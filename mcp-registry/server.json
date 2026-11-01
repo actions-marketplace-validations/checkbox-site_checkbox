@@ -1,0 +1,29 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "site.checkbox/checkbox",
+  "title": "Checkbox",
+  "description": "Auto-renewal law compliance (ROSCA, CA, NY, other states) for subscription checkout and emails",
+  "websiteUrl": "https://checkbox.site/docs/mcp",
+  "version": "1.0.0",
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://app.checkbox.site/mcp",
+      "headers": [
+        {
+          "name": "Authorization",
+          "description": "Optional. Clients that implement MCP OAuth sign in without it (browser approval). Otherwise Bearer <Checkbox API key> (ck_test_… or ck_live_…).",
+          "isRequired": false,
+          "isSecret": true
+        }
+      ]
+    }
+  ],
+  "_meta": {
+    "io.modelcontextprotocol.registry/publisher-provided": {
+      "docs": "https://checkbox.site/docs/mcp",
+      "llms_txt": "https://checkbox.site/llms.txt",
+      "openapi": "https://app.checkbox.site/v1/openapi.json"
+    }
+  }
+}

@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+# Publish name to be decided ("checkbox" may already be taken on PyPI; check before publishing); the import name is `checkbox`.
+name = "checkbox-sdk"
+version = "0.1.0"
+description = "Checkbox: automatic-renewal-law compliance (ROSCA, California ARL, New York and other state laws) for subscription businesses. Official Python SDK."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+dependencies = []
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Typing :: Typed",
+  "Operating System :: OS Independent",
+]
+
+[project.urls]
+Homepage = "https://checkbox.site"
+Documentation = "https://checkbox.site/docs"
+
+[tool.setuptools]
+packages = ["checkbox"]
+
+[tool.setuptools.package-data]
+checkbox = ["py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,0 +1,9 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": { "checkbox": ["../src/index.ts"] },
+    "types": ["node"]
+  },
+  "include": ["compliant-checkout.ts", "register-site.ts", "usage.ts", "quickstart.ts", "nextjs/app/api/webhooks/checkbox/route.ts"]
+}

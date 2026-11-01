@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "checkbox": {
+      "type": "http",
+      "url": "https://app.checkbox.site/mcp"
+    }
+  }
+}

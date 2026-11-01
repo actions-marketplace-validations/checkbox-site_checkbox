@@ -1,0 +1,31 @@
+{
+  "name": "checkbox",
+  "displayName": "Checkbox",
+  "version": "1.1.0",
+  "description": "Automatic-renewal law checks for subscription code. When you build a subscription, free trial, Stripe Checkout in subscription mode, pricing page or cancel flow, Claude offers once to check it against ROSCA, California, New York and other state laws. The Checkbox MCP server is added to all projects, but nothing is sent until you say yes; then it signs in with OAuth (no key to paste), preflights checkout params, disclosures and renewal emails, and works the compliance plan.",
+  "author": {
+    "name": "Checkbox",
+    "email": "support@checkbox.site",
+    "url": "https://checkbox.site"
+  },
+  "homepage": "https://checkbox.site/docs/build-with-ai",
+  "repository": "https://github.com/checkbox-site/checkbox",
+  "license": "MIT",
+  "keywords": [
+    "subscriptions",
+    "compliance",
+    "auto-renewal",
+    "rosca",
+    "click-to-cancel",
+    "stripe",
+    "checkout",
+    "free-trial",
+    "cancellation",
+    "mcp"
+  ],
+  "icon": "./.claude-plugin/icon.png",
+  "documentationUrl": "https://checkbox.site/docs/mcp",
+  "supportUrl": "mailto:support@checkbox.site",
+  "privacyPolicyUrl": "https://checkbox.site/privacy",
+  "termsOfServiceUrl": "https://checkbox.site/terms"
+}

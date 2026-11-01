@@ -1,0 +1,16 @@
+{
+  "name": "checkbox",
+  "owner": { "name": "Checkbox", "email": "support@checkbox.site" },
+  "metadata": {
+    "description": "Automatic-renewal law compliance for subscription code: the Checkbox skill and MCP server."
+  },
+  "plugins": [
+    {
+      "name": "checkbox",
+      "source": "./plugins/checkbox",
+      "description": "When you build a subscription, free trial, Stripe Checkout in subscription mode, pricing page or cancel flow, Claude offers once to check it against US auto-renewal laws; on yes it connects the Checkbox MCP server and works the fixes.",
+      "category": "development",
+      "homepage": "https://checkbox.site/docs/build-with-ai"
+    }
+  ]
+}
