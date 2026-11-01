@@ -604,7 +604,7 @@ const verifyTask: ToolDef = {
   input: {
     task: z.string().max(100).describe('Task id (task_…).'),
     html: z.string().max(950_000).optional().describe('Page tasks: the rendered page HTML.'),
-    stripe_checkout_session: z.record(z.unknown()).optional().describe('Stripe tasks: the params your code passes to stripe.checkout.sessions.create.'),
+    stripe_checkout_session: z.record(z.string(), z.unknown()).optional().describe('Stripe tasks: the params your code passes to stripe.checkout.sessions.create.'),
     email: z
       .object({
         kind: z.enum(['acknowledgment', 'trial_reminder', 'renewal_reminder', 'price_change', 'annual_terms', 'cancellation_confirmation']).optional(),
@@ -710,12 +710,12 @@ const startTestRun: ToolDef = {
         checkout_config: z.string().max(100).optional().describe('Registered checkout config (scc_…) to mirror; default the newest, else the latest live Checkout Session.'),
         price: z.string().max(200).optional().describe('A TEST-mode price id (price_…) to subscribe to when nothing is registered.'),
         trial_period_days: z.number().int().min(0).max(730).optional(),
-        price_map: z.record(z.string()).optional().describe('Live price id → test-mode price id.'),
+        price_map: z.record(z.string(), z.string()).optional().describe('Live price id → test-mode price id.'),
         cancel_url: z.string().max(2048).optional().describe('Cancel on your own page instead of the Stripe customer portal.'),
       })
       .optional()
       .describe('Stripe options.'),
-    generic: z.record(z.unknown()).optional().describe('Generic (non-Stripe) options as in the API: checkout_url, checkout_steps, complete_purchase { steps, promo_code }, account { login_url, email, password }, cancel_steps.'),
+    generic: z.record(z.string(), z.unknown()).optional().describe('Generic (non-Stripe) options as in the API: checkout_url, checkout_steps, complete_purchase { steps, promo_code }, account { login_url, email, password }, cancel_steps.'),
   },
   scopes: ['test_runs:write'],
   annotations: { ...write(false, true), title: 'Start test run' },
@@ -815,7 +815,7 @@ const checkStripeCheckoutSession: ToolDef = {
     'Note: on Stripe-hosted pages "clear and conspicuous" stays needs_review (Stripe styles custom_text itself); the response explains this.',
   ].join('\n'),
   input: {
-    params: z.record(z.unknown()).describe('The Checkout Session params object, e.g. {"mode":"subscription","line_items":[{"price":"price_123","quantity":1}],"success_url":"https://acme.example/welcome"}.'),
+    params: z.record(z.string(), z.unknown()).describe('The Checkout Session params object, e.g. {"mode":"subscription","line_items":[{"price":"price_123","quantity":1}],"success_url":"https://acme.example/welcome"}.'),
     merchant: planTerms.optional().describe('What the params do not say: merchant_name, cancel_url, and price/interval when line_items use a Price id.'),
     jurisdictions: jurisdictions.optional(),
     as_of: asOf.optional(),
@@ -1009,7 +1009,7 @@ const updateSite: ToolDef = {
     site: siteId.optional(),
     name: z.string().max(200).optional().describe('Merchant / brand name (used in generated disclosures).'),
     checkout_url: z.string().max(2048).optional().describe('Page with the Subscribe / Buy button.'),
-    checkout_steps: z.array(z.record(z.unknown())).max(20).optional().describe('Steps to reach the purchase button (clicks / fills), as in the API.'),
+    checkout_steps: z.array(z.record(z.string(), z.unknown())).max(20).optional().describe('Steps to reach the purchase button (clicks / fills), as in the API.'),
     test_account: z
       .object({ login_url: z.string().max(2048), email: z.string().max(320), password: z.string().max(200) })
       .optional()
@@ -1241,14 +1241,18 @@ function toDisclosureTerms(t: Record<string, unknown>): Record<string, unknown> 
 }
 
 function reactSnippet(d: DisclosureLite): string {
-  const terms = d.terms ? JSON.stringify(d.terms) : '{ /* terms */ }';
   return [
-    "import { CheckboxDisclosure } from '@subcomply/elements/react';",
+    '// React / Next.js, no package needed: put script_tag in <head> once (e.g. app/layout.tsx), then render the',
+    '// <checkbox-disclosure> custom element directly above the pay button, inside the sign-up form:',
+    `<checkbox-disclosure ref={disclosureRef} publishable-key={process.env.NEXT_PUBLIC_CHECKBOX_PUBLISHABLE_KEY} disclosure="${d.id}" />`,
     '',
-    '// Directly above the pay button, inside the sign-up form:',
-    `<CheckboxDisclosure publishableKey={process.env.NEXT_PUBLIC_CHECKBOX_PUBLISHABLE_KEY} disclosure="${d.id}"`,
-    `  terms={${terms}}`,
-    '  onConsent={(consent) => setConsentId(consent.id)} />',
+    '// A native form post carries checkbox_consent_id (cons_…). When you submit with fetch, take it from the event:',
+    'useEffect(() => {',
+    '  const el = disclosureRef.current;',
+    '  const onConsent = (e: Event) => setConsentId((e as CustomEvent<{ id: string }>).detail.id);',
+    "  el?.addEventListener('checkbox:consent', onConsent);",
+    "  return () => el?.removeEventListener('checkbox:consent', onConsent);",
+    '}, []);',
   ].join('\n');
 }
 
@@ -1575,8 +1579,8 @@ const callApi: ToolDef = {
   input: {
     method: z.enum(['GET', 'POST', 'DELETE']).describe('HTTP method.'),
     path: z.string().max(500).describe('Path starting with /v1/, e.g. "/v1/sites/site_123/domain_verification/check".'),
-    query: z.record(z.union([z.string(), z.number(), z.boolean()])).optional().describe('Query parameters.'),
-    body: z.record(z.unknown()).optional().describe('JSON body (POST).'),
+    query: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional().describe('Query parameters.'),
+    body: z.record(z.string(), z.unknown()).optional().describe('JSON body (POST).'),
   },
   scopes: [],
   annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true, title: 'Call API' },

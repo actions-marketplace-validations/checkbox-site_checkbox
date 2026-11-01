@@ -32,14 +32,14 @@ test-mode keys.
   "mcpServers": {
     "checkbox": {
       "command": "npx",
-      "args": ["-y", "<package>", "checkbox-mcp"],
+      "args": ["-y", "@checkbox-site/mcp"],
       "env": { "CHECKBOX_API_KEY": "ck_test_..." }
     }
   }
 }
 ```
 
-The npm package name is not final (see the pre-release note at https://checkbox.site/docs/mcp). Options:
+Package: `@checkbox-site/mcp` on npm (Node 20+; binary `checkbox-mcp`). Options:
 `--read-only`, `--api-key`, `--api-base`; environment `CHECKBOX_API_KEY` (falls back to `CHECKBOX_SECRET_KEY`),
 `CHECKBOX_API_BASE`, `CHECKBOX_MCP_READ_ONLY=true`.
 

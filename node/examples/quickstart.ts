@@ -1,5 +1,5 @@
 // The README quickstart, kept compiling (examples/tsconfig.json).
-import Checkbox from 'checkbox';
+import Checkbox from '@checkbox-site/node';
 
 export async function quickstart(sessionParams: Record<string, unknown>): Promise<Record<string, unknown>> {
   const checkbox = new Checkbox(); // reads CHECKBOX_API_KEY, then CHECKBOX_SECRET_KEY (ck_test_… written by `checkbox init`)

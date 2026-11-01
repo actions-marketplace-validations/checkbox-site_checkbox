@@ -37,20 +37,23 @@ Remote Streamable HTTP at `https://app.checkbox.site/mcp` with MCP OAuth (no API
 `site.checkbox/checkbox` ([`mcp-registry/server.json`](mcp-registry/server.json)). Source and tool list:
 [`mcp/`](mcp). Docs: https://checkbox.site/docs/mcp
 
+Local stdio server for clients without remote MCP support: `npx -y @checkbox-site/mcp` (binary `checkbox-mcp`).
+
 ## SDKs
 
-| Language | Source | Status |
+| Language | Package | Source |
 |---|---|---|
-| Node.js / TypeScript (zero dependencies) | [`node/`](node) | Pre-release: the npm name is being finalized; use the HTTP API or MCP meanwhile |
-| Python | [`python/`](python) | Pre-release: the PyPI name is being finalized |
+| Node.js / TypeScript (zero dependencies) | `npm install @checkbox-site/node` | [`node/`](node) |
+| Python 3.9+ (standard library only) | `pip install checkbox-site` (import `checkbox`) | [`python/`](python) |
 
-Never install the npm package named `checkbox`: it is an unrelated project.
+Never install the npm package named `checkbox` or the PyPI packages `checkbox` / `checkbox-sdk`: they are unrelated
+projects.
 
 ## Repository layout
 
-This repository is a read-only mirror of the public parts of Checkbox's main codebase, updated with each release.
-The SDK and MCP sources here reference internal workspace package names until the release build renames them; to
-use them today, call the HTTP API or the remote MCP server. Issues and pull requests are welcome: see
+This repository mirrors the public parts of Checkbox's main codebase and is updated with each release: `node/`,
+`mcp/` (npm workspaces), `python/`, `openapi/`, `integrations/`, `plugins/` and `mcp-registry/`. Releases are
+published from tags by GitHub Actions ([RELEASING.md](RELEASING.md)). Issues and pull requests are welcome: see
 [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License

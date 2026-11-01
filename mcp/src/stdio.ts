@@ -1,6 +1,6 @@
 // Local stdio MCP server (`checkbox-mcp`) for clients without remote MCP support, or for teams that prefer a local
 // process. Reads CHECKBOX_API_KEY (or CHECKBOX_SECRET_KEY, which `checkbox init` writes to .env.local) and calls
-// the API over HTTPS — through @subcomply/sdk-node when it provides a client, else with the built-in fetch client.
+// the API over HTTPS — through @checkbox-site/node when it provides a client, else with the built-in fetch client.
 // Without a key it starts with setup_checkbox only and switches to the issued key once the human approves.
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CheckboxApiError, createHttpApi, DEFAULT_API_BASE, fromSdkClient, type CheckboxApi } from './api.ts';
@@ -39,7 +39,7 @@ export async function buildApi(cfg: { apiKey?: string; apiBase: string }, f?: ty
   const http = () => createHttpApi({ ...(cfg.apiKey ? { apiKey: cfg.apiKey } : {}), apiBase: cfg.apiBase, userAgent: `checkbox-mcp/${SERVER_VERSION}`, ...(f ? { fetch: f } : {}) });
   if (!cfg.apiKey || f) return http();
   try {
-    const sdk = (await import('@subcomply/sdk-node')) as Record<string, unknown>;
+    const sdk = (await import('@checkbox-site/node')) as Record<string, unknown>;
     const Ctor = (sdk.Checkbox ?? sdk.default) as (new (key: string, opts?: Record<string, unknown>) => unknown) | undefined;
     if (typeof Ctor === 'function') {
       const client = new Ctor(cfg.apiKey, { apiBase: cfg.apiBase, baseUrl: cfg.apiBase, appInfo: { name: 'checkbox-mcp', version: SERVER_VERSION } });

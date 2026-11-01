@@ -1,0 +1,103 @@
+# Publishes @checkbox-site/node and @checkbox-site/mcp to npm and checkbox-site to PyPI. See RELEASING.md.
+#
+# npm: the first publish uses the NPM_TOKEN repository secret (a short-lived granular token). Once a trusted publisher
+# is configured for each package on npmjs.com (this repository, workflow release.yml), npm >= 11.5 authenticates with
+# GitHub's OIDC token instead and NPM_TOKEN can be deleted.
+# PyPI: trusted publishing only (environment "pypi"); no token is stored anywhere.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  versions:
+    name: Check versions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Packages carry the tag's version
+        run: |
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then node scripts/check-versions.mjs "$GITHUB_REF_NAME"; else node scripts/check-versions.mjs; fi
+
+  npm:
+    name: Publish to npm
+    needs: versions
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # trusted publishing and provenance
+    env:
+      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Upgrade npm (trusted publishing needs npm >= 11.5.1)
+        run: npm install -g npm@^11.5.1 && npm --version
+      - name: Use NPM_TOKEN when the secret is set (first publish only)
+        if: ${{ env.NODE_AUTH_TOKEN != '' }}
+        run: echo '//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}' >> ~/.npmrc
+      - run: npm ci
+      - run: npm run build --workspaces
+      - name: Smoke-test the MCP server
+        run: node scripts/smoke-mcp.mjs
+      - name: Publish (node first, since mcp depends on it)
+        run: |
+          for ws in node mcp; do
+            name=$(node -p "require('./$ws/package.json').name")
+            version=$(node -p "require('./$ws/package.json').version")
+            if npm view "$name@$version" version >/dev/null 2>&1; then
+              echo "$name@$version is already on npm; skipping."
+            else
+              npm publish --workspace "$ws"
+            fi
+          done
+
+  pypi-build:
+    name: Build Python distributions
+    needs: versions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --upgrade build
+      - name: Build sdist and wheel
+        run: python -m build python --outdir dist-python
+      - uses: actions/upload-artifact@v4
+        with:
+          name: python-dist
+          path: dist-python/
+          if-no-files-found: error
+
+  pypi:
+    name: Publish to PyPI
+    needs: pypi-build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/checkbox-site
+    permissions:
+      id-token: write # trusted publishing
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: python-dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          skip-existing: true

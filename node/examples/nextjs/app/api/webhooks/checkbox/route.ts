@@ -2,7 +2,7 @@
 // Receives Checkbox webhooks (findings, plan updates, test runs, certificates, …) and verifies Checkbox-Signature.
 //   Create the endpoint once: checkbox.webhookEndpoints.create({ url: 'https://yoursite.com/api/webhooks/checkbox', enabled_events: ['*'] })
 //   and store its secret as CHECKBOX_WEBHOOK_SECRET (whsec_…).
-import Checkbox, { CheckboxSignatureVerificationError, type WebhookEvent } from 'checkbox';
+import Checkbox, { CheckboxSignatureVerificationError, type WebhookEvent } from '@checkbox-site/node';
 
 const checkbox = new Checkbox(process.env.CHECKBOX_API_KEY);
 

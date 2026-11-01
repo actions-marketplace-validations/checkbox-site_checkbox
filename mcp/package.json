@@ -1,22 +1,71 @@
 {
-  "name": "@subcomply/mcp",
+  "name": "@checkbox-site/mcp",
   "version": "0.1.0",
-  "private": true,
-  "type": "module",
-  "main": "src/index.ts",
-  "exports": {
-    ".": "./src/index.ts"
-  },
-  "dependencies": {
-    "@subcomply/sdk-node": "workspace:*",
-    "@modelcontextprotocol/sdk": "^1.32.2",
-    "zod": "^3.25.76"
-  },
   "description": "Checkbox MCP server: subscription-law compliance tools for AI agents (remote at https://app.checkbox.site/mcp, or local stdio).",
+  "keywords": [
+    "subscription",
+    "auto-renewal",
+    "automatic-renewal",
+    "compliance",
+    "rosca",
+    "click-to-cancel",
+    "california-arl",
+    "stripe",
+    "stripe-checkout",
+    "checkout",
+    "cancellation",
+    "mcp",
+    "model-context-protocol",
+    "mcp-server",
+    "ai-agent"
+  ],
+  "mcpName": "site.checkbox/checkbox",
+  "license": "MIT",
+  "author": "Checkbox <support@checkbox.site>",
+  "homepage": "https://checkbox.site/docs",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/checkbox-site/checkbox.git",
+    "directory": "mcp"
+  },
+  "bugs": {
+    "url": "https://github.com/checkbox-site/checkbox/issues",
+    "email": "support@checkbox.site"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "bin": {
-    "checkbox-mcp": "./bin/checkbox-mcp.mjs"
+    "checkbox-mcp": "dist/bin.js"
   },
   "scripts": {
-    "start": "node ./bin/checkbox-mcp.mjs"
+    "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
+    "build": "npm run clean && tsc -p tsconfig.build.json",
+    "prepack": "npm run build"
+  },
+  "dependencies": {
+    "@checkbox-site/node": "^0.1.0",
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "zod": "^4.6.7"
   }
 }

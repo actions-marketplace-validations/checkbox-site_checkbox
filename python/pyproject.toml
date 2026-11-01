@@ -1,17 +1,21 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
-# Publish name to be decided ("checkbox" may already be taken on PyPI; check before publishing); the import name is `checkbox`.
-name = "checkbox-sdk"
+# Published to PyPI as checkbox-site ("checkbox" and "checkbox-sdk" belong to unrelated projects); the import name is `checkbox`.
+name = "checkbox-site"
 version = "0.1.0"
 description = "Checkbox: automatic-renewal-law compliance (ROSCA, California ARL, New York and other state laws) for subscription businesses. Official Python SDK."
 readme = "README.md"
 requires-python = ">=3.9"
-license = { text = "MIT" }
+license = "MIT"
+authors = [{ name = "Checkbox", email = "support@checkbox.site" }]
+keywords = ["subscription", "auto-renewal", "automatic renewal", "compliance", "ROSCA", "click to cancel", "stripe", "checkout"]
 dependencies = []
 classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
   "Programming Language :: Python :: 3",
   "Typing :: Typed",
   "Operating System :: OS Independent",
@@ -20,6 +24,9 @@ classifiers = [
 [project.urls]
 Homepage = "https://checkbox.site"
 Documentation = "https://checkbox.site/docs"
+Repository = "https://github.com/checkbox-site/checkbox"
+Source = "https://github.com/checkbox-site/checkbox/tree/main/python"
+Issues = "https://github.com/checkbox-site/checkbox/issues"
 
 [tool.setuptools]
 packages = ["checkbox"]

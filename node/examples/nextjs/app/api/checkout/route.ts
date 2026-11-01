@@ -2,7 +2,7 @@
 // Creates a Stripe Checkout Session whose params Checkbox has checked (and corrected) for automatic-renewal laws.
 //   npm install checkbox stripe      (Checkbox SDK publish name to be decided; see the SDK README)
 //   CHECKBOX_API_KEY=ck_test_…  STRIPE_SECRET_KEY=sk_test_…
-import Checkbox from 'checkbox';
+import Checkbox from '@checkbox-site/node';
 import Stripe from 'stripe';
 import { compliantCheckoutParamsOrOriginal } from '../../../../compliant-checkout';
 

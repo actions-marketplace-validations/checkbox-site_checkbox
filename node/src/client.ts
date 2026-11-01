@@ -72,7 +72,7 @@ export interface Checkbox extends ResourceInstances {}
  * Checkbox API client.
  *
  * ```ts
- * import Checkbox from 'checkbox';
+ * import Checkbox from '@checkbox-site/node';
  * const checkbox = new Checkbox(process.env.CHECKBOX_API_KEY);
  * const site = await checkbox.sites.create({ url: 'https://acme.example' });
  * for await (const finding of checkbox.findings.list({ site: site.id })) console.log(finding.check_id, finding.status);

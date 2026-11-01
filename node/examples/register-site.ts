@@ -3,7 +3,7 @@
 // (Or let your coding agent run `checkbox init`, which does all of this and more with one browser approval.)
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import Checkbox from 'checkbox';
+import Checkbox from '@checkbox-site/node';
 
 export async function registerSite(checkbox: Checkbox, siteUrl: string, webhookUrl?: string) {
   // Idempotency-Key per site URL: re-running the script returns the same site instead of creating a second one.

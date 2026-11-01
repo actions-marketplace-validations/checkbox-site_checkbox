@@ -4,13 +4,13 @@ Automatic-renewal-law compliance (ROSCA, California Bus. & Prof. Code § 17600, 
 laws) for subscription businesses, as an API. Zero runtime dependencies (global `fetch`; Node 20+, Bun, Deno, edge).
 Free to use.
 
-> **Package name.** The npm publish name is not final; these docs use `checkbox`. Inside this monorepo the package is
-> `@subcomply/sdk-node` (`import Checkbox from '@subcomply/sdk-node'`).
+> **Install.** `npm install @checkbox-site/node` (Node 20+). Never install the unscoped npm package `checkbox`: it is an
+> unrelated project.
 
 ## Quickstart
 
 ```ts
-import Checkbox from 'checkbox';
+import Checkbox from '@checkbox-site/node';
 const checkbox = new Checkbox(); // reads CHECKBOX_API_KEY, then CHECKBOX_SECRET_KEY (ck_test_… written by `checkbox init`)
 const check = await checkbox.checks.stripeCheckoutSession({ params: sessionParams, merchant: { merchant_name: 'Acme', price: 19.99, interval: 'month' } });
 console.log(check.verdict, check.next_action.message);
@@ -26,7 +26,7 @@ sandbox and never need activation.
 | | |
 |---|---|
 | Resources | `checkbox.<namespace>.<method>()` for every `/v1` operation: `sites`, `checks`, `plans`, `tasks`, `verifications`, `findings`, `fixes`, `scans`, `evaluations`, `evidence`, `certificates`, `noticeSettings`, `lawUpdates`, `testRuns`, `testCredentials`, `stripeCheckoutConfigs`, `disclosures`, `consents`, `elements`, `domainVerifications`, `setupSessions`, `device`, `webhookEndpoints`, `events`, `account` |
-| Types | Every request, response and webhook event is typed, generated from `openapi/checkbox.v1.json` (`import type { Site, Finding, WebhookEvent } from 'checkbox'`). JSDoc on every method and field |
+| Types | Every request, response and webhook event is typed, generated from `openapi/checkbox.v1.json` (`import type { Site, Finding, WebhookEvent } from '@checkbox-site/node'`). JSDoc on every method and field |
 | Pagination | `for await (const f of checkbox.findings.list({ site }))` walks every page; `.autoPagingToArray({ limit })`, `.autoPagingEach(fn)` |
 | Retries | Network errors, 409 `idempotency_key_in_use`, 429 (honours `Retry-After`) and 5xx are retried with exponential backoff and jitter (`maxNetworkRetries`, default 2) |
 | Idempotency | Every POST that changes something gets an `Idempotency-Key` automatically, reused across retries; pass your own with `{ idempotencyKey }` |
@@ -39,7 +39,7 @@ sandbox and never need activation.
 ## Usage
 
 ```ts
-import Checkbox, { CheckboxError } from 'checkbox';
+import Checkbox, { CheckboxError } from '@checkbox-site/node';
 
 const checkbox = new Checkbox(process.env.CHECKBOX_API_KEY, {
   maxNetworkRetries: 2, // default
@@ -101,15 +101,13 @@ rejected (`tolerance` argument). Several `v1=` entries are accepted, so rolling 
 [Next.js route](examples/nextjs/app/api/checkout/route.ts) or an [Express server](examples/express-checkout.mjs) (shared
 logic in [compliant-checkout.ts](examples/compliant-checkout.ts)), [register a site](examples/register-site.ts), and
 [verify a webhook](examples/nextjs/app/api/webhooks/checkbox/route.ts). The TypeScript examples are typechecked and run
-against the real API in this repository's tests (`src/examples.test.ts`, `src/sdk.pg.test.ts`); the quickstart and
+against the real API in Checkbox's test suite; the quickstart and
 usage snippets above are [quickstart.ts](examples/quickstart.ts) and [usage.ts](examples/usage.ts).
 
-## Development (this repository)
+## Development
 
-- Types and resource methods are **generated** from `openapi/checkbox.v1.json` by `scripts/generate-sdk-types`
-  (`pnpm generate:openapi && pnpm generate:sdk`). Do not edit `src/generated/*`; `src/generated.test.ts` fails when
-  they are stale. Method names come from `scripts/generate-sdk-types/names.ts` (new operations get a derived name).
-- Tests: `pnpm exec vitest run packages/sdk-node` (unit tests against a scripted fetch; `sdk.pg.test.ts` runs the real
-  API on a local port against Postgres database `subcomply_test_sdks`, reset by the test).
-- Publishable build: `pnpm --filter @subcomply/sdk-node build` (plain ESM + `.d.ts` in `dist/`; `publishConfig` points
-  the package there).
+- `npm install` at the repository root, then `npm run build --workspace node` (plain ESM + `.d.ts` in `dist/`) and
+  `npm run typecheck:examples`.
+- Types and resource methods in `src/generated/` are generated from [`openapi/checkbox.v1.json`](../openapi/checkbox.v1.json)
+  in Checkbox's main codebase and mirrored here with each release; see [CONTRIBUTING.md](../CONTRIBUTING.md).
+- Releases: [RELEASING.md](../RELEASING.md).

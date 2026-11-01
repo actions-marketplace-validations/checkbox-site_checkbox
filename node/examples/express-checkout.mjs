@@ -3,7 +3,7 @@
 //   CHECKBOX_API_KEY=ck_test_… CHECKBOX_WEBHOOK_SECRET=whsec_… STRIPE_SECRET_KEY=sk_test_… STRIPE_PRICE_ID=price_… node express-checkout.mjs
 import express from 'express';
 import Stripe from 'stripe';
-import Checkbox, { CheckboxError, CheckboxSignatureVerificationError } from 'checkbox';
+import Checkbox, { CheckboxError, CheckboxSignatureVerificationError } from '@checkbox-site/node';
 
 const checkbox = new Checkbox(process.env.CHECKBOX_API_KEY);
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);

@@ -3,7 +3,7 @@
 // - The remote server (apps/api, https://app.checkbox.site/mcp) implements it in-process with Fastify's inject, so a
 //   tool call goes through exactly the same /v1 auth, scopes, test/live mode, idempotency and rate limits as an HTTP
 //   call with the same key.
-// - The local stdio server (`checkbox-mcp`) implements it over HTTPS (createHttpApi, or an @subcomply/sdk-node client
+// - The local stdio server (`checkbox-mcp`) implements it over HTTPS (createHttpApi, or an @checkbox-site/node client
 //   through fromSdkClient).
 import { randomUUID } from 'node:crypto';
 
@@ -158,7 +158,7 @@ export function createHttpApi(opts: HttpApiOptions): CheckboxApi {
 }
 
 /**
- * Adapts a Node SDK client (@subcomply/sdk-node) to CheckboxApi. Any client with a Stripe-style
+ * Adapts a Node SDK client (@checkbox-site/node) to CheckboxApi. Any client with a Stripe-style
  * `rawRequest(method, path, params?, options?)` or a `request(method, path, { query, body, idempotencyKey })` works;
  * errors with `status`/`code`/`type` fields are mapped to CheckboxApiError.
  */

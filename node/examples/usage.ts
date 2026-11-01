@@ -1,5 +1,5 @@
 // The "Usage" section of the SDK README, kept compiling (examples/tsconfig.json). Run: CHECKBOX_API_KEY=ck_test_… npx tsx usage.ts
-import Checkbox, { CheckboxError } from 'checkbox';
+import Checkbox, { CheckboxError } from '@checkbox-site/node';
 
 export async function usage(): Promise<void> {
   const checkbox = new Checkbox(process.env.CHECKBOX_API_KEY, {

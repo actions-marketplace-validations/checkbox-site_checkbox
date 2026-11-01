@@ -3,8 +3,8 @@
 Automatic-renewal-law compliance (ROSCA, California Bus. & Prof. Code § 17600, New York GBL § 527-a and ~26 other state
 laws) for subscription businesses, as an API. Standard library only (`urllib`), Python 3.9+. Free to use.
 
-> **Package name.** `pip install checkbox-sdk` (the name in `pyproject.toml` and in the docs; never install the unrelated
-> `checkbox` package). The import name is `checkbox`. In this monorepo: `pip install -e sdks/python`.
+> **Package name.** `pip install checkbox-site` (the name in `pyproject.toml`; never install the unrelated `checkbox` or
+> `checkbox-sdk` packages). The import name is `checkbox`.
 
 ## Quickstart
 
@@ -90,11 +90,10 @@ rejected (`tolerance=`).
 [Flask app](examples/flask_app.py) (with the webhook receiver), and [register a site](examples/register_site.py). The
 tests run them against the real API.
 
-## Development (this repository)
+## Development
 
-- `checkbox/types.py` and `checkbox/_resources.py` are **generated** from `openapi/checkbox.v1.json` by
-  `scripts/generate-sdk-types` (`pnpm generate:openapi && pnpm generate:sdk`); do not edit them. The Node test
-  `packages/sdk-node/src/generated.test.ts` fails when they are stale.
-- Tests: `cd sdks/python && python3 -m pytest`. Unit tests use a local fake HTTP server; `tests/test_live_api.py` and
-  `tests/test_examples.py` start the real API (`pnpm exec tsx apps/api/src/testing/serve-sdk-api.ts`) against Postgres
-  database `subcomply_test_sdks_py` (reset), and skip when Node/pnpm or Postgres is unavailable.
+- `checkbox/types.py` and `checkbox/_resources.py` are generated from
+  [`openapi/checkbox.v1.json`](../openapi/checkbox.v1.json) in Checkbox's main codebase and mirrored here with each
+  release; see [CONTRIBUTING.md](../CONTRIBUTING.md).
+- Tests: `cd python && python -m pytest` (a local fake HTTP server; no network). Build: `python -m build`.
+- Releases: [RELEASING.md](../RELEASING.md).

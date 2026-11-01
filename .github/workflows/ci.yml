@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  node:
+    name: Node ${{ matrix.node }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [20, 22]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - run: npm ci
+      - run: npm run build --workspaces
+      - name: Typecheck the SDK examples
+        run: npm run typecheck:examples
+      - name: Smoke-test the MCP server (stdio handshake)
+        run: node scripts/smoke-mcp.mjs
+      - name: Versions agree
+        run: node scripts/check-versions.mjs
+      - name: Package contents
+        run: |
+          npm pack --dry-run --workspace node
+          npm pack --dry-run --workspace mcp
+
+  python:
+    name: Python ${{ matrix.python }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ['3.9', '3.13']
+    defaults:
+      run:
+        working-directory: python
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -m pip install --upgrade pip build pytest
+      - run: python -m pytest
+      - name: Build sdist and wheel
+        run: python -m build

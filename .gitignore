@@ -1,7 +1,10 @@
 node_modules
 dist
+build
+*.egg-info
 __pycache__
 .pytest_cache
+*.tgz
 .env
 .env.*
 !.env.example

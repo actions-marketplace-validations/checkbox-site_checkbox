@@ -4,7 +4,7 @@
 // Checkbox checks the params against automatic-renewal laws (ROSCA, California, New York, …) and returns a corrected
 // copy (consent collection, renewal terms next to the button, cancellation instructions). Applying the correction is
 // deterministic: the same input always gives the same params.
-import Checkbox, { CheckboxError, type CheckPlanTerms, type StripeCheckoutSessionCheckResult } from 'checkbox';
+import Checkbox, { CheckboxError, type CheckPlanTerms, type StripeCheckoutSessionCheckResult } from '@checkbox-site/node';
 
 export interface CompliantParams {
   /** Params to pass to stripe.checkout.sessions.create(). */

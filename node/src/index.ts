@@ -1,9 +1,9 @@
 // Checkbox Node SDK. Public surface:
-//   import Checkbox from 'checkbox';                      // or: import { Checkbox } from 'checkbox';
+//   import Checkbox from '@checkbox-site/node';                      // or: import { Checkbox } from '@checkbox-site/node';
 //   const checkbox = new Checkbox(process.env.CHECKBOX_API_KEY);
 //   await checkbox.checks.stripeCheckoutSession({ params });
 //   const event = checkbox.webhooks.constructEvent(rawBody, req.headers['checkbox-signature'], secret);
-// The npm publish name is not final ("checkbox" is used in docs); in this monorepo the package is @subcomply/sdk-node.
+// Published to npm as @checkbox-site/node.
 import { Checkbox } from './client.ts';
 
 export { Checkbox, modeOfKey, getLastResponse, backoff, DEFAULT_BASE_URL, DEFAULT_MAX_NETWORK_RETRIES, DEFAULT_TIMEOUT_MS, type CheckboxConfig, type Mode } from './client.ts';

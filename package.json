@@ -1,0 +1,19 @@
+{
+  "name": "checkbox-repo",
+  "private": true,
+  "description": "Checkbox SDKs and MCP server (npm workspaces: node, mcp). Not published; see RELEASING.md.",
+  "license": "MIT",
+  "type": "module",
+  "workspaces": ["node", "mcp"],
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "build": "npm run build --workspaces",
+    "typecheck:examples": "tsc -p node/examples/tsconfig.json",
+    "smoke:mcp": "node scripts/smoke-mcp.mjs",
+    "check:versions": "node scripts/check-versions.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "~5.9.3"
+  }
+}

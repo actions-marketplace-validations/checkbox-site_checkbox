@@ -1,5 +1,5 @@
-// @subcomply/mcp — the Checkbox MCP server (tools, resources, prompts) shared by the remote endpoint
-// (https://app.checkbox.site/mcp, apps/api/src/mcp) and the local stdio binary (bin/checkbox-mcp.mjs).
+// @checkbox-site/mcp — the Checkbox MCP server (tools, resources, prompts) shared by the remote endpoint
+// (https://app.checkbox.site/mcp, apps/api/src/mcp) and the local stdio binary (dist/bin.js).
 export {
   API_VERSION,
   CheckboxApiError,
