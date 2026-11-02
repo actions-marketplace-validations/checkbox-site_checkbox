@@ -34,7 +34,7 @@ export type Mode = 'test' | 'live';
 
 /** `ck_test_…` / `rk_test_…` / `pk_test_…` -> test; `ck_live_…` / `rk_live_…` / `sk_live_…` / `pk_live_…` -> live. */
 export function modeOfKey(key: string | undefined): Mode | undefined {
-  const m = /^(?:ck|rk|sk|pk)_(test|live)_/.exec(key ?? '');
+  const m = /^(?:ckr|ck|rk|sk|pk)_(test|live)_/.exec(key ?? '');
   return m ? (m[1] as Mode) : undefined;
 }
 
@@ -105,7 +105,8 @@ export class Checkbox implements RequestSender {
     this.#apiKey = (apiKey ?? env('CHECKBOX_API_KEY') ?? env('CHECKBOX_SECRET_KEY'))?.trim() || undefined;
     this.#config = { maxNetworkRetries: DEFAULT_MAX_NETWORK_RETRIES, timeout: DEFAULT_TIMEOUT_MS, ...config };
     this.apiVersion = config.apiVersion ?? API_VERSION;
-    this.baseUrl = (config.baseUrl ?? env('CHECKBOX_API_BASE') ?? DEFAULT_BASE_URL).replace(/\/+$/, '');
+    // Round-4 pilot (express): the dashboard shows the base URL with /v1; with or without it, requests go to /v1/… once.
+    this.baseUrl = (config.baseUrl ?? env('CHECKBOX_API_BASE') ?? DEFAULT_BASE_URL).replace(/\/+$/, '').replace(/\/v1$/i, '');
     this.mode = modeOfKey(this.#apiKey);
     const app = config.appInfo ? ` ${config.appInfo.name}${config.appInfo.version ? `/${config.appInfo.version}` : ''}${config.appInfo.url ? ` (${config.appInfo.url})` : ''}` : '';
     this.#userAgent = `checkbox-node/${SDK_VERSION} ${runtimeLabel()}${app}`;

@@ -1094,6 +1094,40 @@ export const OPERATIONS = {
     paginated: false,
     summary: "Get the dates each required notice must be sent",
   },
+  listSiteSuggestions: {
+    operationId: "listSiteSuggestions",
+    namespace: "suggestions",
+    method: "forSite",
+    httpMethod: "GET",
+    path: "/v1/sites/{site}/suggestions",
+    pathParams: ["site"],
+    queryParams: ["surfaces"],
+    body: false,
+    idempotent: false,
+    auth: true,
+    scope: "checks:read",
+    response: "json",
+    list: false,
+    paginated: false,
+    summary: "Get conversion suggestions for a site",
+  },
+  suggestImprovements: {
+    operationId: "suggestImprovements",
+    namespace: "suggestions",
+    method: "generate",
+    httpMethod: "POST",
+    path: "/v1/suggestions",
+    pathParams: [],
+    queryParams: [],
+    body: true,
+    idempotent: false,
+    auth: true,
+    scope: "checks:read",
+    response: "json",
+    list: false,
+    paginated: false,
+    summary: "Get conversion suggestions for copy you send",
+  },
   getElementsBundle: {
     operationId: "getElementsBundle",
     namespace: "elements",
@@ -1845,6 +1879,8 @@ export interface OperationTypes {
   checkEmail: { args: T.EmailCheckParams; response: T.EmailCheckResult };
   checkPage: { args: T.PageCheckParams; response: T.PageCheckResult };
   checkNoticeSchedule: { args: T.NoticeScheduleParams; response: T.NoticeScheduleResult };
+  listSiteSuggestions: { args: { site: string } & T.ListSiteSuggestionsParams; response: T.SuggestionReport };
+  suggestImprovements: { args: T.SuggestionsParams; response: T.SuggestionReport };
   getElementsBundle: { args: Record<string, never>; response: string };
   getElementsManifest: { args: Record<string, never>; response: T.ElementsManifest };
   getElementsBundleVersion: { args: { version: string }; response: string };
@@ -2039,7 +2075,7 @@ export class SitesResource extends Resource {
   /**
    * Retrieve a site.
    *
-   * Returns a site with its latest compliance verdict (score, insurable) and install details.
+   * Returns a site with its latest compliance verdict (score, status) and install details.
    *
    * @param site Unique identifier of the site (site_…).
    * @see GET /v1/sites/{site} (operation `retrieveSite`, scope `sites:read`)
@@ -2063,7 +2099,7 @@ export class SitesResource extends Resource {
   /**
    * Archive a site.
    *
-   * Archives (soft-deletes) the site: monitoring stops and it disappears from lists, but evidence and findings are retained for the warranty. Undo with restoreSite.
+   * Archives (soft-deletes) the site: monitoring stops and it disappears from lists, but evidence and findings are retained. Undo with restoreSite.
    *
    * @param site Unique identifier of the site (site_…).
    * @see DELETE /v1/sites/{site} (operation `deleteSite`, scope `sites:write`)
@@ -2091,7 +2127,7 @@ export class SitesResource extends Resource {
   /**
    * Connect a billing platform.
    *
-   * Connects the site's billing platform with read-only credentials (a Stripe restricted key, a Recharge token or a Shopify Admin API token), so Checkbox reads the customer-portal and reminder settings. Works for test-mode sites too (use an rk_test_ key). The credentials are validated by reading the settings once and stored encrypted. Pilot fix: this used to be possible only in the dashboard, which could not open test-mode sites.
+   * Connects the site's billing platform with read-only credentials (a Stripe restricted key, a Recharge token or a Shopify Admin API token), so Checkbox reads the customer-portal and reminder settings. Works for test-mode sites too (use an rk_test_ key). The credentials are validated by reading the settings once and stored encrypted.
    *
    * @param site Unique identifier of the site (site_…).
    * @see POST /v1/sites/{site}/integrations (operation `connectBillingPlatform`, scope `sites:write`)
@@ -2221,7 +2257,7 @@ export class EvaluationsResource extends Resource {
   /**
    * Retrieve an evaluation.
    *
-   * Returns one verdict with all checks and the insurability blockers.
+   * Returns one verdict with all checks and the blocking checks.
    *
    * @param evaluation Unique identifier of the evaluation (eval_…).
    * @see GET /v1/evaluations/{evaluation} (operation `retrieveEvaluation`, scope `evaluations:read`)
@@ -2233,7 +2269,7 @@ export class EvaluationsResource extends Resource {
   /**
    * Get the current verdict of a site.
    *
-   * The latest evaluation of the site: is it compliant (score) and insurable, and what blocks it. 404 resource_missing with next_action createScan when the site was never evaluated.
+   * The latest evaluation of the site: is it compliant (score and status), and what blocks it. 404 resource_missing with next_action createScan when the site was never evaluated.
    *
    * @param site Unique identifier of the site (site_…).
    * @see GET /v1/sites/{site}/evaluation (operation `retrieveLatestEvaluation`, scope `evaluations:read`)
@@ -2486,7 +2522,7 @@ export class CertificatesResource extends Resource {
   /**
    * Issue a certificate.
    *
-   * Issues a signed monitoring certificate once the site has been insurable for the required streak of days with a verified domain and fresh scans. Otherwise fails with resource_conflict and next_action describing what is missing.
+   * Issues a signed monitoring certificate once the site has passed every critical and high check for the required streak of days with a verified domain and fresh scans. Otherwise fails with resource_conflict and next_action describing what is missing.
    *
    * @param site Unique identifier of the site (site_…).
    * @see POST /v1/sites/{site}/certificates (operation `createCertificate`, scope `certificates:write`, live mode needs an activated account)
@@ -2707,6 +2743,33 @@ export class ChecksResource extends Resource {
 
 }
 
+/** `checkbox.suggestions` */
+export class SuggestionsResource extends Resource {
+  /**
+   * Get conversion suggestions for a site.
+   *
+   * Suggestions for a site, detected from what Checkbox observed (checkout captures, emails, the test cancellation, billing settings, registered Stripe Checkout params) and its latest evaluation. Optional, deterministic suggestions (no LLM) from Checkbox’s curated library: each has the surface, what to change, why it commonly helps (no invented figures), a concrete before/after built from your plan terms, the exact copy / Stripe patch / flow change to apply, the legal guardrails it respects (catalog requirement ids, e.g. California’s and Minnesota’s save-offer rules), and the engine check of the after-example (only verified suggestions are offered). Surfaces whose compliance checks fail are held until fixed. Suggestions never block and never count toward compliance.
+   *
+   * @param site Unique identifier of the site (site_…).
+   * @see GET /v1/sites/{site}/suggestions (operation `listSiteSuggestions`, scope `checks:read`)
+   */
+  forSite(site: string, params?: T.ListSiteSuggestionsParams, options?: RequestOptions): Promise<T.SuggestionReport> {
+    return this._request(OPERATIONS.listSiteSuggestions, [site], params, options) as Promise<T.SuggestionReport>;
+  }
+
+  /**
+   * Get conversion suggestions for copy you send.
+   *
+   * Stateless: send any of the inputs of /v1/checks/* (disclosure, page html, Stripe Checkout params, emails) plus a cancellation flow and your plan terms; get suggestions for them. The current status of what you send comes from the same preflight checks; nothing is stored. Optional, deterministic suggestions (no LLM) from Checkbox’s curated library: each has the surface, what to change, why it commonly helps (no invented figures), a concrete before/after built from your plan terms, the exact copy / Stripe patch / flow change to apply, the legal guardrails it respects (catalog requirement ids, e.g. California’s and Minnesota’s save-offer rules), and the engine check of the after-example (only verified suggestions are offered). Surfaces whose compliance checks fail are held until fixed. Suggestions never block and never count toward compliance.
+   *
+   * @see POST /v1/suggestions (operation `suggestImprovements`, scope `checks:read`)
+   */
+  generate(params?: T.SuggestionsParams, options?: RequestOptions): Promise<T.SuggestionReport> {
+    return this._request(OPERATIONS.suggestImprovements, [], params, options) as Promise<T.SuggestionReport>;
+  }
+
+}
+
 /** `checkbox.elements` */
 export class ElementsResource extends Resource {
   /**
@@ -2911,7 +2974,7 @@ export class ReceiptsResource extends Resource {
   /**
    * Download a self-verifying receipt bundle.
    *
-   * ZIP for a lawyer, insurer or court expert: manifest.json (the receipt's evidence record with its chain links) + manifest.sig.json, the canonical receipt JSON under records/, receipt.sig.json (Checkbox's signature over the receipt hash), receipt.png and render.html (the reconstruction), README.md and verify.mjs (zero-dependency offline verifier: node verify.mjs --keys checkbox-keys.json).
+   * ZIP for a lawyer or court expert: manifest.json (the receipt's evidence record with its chain links) + manifest.sig.json, the canonical receipt JSON under records/, receipt.sig.json (Checkbox's signature over the receipt hash), receipt.png and render.html (the reconstruction), README.md and verify.mjs (zero-dependency offline verifier: node verify.mjs --keys checkbox-keys.json).
    *
    * @param receipt Unique identifier of the receipt (rcpt_…).
    * @see GET /v1/receipts/{receipt}/export (operation `exportReceipt`, scope `receipts:read`)
@@ -3241,6 +3304,7 @@ export const RESOURCES = {
   notices: NoticesResource,
   lawUpdates: LawUpdatesResource,
   checks: ChecksResource,
+  suggestions: SuggestionsResource,
   elements: ElementsResource,
   disclosures: DisclosuresResource,
   consents: ConsentsResource,

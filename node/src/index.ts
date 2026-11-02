@@ -1,5 +1,5 @@
 // Checkbox Node SDK. Public surface:
-//   import Checkbox from '@checkbox-site/node';                      // or: import { Checkbox } from '@checkbox-site/node';
+//   import Checkbox from '@checkbox-site/node';           // or: import { Checkbox } from '@checkbox-site/node';
 //   const checkbox = new Checkbox(process.env.CHECKBOX_API_KEY);
 //   await checkbox.checks.stripeCheckoutSession({ params });
 //   const event = checkbox.webhooks.constructEvent(rawBody, req.headers['checkbox-signature'], secret);

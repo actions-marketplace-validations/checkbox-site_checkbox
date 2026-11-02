@@ -140,6 +140,8 @@ DeviceAuthorizationParams = TypedDict(
         "package_manager": str,
         #: Detected billing platform. (optional)
         "billing_platform": str,
+        #: Business name (round 3: names the site and workspace instead of the host). (optional)
+        "merchant_name": str,
         #: Also ask for live-mode keys (live mode activates after domain verification). (optional)
         "live": bool,
         #: A HINT of the Stripe TEST key found in the project ("sk_test_…a1b2" — never the key). The human is asked once whether Checkbox may use it for synthetic test subscriptions. (optional)
@@ -420,8 +422,6 @@ SetupSessionCompliance = TypedDict(
     {
         #: 0-100.
         "score": float,
-        #: No critical/high failure open.
-        "insurable": bool,
         #: When it was evaluated. Unix timestamp in seconds.
         "evaluated": int,
         #: Open failing findings.
@@ -712,8 +712,6 @@ AccountBilling = TypedDict(
     {
         #: Checkbox is free to use.
         "plan": Literal["free"],
-        #: The compliance warranty is not offered yet (waitlist only; no coverage).
-        "warranty": Literal["coming_soon"],
     },
     total=False,
 )
@@ -771,6 +769,8 @@ SiteFacts = TypedDict(
         "notice_channel_email": bool,
         #: Price increases need consent or allow a refund (NY). (optional)
         "price_increase_consent_or_refund": bool,
+        #: The billing-platform price this checkout sells (e.g. a Stripe price id). Terms copy and the price cross-check use only this price; without it, a connected price never rewrites Terms copy or reopens a verified task. (optional)
+        "plan_price_id": str,
         #: Accepted payment methods (debit / ACH bring in Reg E). (optional)
         "payment_methods": List[Literal["card", "debit", "ach", "wallet", "other"]],
     },
@@ -799,20 +799,102 @@ SiteMonitoring = TypedDict(
 )
 
 
+#: A live check Checkbox has not observed yet, and how it completes.
+PendingLiveCheck = TypedDict(
+    "PendingLiveCheck",
+    {
+        #: What has not been observed yet.
+        "what": str,
+        #: When / how it completes.
+        "completes": str,
+        #: How it completes: run_proof, bcc_real_sends, wait_for_event, connect_billing, resync_billing, scan, check_rendered_page, register_checkout, publish_policy.
+        "action": Literal["run_proof", "bcc_real_sends", "wait_for_event", "connect_billing", "resync_billing", "scan", "check_rendered_page", "register_checkout", "publish_policy"],
+        #: ISO date when it completes on its own (a reminder window), when known.
+        "due": Optional[str],
+    },
+    total=False,
+)
+
+
+#: Required checks per user-facing status.
+ComplianceRollupCounts = TypedDict(
+    "ComplianceRollupCounts",
+    {
+        #: Required checks that need a fix.
+        "needs_fix": int,
+        #: Decisions for a person.
+        "your_call": int,
+        #: Compliant, live check pending.
+        "pending_live_check": int,
+        #: Verified live.
+        "verified_live": int,
+        #: Compliant.
+        "compliant": int,
+        #: Not applicable.
+        "not_applicable": int,
+        #: Not set up yet (no sign the email or setting exists).
+        "not_set_up": int,
+        #: Not checked yet (Checkbox has not tried it).
+        "not_checked": int,
+    },
+    total=False,
+)
+
+
+ComplianceRollupPendingLiveChecksItem = TypedDict(
+    "ComplianceRollupPendingLiveChecksItem",
+    {
+        #: What has not been observed yet.
+        "what": str,
+        #: When / how it completes.
+        "completes": str,
+        #: How it completes: run_proof, bcc_real_sends, wait_for_event, connect_billing, resync_billing, scan, check_rendered_page, register_checkout, publish_policy.
+        "action": Literal["run_proof", "bcc_real_sends", "wait_for_event", "connect_billing", "resync_billing", "scan", "check_rendered_page", "register_checkout", "publish_policy"],
+        #: ISO date when it completes on its own (a reminder window), when known.
+        "due": Optional[str],
+        #: Check id.
+        "check_id": str,
+    },
+    total=False,
+)
+
+
+#: Roll-up of the user-facing statuses of the required checks.
+ComplianceRollup = TypedDict(
+    "ComplianceRollup",
+    {
+        #: needs_fix (a required check needs a fix or something is not set up yet), your_call (a decision is needed), incomplete (only "not checked yet" items are left, e.g. the cancel flow was never tried), compliant (pending live checks count as compliant), not_checked (never evaluated).
+        "status": Literal["needs_fix", "your_call", "incomplete", "compliant", "not_checked"],
+        #: Label to show.
+        "label": str,
+        #: Required checks per user-facing status.
+        "counts": "ComplianceRollupCounts",
+        #: What each pending live check waits for and how it completes.
+        "pending_live_checks": List["ComplianceRollupPendingLiveChecksItem"],
+        #: Recommended / extra items open (never block compliant).
+        "suggestions": int,
+    },
+    total=False,
+)
+
+
 #: Latest verdict; null until the first evaluation.
 SiteComplianceValue = TypedDict(
     "SiteComplianceValue",
     {
         #: Compliance score 0-100 (one decimal place).
         "score": float,
-        #: No critical/high obligation failing or unverified.
-        "insurable": bool,
         #: When the latest evaluation ran. Unix timestamp in seconds.
         "evaluated": int,
         #: Open findings whose latest status is fail.
         "open_findings": int,
         #: Open findings waiting for a human look.
         "needs_review": int,
+        #: User-facing roll-up of the required checks: needs_fix > your_call > compliant (pending live checks count as compliant).
+        "status": Literal["needs_fix", "your_call", "incomplete", "compliant", "not_checked"],
+        #: Label to show.
+        "label": str,
+        "rollup": "ComplianceRollup",
     },
     total=False,
 )
@@ -865,8 +947,6 @@ Scan = TypedDict(
         "evaluation": Optional[str],
         #: Score of that evaluation (0-100, one decimal place).
         "score": Optional[float],
-        #: Insurable flag of that evaluation.
-        "insurable": Optional[bool],
         #: When the scan started. Unix timestamp in seconds.
         "started": Optional[int],
         #: When the scan finished. Unix timestamp in seconds.
@@ -997,6 +1077,8 @@ SiteCheckout = TypedDict(
         "account_url": Optional[str],
         #: Terms of service page read on every scan.
         "terms_url": Optional[str],
+        #: The checkout page is the home page (checkout_url was omitted or set to the site root). Sign-up checks then judge the home page: set checkout_url to the page with the subscribe button unless the home page really has it.
+        "homepage_as_checkout": bool,
     },
     total=False,
 )
@@ -1024,6 +1106,8 @@ Site = TypedDict(
         #: Synthetic-shopper configuration (secrets are never returned).
         "checkout": "SiteCheckout",
         "monitoring": "SiteMonitoring",
+        #: Which requirement tiers Checkbox shows (minimum: required only; balanced: + recommended suggestions; maximum: + extras). Only required items affect compliance.
+        "protection_level": Literal["minimum", "balanced", "maximum"],
         "compliance": "SiteCompliance",
         "install": "SiteInstall",
         #: Archived (soft-deleted); evidence is retained.
@@ -1153,7 +1237,9 @@ SiteTestAccount = TypedDict(
         "password": str,
         #: Custom login steps. (optional)
         "login_steps": List["ScanStep"],
-        #: Optional page on your site that re-activates the test subscription (a test-only route). The cancellation test really cancels the test account; the scanner opens this page after logging in, before cancelling, so every run starts subscribed. Without it, a run after a completed cancellation reports "already cancelled by an earlier scan" (needs review). (optional)
+        #: Optional page on your site that RE-ACTIVATES the test subscription (a test-only route). The cancellation test really cancels the test account; the scanner opens this page after logging in, before cancelling, so every scan starts subscribed. Without it, a scan after a completed cancellation reports "not observed: the test account has no active subscription" (needs review). (Round 3: renamed from reset_url, which meant the opposite of the proof run's stripe.cleanup_url.) (optional)
+        "reactivate_url": str,
+        #: Deprecated alias of reactivate_url. (optional)
         "reset_url": str,
     },
     total=False,
@@ -1193,6 +1279,8 @@ CreateSiteParams = TypedDict(
         "devices": List[Literal["desktop", "mobile"]],
         #: Scheduled re-scan interval (0 = off, minimum 60). Default 1440 in live mode, 0 in test mode. (optional)
         "monitoring_interval_minutes": int,
+        #: Which requirement tiers Checkbox shows. minimum: the legal floor only (required items). balanced (default): required items plus recommended suggestions (consent receipts, a cancellation confirmation email…), collapsed and never blocking "compliant". maximum: everything, including extra protections (a separate checkbox per term, a pre-purchase summary). Only required items can make a site not compliant, at every level. (optional)
+        "protection_level": Literal["minimum", "balanced", "maximum"],
     },
     total=False,
 )
@@ -1231,6 +1319,8 @@ UpdateSiteParams = TypedDict(
         "devices": List[Literal["desktop", "mobile"]],
         #: Scheduled re-scan interval (0 = off, minimum 60). Default 1440 in live mode, 0 in test mode. (optional)
         "monitoring_interval_minutes": int,
+        #: Which requirement tiers Checkbox shows. minimum: the legal floor only (required items). balanced (default): required items plus recommended suggestions (consent receipts, a cancellation confirmation email…), collapsed and never blocking "compliant". maximum: everything, including extra protections (a separate checkbox per term, a pre-purchase summary). Only required items can make a site not compliant, at every level. (optional)
+        "protection_level": Literal["minimum", "balanced", "maximum"],
     },
     total=False,
 )
@@ -1302,6 +1392,8 @@ CheckSummary = TypedDict(
         "severity": Literal["critical", "high", "medium", "low"],
         #: Lifecycle stage.
         "stage": Literal["signup", "confirmation", "reminder", "cancellation", "config"],
+        #: User-facing status. needs_fix (a clear violation: `compliance.fix` is the one change), pending_live_check (everything Checkbox can see is right; the live event has not been observed yet — counts as compliant), verified_live (observed live: proof run, real BCC'd send, Stripe-confirmed cancellation), your_call (a real decision for a person: `compliance.question`), compliant (passes; grey areas carry a `compliance.note`), not_applicable, not_set_up (no sign the email or setting exists yet: `compliance.fix` is the one-click way to set it up; never counts as compliant), not_checked (Checkbox has not tried it yet, e.g. the cancel flow: `compliance.fix` says how; never counts as compliant).
+        "compliance_status": Literal["needs_fix", "pending_live_check", "verified_live", "your_call", "compliant", "not_applicable", "not_set_up", "not_checked"],
     },
     total=False,
 )
@@ -1340,8 +1432,6 @@ Evaluation = TypedDict(
         "scan": str,
         #: Compliance score 0-100 (severity-weighted, one decimal place, e.g. 82.5).
         "score": float,
-        #: No critical/high check failing, no critical check undecided, no high check without evidence.
-        "insurable": bool,
         #: Legal catalog / rules version used.
         "rules_version": str,
         #: When it was evaluated. Unix timestamp in seconds.
@@ -1350,8 +1440,9 @@ Evaluation = TypedDict(
         "observed": Optional[int],
         #: Counts per status.
         "summary": "EvaluationSummary",
-        #: Checks that keep the site from being insurable.
+        #: Blocking checks: critical or high-severity checks that fail, are undecided (critical) or lack evidence (high).
         "blockers": List["CheckSummary"],
+        "compliance": "ComplianceRollup",
         #: Every check evaluated.
         "checks": List["CheckSummary"],
     },
@@ -1431,6 +1522,112 @@ RemediationValue = TypedDict(
 Remediation = Optional["RemediationValue"]
 
 
+#: Where the element was, in page coordinates (the crop of the screenshot).
+EvidenceItemRect = TypedDict(
+    "EvidenceItemRect",
+    {
+        #: Left edge (px).
+        "x": float,
+        #: Top edge (px, from the top of the page).
+        "y": float,
+        #: Width (px).
+        "width": float,
+        #: Height (px).
+        "height": float,
+    },
+    total=False,
+)
+
+
+#: One piece of evidence a verdict relied on.
+EvidenceItem = TypedDict(
+    "EvidenceItem",
+    {
+        #: What kind of evidence: a captured page, an email, a billing-platform setting, a lifecycle event, a fetched policy document, a test cancellation, or the request input (preflight).
+        "source": Literal["page", "email", "billing", "event", "policy", "flow", "input"],
+        #: Id of the capture / email / event / evidence record. (optional)
+        "ref": str,
+        #: Page URL. (optional)
+        "url": str,
+        #: The exact text the verdict relied on. (optional)
+        "quote": str,
+        #: The element on the page (CSS selector). (optional)
+        "selector": str,
+        #: Where the element was, in page coordinates (the crop of the screenshot). (optional)
+        "rect": "EvidenceItemRect",
+        #: Billing-platform field the verdict read. (optional)
+        "field": str,
+        #: Value of that field. (optional)
+        "value": Any,
+        #: Where it was seen (region and device, email subject, …). (optional)
+        "label": str,
+        #: This item’s own outcome when the check judged several. (optional)
+        "status": Literal["pass", "fail", "needs_review", "not_applicable"],
+        #: What the check concluded from this item. (optional)
+        "detail": str,
+        #: Evidence id of the page screenshot. (optional)
+        "screenshot_ref": str,
+        #: When it was captured / received. (optional)
+        "at": str,
+    },
+    total=False,
+)
+
+
+#: What a verdict was based on. Never a pass without it; needs_review says what is missing.
+VerdictEvidence = TypedDict(
+    "VerdictEvidence",
+    {
+        #: What the verdict rests on, in one line.
+        "summary": str,
+        #: The exact texts, elements, emails, settings and events relied on (failing / unclear first).
+        "items": List["EvidenceItem"],
+        #: For needs_review: the missing piece that would decide it. (optional)
+        "missing": str,
+    },
+    total=False,
+)
+
+
+#: your_call: the question.
+ComplianceInfoQuestion = TypedDict(
+    "ComplianceInfoQuestion",
+    {
+        #: One plain-language question.
+        "text": str,
+        #: The answer Checkbox recommends.
+        "recommended": str,
+        #: Why a person has to decide.
+        "why": str,
+    },
+    total=False,
+)
+
+
+#: What a person should do about one check (the user-facing layer over `status`).
+ComplianceInfo = TypedDict(
+    "ComplianceInfo",
+    {
+        #: User-facing status. needs_fix (a clear violation: `compliance.fix` is the one change), pending_live_check (everything Checkbox can see is right; the live event has not been observed yet — counts as compliant), verified_live (observed live: proof run, real BCC'd send, Stripe-confirmed cancellation), your_call (a real decision for a person: `compliance.question`), compliant (passes; grey areas carry a `compliance.note`), not_applicable, not_set_up (no sign the email or setting exists yet: `compliance.fix` is the one-click way to set it up; never counts as compliant), not_checked (Checkbox has not tried it yet, e.g. the cancel flow: `compliance.fix` says how; never counts as compliant).
+        "status": Literal["needs_fix", "pending_live_check", "verified_live", "your_call", "compliant", "not_applicable", "not_set_up", "not_checked"],
+        #: Label to show: "Needs a fix", "Not set up yet", "Not checked yet", "Looks compliant — live check pending", "Verified live", "Your call", "Compliant", "Looks compliant", "Looks compliant with a note", "Not applicable".
+        "label": str,
+        #: Stable code of the mapping rule (docs/ACCURACY.md).
+        "reason": str,
+        #: required (legal floor: the only tier that can make a site not compliant), recommended (lowers lawsuit risk, conversion-neutral), extra (maximum protection).
+        "tier": Literal["required", "recommended", "extra"],
+        #: needs_fix: the one change that fixes it.
+        "fix": Optional[str],
+        #: A short note (grey area, stylistic suggestion).
+        "note": Optional[str],
+        "pending_live_check": Optional["PendingLiveCheck"],
+        #: your_call: the question.
+        "question": Optional["ComplianceInfoQuestion"],
+    },
+    total=False,
+)
+
+
 #: The latest result of one legal check for a site.
 Finding = TypedDict(
     "Finding",
@@ -1470,6 +1667,10 @@ Finding = TypedDict(
         "evidence_refs": List[str],
         #: Check-specific details (failing regions/devices/URLs, measurements, quotes).
         "details": Dict[str, Any],
+        "evidence": "VerdictEvidence",
+        #: User-facing status. needs_fix (a clear violation: `compliance.fix` is the one change), pending_live_check (everything Checkbox can see is right; the live event has not been observed yet — counts as compliant), verified_live (observed live: proof run, real BCC'd send, Stripe-confirmed cancellation), your_call (a real decision for a person: `compliance.question`), compliant (passes; grey areas carry a `compliance.note`), not_applicable, not_set_up (no sign the email or setting exists yet: `compliance.fix` is the one-click way to set it up; never counts as compliant), not_checked (Checkbox has not tried it yet, e.g. the cancel flow: `compliance.fix` says how; never counts as compliant).
+        "compliance_status": Literal["needs_fix", "pending_live_check", "verified_live", "your_call", "compliant", "not_applicable", "not_set_up", "not_checked"],
+        "compliance": "ComplianceInfo",
         #: Scan that produced the latest result.
         "scan": Optional[str],
         #: First time the check was evaluated. Unix timestamp in seconds.
@@ -1728,10 +1929,14 @@ Task = TypedDict(
         "key": str,
         #: Short imperative title.
         "title": str,
-        #: open (apply the change), in_progress (an agent claimed it), verifying (a verification is waiting for a confirming observation), done, wont_fix (the merchant declined, with a reason), manual (needs a human answer: see question).
-        "status": Literal["open", "in_progress", "verifying", "done", "wont_fix", "manual"],
+        #: open (apply the change), in_progress (an agent claimed it), verifying (a verification is waiting for a confirming observation), done, wont_fix (the merchant declined, with a reason), manual (needs a human answer: see question), pending_live_check (everything Checkbox can see is right; it waits for a live observation — see change for how it completes. Counts as compliant and never blocks the plan).
+        "status": Literal["open", "in_progress", "verifying", "done", "wont_fix", "manual", "pending_live_check"],
         #: Strictest severity among the task's legal checks.
         "priority": Literal["critical", "high", "medium", "low"],
+        #: required (the legal floor: the only tier that can keep the site from being compliant), recommended (lowers lawsuit risk, conversion-neutral; shown at protection level balanced and maximum, never blocks), extra (maximum protection only). Always present on API responses. (optional)
+        "tier": Literal["required", "recommended", "extra"],
+        #: User-facing status. needs_fix (a clear violation: `compliance.fix` is the one change), pending_live_check (everything Checkbox can see is right; the live event has not been observed yet — counts as compliant), verified_live (observed live: proof run, real BCC'd send, Stripe-confirmed cancellation), your_call (a real decision for a person: `compliance.question`), compliant (passes; grey areas carry a `compliance.note`), not_applicable, not_set_up (no sign the email or setting exists yet: `compliance.fix` is the one-click way to set it up; never counts as compliant), not_checked (Checkbox has not tried it yet, e.g. the cancel flow: `compliance.fix` says how; never counts as compliant). (optional)
+        "compliance_status": Literal["needs_fix", "pending_live_check", "verified_live", "your_call", "compliant", "not_applicable", "not_set_up", "not_checked"],
         #: Position in the plan (1 = do first). Dependency-aware.
         "order": int,
         #: Legal checks this task makes pass.
@@ -1765,6 +1970,8 @@ Task = TypedDict(
         #: The newest verification of the task (retrieveVerification for the details).
         "last_verification": Optional["TaskLastVerification"],
         "next_action": "PlanNextAction",
+        #: Email tasks only (null otherwise): what Checkbox has seen of this email. not_seen (nothing yet), template_checked (a template or sample passed the email checks, but Checkbox has not seen it sent for a real event: the task stays open), delivery_seen (captured from a real event: a test run, a notice for a real subscriber, or a BCC copy matching that subscriber's billing event). Only delivery_seen satisfies the task.
+        "verification_level": Optional[Literal["not_seen", "template_checked", "delivery_seen"]],
         #: When the task first appeared. Unix timestamp in seconds.
         "first_seen": int,
         #: When it was done. Unix timestamp in seconds.
@@ -1786,10 +1993,27 @@ CompliancePlanCounts = TypedDict(
         "verifying": int,
         #: Tasks waiting for a human answer.
         "manual": int,
+        #: Tasks that only wait for a live observation (count as compliant). (optional)
+        "pending_live_check": int,
         #: Done tasks.
         "done": int,
         #: Declined tasks.
         "wont_fix": int,
+    },
+    total=False,
+)
+
+
+#: Task ids grouped by tier, in plan order.
+CompliancePlanGroups = TypedDict(
+    "CompliancePlanGroups",
+    {
+        #: Required tasks (the legal floor).
+        "required": List[str],
+        #: Recommended suggestions (never block compliant).
+        "recommended": List[str],
+        #: Extra protections (maximum only).
+        "extra": List[str],
     },
     total=False,
 )
@@ -1812,6 +2036,56 @@ CompliancePlanCoverage = TypedDict(
 )
 
 
+CompliancePlanEmailVerificationItem = TypedDict(
+    "CompliancePlanEmailVerificationItem",
+    {
+        #: Email kind (acknowledgment, trial_ending, renewal_reminder, annual_terms, charge_notice, price_change, cancellation_confirmation).
+        "kind": str,
+        #: not_seen, template_checked (template or sample only: never counted as compliant) or delivery_seen (sent for a real event).
+        "verification_level": Literal["not_seen", "template_checked", "delivery_seen"],
+        #: Why this level, in plain words.
+        "reason": str,
+        #: The email the level rests on (the delivered one, else the newest).
+        "email": Optional[str],
+        #: delivery_seen only: the real event the email came from.
+        "basis": Optional[Literal["test_run", "synthetic_signup", "checkbox_sent", "notice_due", "billing_event"]],
+    },
+    total=False,
+)
+
+
+#: Compliant conversion suggestions for this site.
+CompliancePlanOptionalImprovementsConversionSuggestions = TypedDict(
+    "CompliancePlanOptionalImprovementsConversionSuggestions",
+    {
+        #: What they are.
+        "description": str,
+        #: Always false.
+        "blocking": Literal[False],
+        #: Always false: they never change status, score or tasks.
+        "counts_toward_compliance": Literal[False],
+        #: Operation that lists them.
+        "operation_id": str,
+        #: MCP tool that lists them.
+        "mcp_tool": str,
+        #: HTTP endpoint.
+        "endpoint": str,
+    },
+    total=False,
+)
+
+
+#: Optional improvements beyond compliance. Never tasks, never blocking, never counted toward compliance.
+CompliancePlanOptionalImprovements = TypedDict(
+    "CompliancePlanOptionalImprovements",
+    {
+        #: Compliant conversion suggestions for this site.
+        "conversion_suggestions": "CompliancePlanOptionalImprovementsConversionSuggestions",
+    },
+    total=False,
+)
+
+
 #: The ordered, machine-readable list of changes that makes a site compliant, recomputed from its latest evaluation.
 CompliancePlan = TypedDict(
     "CompliancePlan",
@@ -1824,12 +2098,10 @@ CompliancePlan = TypedDict(
         "livemode": bool,
         #: The site.
         "site": str,
-        #: action_required (an agent can apply open tasks now), verifying (changes applied; waiting for confirming observations), compliant (every applicable check Checkbox could observe passes — an automated assessment, not a legal determination; see coverage for what was not observed), blocked (only human answers or declined critical tasks remain).
+        #: action_required (an agent can apply open tasks now), verifying (changes applied; waiting for confirming observations), compliant (every required check passes or only waits for a live check — an automated assessment, not a legal determination; see compliance.pending_live_checks and coverage), blocked (only human answers ("Your call") or declined critical tasks remain).
         "status": Literal["action_required", "verifying", "compliant", "blocked"],
         #: Compliance score 0-100 of the latest evaluation.
         "score": Optional[int],
-        #: Preview flag the planned Checkbox Warranty will key on (no checks failing at high severity). No warranty or insurance is offered yet; this is not an underwriting decision.
-        "insurable": Optional[bool],
         #: The evaluation the plan was built from (null before the first check).
         "evaluation": Optional[str],
         #: When that evaluation ran. Unix timestamp in seconds.
@@ -1840,15 +2112,24 @@ CompliancePlan = TypedDict(
         "counts": "CompliancePlanCounts",
         #: Tasks in the order to do them (done tasks last).
         "tasks": List["Task"],
+        #: The site's protection level: minimum lists required tasks only; balanced adds recommended suggestions; maximum adds extras. Only required tasks change the plan status.
+        "protection_level": Literal["minimum", "balanced", "maximum"],
+        #: Task ids grouped by tier, in plan order.
+        "groups": "CompliancePlanGroups",
+        "compliance": Optional["ComplianceRollup"],
         #: What the assessment rests on. Tell the human about not_observed and attested items; never call the site "compliant" without them.
         "coverage": "CompliancePlanCoverage",
         "next_action": "PlanNextAction",
+        #: Evidence level per required email kind. A plan is never compliant on template_checked emails.
+        "email_verification": List["CompliancePlanEmailVerificationItem"],
         #: Rules / catalog version of the evaluation.
         "rules_version": Optional[str],
         #: Automated assessment; not legal advice.
         "disclaimer": str,
         #: When the plan was computed. Unix timestamp in seconds.
         "generated": int,
+        #: Optional improvements beyond compliance. Never tasks, never blocking, never counted toward compliance. (optional)
+        "optional_improvements": "CompliancePlanOptionalImprovements",
     },
     total=False,
 )
@@ -1930,8 +2211,8 @@ Verification = TypedDict(
         "task": Optional[str],
         #: One task or the whole site.
         "scope": Literal["task", "site"],
-        #: pending (waiting for the confirming scan / re-evaluation), passed (Checkbox observed the expected result), failed (it did not: see diff).
-        "status": Literal["pending", "passed", "failed"],
+        #: pending (waiting for the confirming scan / re-evaluation), passed (Checkbox observed the expected result), passed_with_gaps (nothing observed fails, but some checks could not be observed: observed missing_data — not verified), failed (it did not: see diff).
+        "status": Literal["pending", "passed", "passed_with_gaps", "failed"],
         #: How it was re-checked.
         "method": Literal["page_fetch", "policy_refetch", "stripe_params", "email_copy", "platform_sync", "attestation", "evaluation", "test_run"],
         #: The fast pre-check run immediately (seconds). A failing pre-check fails the verification at once.
@@ -1980,6 +2261,8 @@ VerifyTaskParams = TypedDict(
         "html": str,
         #: stripe_params tasks: exactly what your code now passes to stripe.checkout.sessions.create. (optional)
         "stripe_checkout_session": Dict[str, Any],
+        #: stripe_params tasks with several Checkout code paths (one per plan, e.g. monthly and annual-with-trial): every params object your code passes to stripe.checkout.sessions.create. The pre-check fails when any of them fails. Without either field, every registered config (newest per name) is checked. (optional)
+        "stripe_checkout_sessions": List[Dict[str, Any]],
         #: email_copy tasks: the new email template (pre-check; the real email confirms). (optional)
         "email": "VerifyTaskParamsEmail",
         #: Re-check a task that is already done (or declined) instead of returning its last result: Checkbox evaluates the site again now and queues a confirming scan, so a regression shows up (pilot: a cancel page switched to phone-only stayed "passed"). (optional)
@@ -2163,7 +2446,7 @@ EvidenceChainVerification = TypedDict(
 )
 
 
-#: Trust badge for the merchant site.
+#: Monitoring badge for the merchant site: it links to the verification page, which says what was checked and when. It does not say the site is legally compliant.
 CertificateBadge = TypedDict(
     "CertificateBadge",
     {
@@ -2178,7 +2461,7 @@ CertificateBadge = TypedDict(
 )
 
 
-#: A signed monitoring certificate: the site met every critical and high obligation for the required streak of days. It is not insurance.
+#: A signed monitoring certificate: for the required streak of days the site passed the checks Checkbox ran for every critical and high obligation (emails count only when seen sent for a real event, never on templates alone). It records what was monitored and when; it is not legal advice and not a legal opinion that the site is compliant.
 Certificate = TypedDict(
     "Certificate",
     {
@@ -2190,13 +2473,13 @@ Certificate = TypedDict(
         "livemode": bool,
         #: Certified site.
         "site": str,
-        #: active while monitoring keeps the site insurable; lapses automatically otherwise.
+        #: active while monitoring keeps passing the checks Checkbox runs (no critical or high obligation failing or unproven); lapses automatically otherwise.
         "status": Literal["active", "lapsed", "revoked", "superseded"],
         #: Verified domain frozen into the certificate.
         "domain": str,
         #: Issue time. Unix timestamp in seconds.
         "issued": int,
-        #: Expiry (renewed automatically while compliant). Unix timestamp in seconds.
+        #: Expiry (renewed automatically while the site keeps passing the checks Checkbox runs). Unix timestamp in seconds.
         "valid_until": int,
         #: Last renewal. Unix timestamp in seconds.
         "renewed": Optional[int],
@@ -2206,7 +2489,7 @@ Certificate = TypedDict(
         "public_reason": Optional[str],
         #: Public verification page.
         "verify_url": str,
-        #: Trust badge for the merchant site.
+        #: Monitoring badge for the merchant site: it links to the verification page, which says what was checked and when. It does not say the site is legally compliant.
         "badge": "CertificateBadge",
     },
     total=False,
@@ -2225,6 +2508,19 @@ CertificateList = TypedDict(
         "has_more": bool,
         #: The URL of this list.
         "url": str,
+    },
+    total=False,
+)
+
+
+#: Who Checkbox can send notices to (null when unknown).
+NoticeSettingsSubscribers = TypedDict(
+    "NoticeSettingsSubscribers",
+    {
+        #: Active subscriptions Checkbox knows from the billing platform.
+        "active": int,
+        #: Of those, how many have a known email address (Checkbox can only send to these).
+        "with_email": int,
     },
     total=False,
 )
@@ -2273,7 +2569,7 @@ NoticeSettingsKindsItem = TypedDict(
     "NoticeSettingsKindsItem",
     {
         #: Notice kind.
-        "kind": Literal["acknowledgment", "trial_ending", "renewal_reminder", "annual_terms", "price_change"],
+        "kind": Literal["acknowledgment", "trial_ending", "renewal_reminder", "annual_terms", "price_change", "cancellation_confirmation", "charge_notice"],
         #: Label.
         "label": str,
         #: What it is and when it is sent.
@@ -2304,7 +2600,7 @@ NoticeSettings = TypedDict(
         #: The site's inbound address. Copies to it confirm a notice only when your sending domain authenticates them (DKIM/SPF, a trusted sending domain) and they go to the subscriber; to confirm any copy, BCC each due notice's own bcc address instead (listDueNotices / the notice.due webhook).
         "bcc": str,
         #: mode checkbox: the notices Checkbox sends for the merchant.
-        "enabled_kinds": List[Literal["acknowledgment", "trial_ending", "renewal_reminder", "annual_terms", "price_change"]],
+        "enabled_kinds": List[Literal["acknowledgment", "trial_ending", "renewal_reminder", "annual_terms", "price_change", "cancellation_confirmation", "charge_notice"]],
         #: Brand shown in notices (defaults to the site name).
         "brand_name": Optional[str],
         #: Product name used in notices.
@@ -2319,6 +2615,8 @@ NoticeSettings = TypedDict(
         "brand_color": Optional[str],
         #: Mailbox name of the sender.
         "from_local_part": str,
+        #: Who Checkbox can send notices to (null when unknown).
+        "subscribers": Optional["NoticeSettingsSubscribers"],
         #: Confirmed cancellation policy (required before notices go out).
         "policy": Optional["NoticeSettingsPolicy"],
         #: Sending address, when one is available.
@@ -2356,7 +2654,7 @@ UpdateNoticeSettingsParams = TypedDict(
         #: merchant: you send the emails (Checkbox tracks them); checkbox: Checkbox sends them. Turning an enabled_kinds notice on implies checkbox. (optional)
         "mode": Literal["merchant", "checkbox"],
         #: Notices to send (turning one on needs cancel_url, a confirmed policy and a connected Stripe/Recharge account). trial_reminder is accepted as an alias of trial_ending. (optional)
-        "enabled_kinds": List[Literal["acknowledgment", "trial_ending", "renewal_reminder", "annual_terms", "price_change", "trial_reminder"]],
+        "enabled_kinds": List[Literal["acknowledgment", "trial_ending", "renewal_reminder", "annual_terms", "price_change", "cancellation_confirmation", "charge_notice", "trial_reminder"]],
         #: Brand name. (optional)
         "brand_name": Optional[str],
         #: Product name. (optional)
@@ -2845,6 +3143,10 @@ CheckVerdict = TypedDict(
         "fix": str,
         #: Page checks on static HTML: the engine status on the estimated layout. (optional)
         "static_estimate": Literal["pass", "fail", "needs_review", "not_applicable"],
+        "evidence": "VerdictEvidence",
+        #: User-facing status. needs_fix (a clear violation: `compliance.fix` is the one change), pending_live_check (everything Checkbox can see is right; the live event has not been observed yet — counts as compliant), verified_live (observed live: proof run, real BCC'd send, Stripe-confirmed cancellation), your_call (a real decision for a person: `compliance.question`), compliant (passes; grey areas carry a `compliance.note`), not_applicable, not_set_up (no sign the email or setting exists yet: `compliance.fix` is the one-click way to set it up; never counts as compliant), not_checked (Checkbox has not tried it yet, e.g. the cancel flow: `compliance.fix` says how; never counts as compliant).
+        "compliance_status": Literal["needs_fix", "pending_live_check", "verified_live", "your_call", "compliant", "not_applicable", "not_set_up", "not_checked"],
+        "compliance": "ComplianceInfo",
     },
     total=False,
 )
@@ -2967,6 +3269,9 @@ DisclosureCheckResult = TypedDict(
         #: Not legal advice.
         "disclaimer": str,
         "next_action": "NextAction",
+        #: User-facing roll-up: needs_fix > your_call > incomplete > compliant (pending live checks count as compliant). `verdict` keeps the machine value.
+        "compliance_status": Literal["needs_fix", "your_call", "incomplete", "compliant", "not_checked"],
+        "compliance": "ComplianceRollup",
         "replacement": "CheckReplacement",
     },
     total=False,
@@ -3173,6 +3478,9 @@ StripeCheckoutSessionCheckResult = TypedDict(
         #: Not legal advice.
         "disclaimer": str,
         "next_action": "NextAction",
+        #: User-facing roll-up: needs_fix > your_call > incomplete > compliant (pending live checks count as compliant). `verdict` keeps the machine value.
+        "compliance_status": Literal["needs_fix", "your_call", "incomplete", "compliant", "not_checked"],
+        "compliance": "ComplianceRollup",
         #: The fix.
         "correction": "StripeCheckoutSessionCheckResultCorrection",
     },
@@ -3332,6 +3640,9 @@ StripePaymentLinkCheckResult = TypedDict(
         #: Not legal advice.
         "disclaimer": str,
         "next_action": "NextAction",
+        #: User-facing roll-up: needs_fix > your_call > incomplete > compliant (pending live checks count as compliant). `verdict` keeps the machine value.
+        "compliance_status": Literal["needs_fix", "your_call", "incomplete", "compliant", "not_checked"],
+        "compliance": "ComplianceRollup",
         #: The fix.
         "correction": "StripePaymentLinkCheckResultCorrection",
     },
@@ -3416,8 +3727,13 @@ EmailCheckResult = TypedDict(
         #: Not legal advice.
         "disclaimer": str,
         "next_action": "NextAction",
+        #: User-facing roll-up: needs_fix > your_call > incomplete > compliant (pending live checks count as compliant). `verdict` keeps the machine value.
+        "compliance_status": Literal["needs_fix", "your_call", "incomplete", "compliant", "not_checked"],
+        "compliance": "ComplianceRollup",
         #: The email kind checked.
         "email_kind": str,
+        #: Always template_checked: this checks the wording you send in, not that your system sends it. On the site, the email only counts once Checkbox sees it sent for a real event (delivery_seen: a test run, a notice for a real subscriber, or a BCC copy matching that subscriber's billing event).
+        "verification_level": Literal["template_checked"],
         #: Requirements that make this email mandatory for this plan (empty: not legally required).
         "required_by": List[str],
         #: A compliant template generated from the plan terms.
@@ -3587,6 +3903,9 @@ PageCheckResult = TypedDict(
         #: Not legal advice.
         "disclaimer": str,
         "next_action": "NextAction",
+        #: User-facing roll-up: needs_fix > your_call > incomplete > compliant (pending live checks count as compliant). `verdict` keeps the machine value.
+        "compliance_status": Literal["needs_fix", "your_call", "incomplete", "compliant", "not_checked"],
+        "compliance": "ComplianceRollup",
         #: Whether html was given or fetched from url.
         "source": Literal["html", "url"],
         #: What was read from the page.
@@ -3624,7 +3943,7 @@ ScheduledNotice = TypedDict(
     "ScheduledNotice",
     {
         #: Notice kind.
-        "kind": Literal["acknowledgment", "trial_ending", "renewal_reminder", "annual_terms", "price_change"],
+        "kind": Literal["acknowledgment", "trial_ending", "renewal_reminder", "annual_terms", "price_change", "cancellation_confirmation", "charge_notice"],
         #: What the notice announces.
         "occasion": str,
         #: Date of the event (YYYY-MM-DD, UTC).
@@ -3730,6 +4049,430 @@ NoticeScheduleParams = TypedDict(
         "jurisdictions": Union[Literal["all"], List[str]],
         #: Evaluate the law as of this date (YYYY-MM-DD, default today). (optional)
         "as_of": str,
+    },
+    total=False,
+)
+
+
+#: RFC 6902 operation.
+SuggestionPatchOp = TypedDict(
+    "SuggestionPatchOp",
+    {
+        #: JSON Patch operation.
+        "op": Literal["add", "replace", "remove"],
+        #: JSON Pointer.
+        "path": str,
+        #: Value. (optional)
+        "value": Any,
+    },
+    total=False,
+)
+
+
+#: A legal guardrail the suggestion respects.
+SuggestionGuardrail = TypedDict(
+    "SuggestionGuardrail",
+    {
+        #: What the change must respect, in plain words.
+        "rule": str,
+        #: Catalog requirement ids the rule comes from.
+        "requirement_ids": List[str],
+    },
+    total=False,
+)
+
+
+#: Before.
+SuggestionBefore = TypedDict(
+    "SuggestionBefore",
+    {
+        #: What is shown.
+        "label": str,
+        #: Your current copy (or a typical example).
+        "text": str,
+    },
+    total=False,
+)
+
+
+#: After.
+SuggestionAfter = TypedDict(
+    "SuggestionAfter",
+    {
+        #: What is shown.
+        "label": str,
+        #: The improved copy, from your plan terms.
+        "text": str,
+    },
+    total=False,
+)
+
+
+#: How to apply it.
+SuggestionApply = TypedDict(
+    "SuggestionApply",
+    {
+        #: Kind of change.
+        "type": Literal["replace_text", "insert_text", "replace_email", "stripe_params", "flow_change", "settings"],
+        #: Where to make it.
+        "where": str,
+        #: The exact copy / markup / JSON to apply.
+        "content": str,
+        #: stripe_params: RFC 6902 patch for the params your code passes to Stripe. (optional)
+        "json_patch": List["SuggestionPatchOp"],
+        #: One or two sentences an agent can follow literally.
+        "instructions": str,
+    },
+    total=False,
+)
+
+
+#: The engine check of the after-example (only verified suggestions are offered).
+SuggestionVerification = TypedDict(
+    "SuggestionVerification",
+    {
+        #: The check the after-example was run through.
+        "operation_id": Literal["checkDisclosure", "checkStripeCheckoutSession", "checkEmail", "cancellation_flow_model"],
+        #: Verdict of that check.
+        "verdict": Literal["pass", "fail", "needs_review", "not_applicable"],
+        #: Nothing fails and nothing new needs review.
+        "verified": bool,
+        #: Checks that did not pass (empty when verified).
+        "open_checks": List[str],
+        #: The after-example's status roll-up (the same labels as compliance on sites and check results): compliant for every offered suggestion.
+        "compliance_status": Literal["needs_fix", "your_call", "incomplete", "compliant", "not_checked"],
+        #: Its label.
+        "compliance_label": str,
+        #: Jurisdictions checked.
+        "jurisdictions": Union[Literal["all"], List[str]],
+        #: How it was checked.
+        "note": str,
+    },
+    total=False,
+)
+
+
+#: One optional, compliant conversion suggestion.
+Suggestion = TypedDict(
+    "Suggestion",
+    {
+        #: Stable id of the suggestion in Checkbox’s library.
+        "key": str,
+        #: String representing the object's type. Always "suggestion".
+        "object": Literal["suggestion"],
+        #: Where it applies.
+        "surface": Literal["checkout_page", "stripe_checkout", "acknowledgment_email", "trial_reminder_email", "renewal_reminder_email", "price_change_email", "cancellation_flow", "cancellation_confirmation_email"],
+        #: What to change.
+        "title": str,
+        #: Why it commonly helps conversion or retention (no invented figures).
+        "why": str,
+        #: detected: your observed copy lacks it; recommended: the surface was not observed but it fits your plan.
+        "match": Literal["detected", "recommended"],
+        #: Why it applies to you.
+        "reason": str,
+        #: Before.
+        "before": "SuggestionBefore",
+        #: After.
+        "after": "SuggestionAfter",
+        #: How to apply it.
+        "apply": "SuggestionApply",
+        #: What must be true before you use it (never claim it otherwise).
+        "preconditions": List[str],
+        #: Legal guardrails (catalog ids) the change must respect.
+        "guardrails": List["SuggestionGuardrail"],
+        #: The engine check of the after-example (only verified suggestions are offered).
+        "verification": Optional["SuggestionVerification"],
+        #: Placeholders you must fill (e.g. {{cancel_url}}).
+        "placeholders": List[str],
+    },
+    total=False,
+)
+
+
+SuggestionReportSurfacesItem = TypedDict(
+    "SuggestionReportSurfacesItem",
+    {
+        #: Surface.
+        "surface": Literal["checkout_page", "stripe_checkout", "acknowledgment_email", "trial_reminder_email", "renewal_reminder_email", "price_change_email", "cancellation_flow", "cancellation_confirmation_email"],
+        #: offered; held (a compliance check on it fails: fix that first); none (nothing to suggest).
+        "status": Literal["offered", "held", "none"],
+        #: Checkbox saw this surface (or you sent it).
+        "observed": bool,
+        #: Failing checks that hold it.
+        "held_by": List[str],
+        #: The status label of those checks ("Needs a fix"), or null.
+        "held_label": Optional[str],
+        #: Suggestions offered for it.
+        "offered": int,
+    },
+    total=False,
+)
+
+
+SuggestionReportWithheldItem = TypedDict(
+    "SuggestionReportWithheldItem",
+    {
+        #: Suggestion key.
+        "key": str,
+        #: Surface.
+        "surface": Literal["checkout_page", "stripe_checkout", "acknowledgment_email", "trial_reminder_email", "renewal_reminder_email", "price_change_email", "cancellation_flow", "cancellation_confirmation_email"],
+        #: Title.
+        "title": str,
+        #: Why it is not offered to you (a guardrail, a failing check, or an untrue precondition).
+        "reason": str,
+    },
+    total=False,
+)
+
+
+#: Next step.
+SuggestionReportNextAction = TypedDict(
+    "SuggestionReportNextAction",
+    {
+        #: What to do next.
+        "type": Literal["apply_suggestion", "fix_compliance_first", "none"],
+        #: One or two sentences for an agent.
+        "message": str,
+        #: The operation to call next, when there is one. (optional)
+        "operation_id": str,
+        #: The MCP tool for operation_id. (optional)
+        "mcp_tool": str,
+    },
+    total=False,
+)
+
+
+#: Optional, compliant conversion suggestions for a checkout, Stripe Checkout, lifecycle emails and the cancellation flow. Never a compliance task.
+SuggestionReport = TypedDict(
+    "SuggestionReport",
+    {
+        #: Id of this report (sugr_…). Reports are computed on request and not stored.
+        "id": str,
+        #: String representing the object's type. Always "suggestion_report".
+        "object": Literal["suggestion_report"],
+        #: true for live-mode objects, false for test mode (ck_test_ keys act on an isolated sandbox).
+        "livemode": bool,
+        #: When it was computed. Unix seconds.
+        "created": int,
+        #: The site (GET /v1/sites/:site/suggestions), or null for POST /v1/suggestions.
+        "site": Optional[str],
+        #: Always true: suggestions are optional and never block anything.
+        "optional": Literal[True],
+        #: Always false: suggestions never count for or against compliance, the score or the plan status.
+        "counts_toward_compliance": Literal[False],
+        #: One paragraph for an LLM or a human.
+        "summary": str,
+        #: Jurisdictions the examples were checked for.
+        "jurisdictions": Union[Literal["all"], List[str]],
+        #: Date the law was evaluated at.
+        "as_of": str,
+        #: Version of the suggestion library.
+        "library_version": str,
+        #: Rules engine version.
+        "rules_version": str,
+        #: Legal catalog version.
+        "catalog_version": str,
+        #: Per surface.
+        "surfaces": List["SuggestionReportSurfacesItem"],
+        #: Offered suggestions: detected gaps in your own copy first.
+        "suggestions": List["Suggestion"],
+        #: Suggestions that would apply but are withheld, and why.
+        "withheld": List["SuggestionReportWithheldItem"],
+        #: Next step.
+        "next_action": "SuggestionReportNextAction",
+        #: Not legal advice; optional; results vary.
+        "disclaimer": str,
+    },
+    total=False,
+)
+
+
+SuggestionsParamsOtherPlansItem = TypedDict(
+    "SuggestionsParamsOtherPlansItem",
+    {
+        #: Brand shown to subscribers; used in generated text. (optional)
+        "merchant_name": str,
+        #: Plan / product name. (optional)
+        "plan_name": str,
+        #: Recurring price in major units (19.99). Or give `amount` in minor units. (optional)
+        "price": Union[float, str],
+        #: Recurring price in minor units (1999 = $19.99), Stripe style. (optional)
+        "amount": int,
+        #: Three-letter ISO currency (default usd). (optional)
+        "currency": str,
+        #: Billing interval: day, week, month or year. (optional)
+        "interval": str,
+        #: Number of intervals between charges (default 1). (optional)
+        "interval_count": int,
+        #: Free-trial length in days (0 or absent = no trial). (optional)
+        "trial_days": int,
+        #: https URL where subscribers cancel online (used in generated text; a {{cancel_url}} placeholder otherwise). (optional)
+        "cancel_url": str,
+        #: When a cancellation takes effect (default period_end). (optional)
+        "cancel_timing": Literal["period_end", "immediately"],
+        #: Plan name shown to subscribers.
+        "name": str,
+    },
+    total=False,
+)
+
+
+#: Where and how the disclosure is shown (as in checkDisclosure).
+SuggestionsParamsDisclosurePlacement = TypedDict(
+    "SuggestionsParamsDisclosurePlacement",
+    {
+        #: Shown above the purchase button (default true). (optional)
+        "above_button": bool,
+        #: On the same page as the payment form (default true). (optional)
+        "same_page_as_payment": bool,
+        #: Font size (default 14). (optional)
+        "font_size_px": float,
+        #: WCAG contrast ratio. (optional)
+        "contrast_ratio": float,
+        #: Bold / semibold. (optional)
+        "bold": bool,
+        #: Set off in a box. (optional)
+        "boxed": bool,
+        #: Surrounding body text size (default 14). (optional)
+        "body_font_size_px": float,
+    },
+    total=False,
+)
+
+
+#: The consent checkbox (as in checkDisclosure).
+SuggestionsParamsDisclosureConsent = TypedDict(
+    "SuggestionsParamsDisclosureConsent",
+    {
+        #: There is a renewal consent checkbox.
+        "checkbox": bool,
+        #: Ticked by default. (optional)
+        "prechecked": bool,
+        #: Its label. (optional)
+        "label": str,
+        #: Required to submit (default true). (optional)
+        "required": bool,
+    },
+    total=False,
+)
+
+
+#: Your own checkout: the same fields as checkDisclosure (without the plan terms, which go in terms).
+SuggestionsParamsDisclosure = TypedDict(
+    "SuggestionsParamsDisclosure",
+    {
+        #: The disclosure shown next to the purchase button, exactly as rendered.
+        "text": str,
+        #: Label of the purchase button. (optional)
+        "button_text": str,
+        #: Other text next to the button (order summary). (optional)
+        "order_summary": str,
+        #: Where and how the disclosure is shown (as in checkDisclosure). (optional)
+        "placement": "SuggestionsParamsDisclosurePlacement",
+        #: The consent checkbox (as in checkDisclosure). (optional)
+        "consent": "SuggestionsParamsDisclosureConsent",
+    },
+    total=False,
+)
+
+
+#: Your checkout page HTML (as in checkPage; html only).
+SuggestionsParamsPage = TypedDict(
+    "SuggestionsParamsPage",
+    {
+        #: Rendered checkout page HTML (as in checkPage).
+        "html": str,
+        #: Where the page lives (resolves relative links). (optional)
+        "url": str,
+    },
+    total=False,
+)
+
+
+#: Stripe Checkout Session params (as in checkStripeCheckoutSession; plan terms in terms).
+SuggestionsParamsStripeCheckoutSession = TypedDict(
+    "SuggestionsParamsStripeCheckoutSession",
+    {
+        #: Exactly what your code passes to stripe.checkout.sessions.create.
+        "params": Dict[str, Any],
+    },
+    total=False,
+)
+
+
+SuggestionsParamsEmailsItem = TypedDict(
+    "SuggestionsParamsEmailsItem",
+    {
+        #: Which lifecycle email (as in checkEmail).
+        "kind": Literal["acknowledgment", "trial_reminder", "trial_ending", "renewal_reminder", "price_change", "annual_terms", "charge_notice", "cancellation_confirmation"],
+        #: Subject line.
+        "subject": str,
+        #: Plain-text body. (optional)
+        "text": str,
+        #: HTML body. (optional)
+        "html": str,
+        #: price_change only: the old price, major units. (optional)
+        "previous_price": Union[float, str],
+    },
+    total=False,
+)
+
+
+SuggestionsParamsCancellationFlowStepsItem = TypedDict(
+    "SuggestionsParamsCancellationFlowStepsItem",
+    {
+        #: What the screen says.
+        "text": str,
+        #: Buttons and links on the screen. (optional)
+        "buttons": List[str],
+        #: The screen shows a retention (save) offer or pause option. (optional)
+        "offer": bool,
+    },
+    total=False,
+)
+
+
+#: Your cancellation flow as a subscriber sees it.
+SuggestionsParamsCancellationFlow = TypedDict(
+    "SuggestionsParamsCancellationFlow",
+    {
+        #: Screens from the account page to the confirmation, in order.
+        "steps": List["SuggestionsParamsCancellationFlowStepsItem"],
+        #: A confirmation is shown at the end (default true). (optional)
+        "confirmation_shown": bool,
+    },
+    total=False,
+)
+
+
+#: What to suggest improvements for: the same inputs as /v1/checks/*, any subset.
+SuggestionsParams = TypedDict(
+    "SuggestionsParams",
+    {
+        #: (optional)
+        "terms": "CheckPlanTerms",
+        #: Other plans you sell (enables “point to a cheaper plan” and plan-choice suggestions). (optional)
+        "other_plans": List["SuggestionsParamsOtherPlansItem"],
+        #: Where you sell: "all" (default) or state codes ("US-CA", "CA", "US-NY"; "US-FED" is always included). (optional)
+        "jurisdictions": Union[Literal["all"], List[str]],
+        #: Evaluate the law as of this date (YYYY-MM-DD, default today). (optional)
+        "as_of": str,
+        #: Only suggest for these surfaces (default: all). (optional)
+        "surfaces": List[Literal["checkout_page", "stripe_checkout", "acknowledgment_email", "trial_reminder_email", "renewal_reminder_email", "price_change_email", "cancellation_flow", "cancellation_confirmation_email"]],
+        #: Your own checkout: the same fields as checkDisclosure (without the plan terms, which go in terms). (optional)
+        "disclosure": "SuggestionsParamsDisclosure",
+        #: Your checkout page HTML (as in checkPage; html only). (optional)
+        "page": "SuggestionsParamsPage",
+        #: Stripe Checkout Session params (as in checkStripeCheckoutSession; plan terms in terms). (optional)
+        "stripe_checkout_session": "SuggestionsParamsStripeCheckoutSession",
+        #: Lifecycle emails (as in checkEmail; plan terms in terms). (optional)
+        "emails": List["SuggestionsParamsEmailsItem"],
+        #: Your cancellation flow as a subscriber sees it. (optional)
+        "cancellation_flow": "SuggestionsParamsCancellationFlow",
+        #: You send a trial-ending reminder to every trial subscriber (false withholds suggestions that promise one). (optional)
+        "trial_reminders": bool,
+        #: Your site’s base URL (used in example links). (optional)
+        "site_url": str,
     },
     total=False,
 )
@@ -4900,11 +5643,11 @@ TestRunStepChecksItem = TypedDict(
 TestRunStep = TypedDict(
     "TestRunStep",
     {
-        #: Stable step key: credentials, checkout_config, checkout_page, subscribe, acknowledgment_email, trial_reminder, renewal, cancel_online, cancellation_email, cleanup.
+        #: Stable step key: credentials, checkout_config, checkout_page, subscribe, acknowledgment_email, trial_reminder, renewal, cancel_online, cancellation_email, webhooks (real_checkout), cleanup.
         "key": str,
         #: Human-readable step title.
         "title": str,
-        #: passed: observed and compliant; failed: a check failed or the step broke the run; warning: could not be fully observed (see code and fix); skipped: not applicable or turned off.
+        #: passed: observed, with evidence, and every judged check passed (never on an assumption); failed: a check failed or the step broke the run; warning: needs review — could not be fully observed or proven (see code and fix); skipped: not applicable or turned off.
         "status": Literal["pending", "running", "passed", "failed", "warning", "skipped"],
         #: What was observed, in one or two sentences.
         "summary": Optional[str],
@@ -4920,7 +5663,7 @@ TestRunStep = TypedDict(
         "observations": Dict[str, Any],
         #: Evidence records (screenshots, page captures, raw emails) behind the step.
         "evidence": List[str],
-        #: Warning or failure code of the step (stable): key_missing, key_not_test_mode, key_invalid, key_permission_missing, checkout_config_missing, price_not_in_test_mode, checkout_session_failed, checkout_page_unreadable, checkout_not_completed, subscription_create_failed, test_clock_failed, no_email_received_within, reminder_not_received, portal_not_configured, cancel_not_completed, cancellation_email_not_received, scan_config_missing, domain_not_verified, scanner_failed, stripe_api_error, timeout, canceled, internal_error.
+        #: Warning or failure code of the step (stable): key_missing, key_not_test_mode, key_invalid, key_permission_missing, checkout_config_missing, price_not_in_test_mode, checkout_session_failed, checkout_page_unreadable, checkout_not_completed, subscription_create_failed, test_clock_failed, no_email_received_within, reminder_not_received, portal_not_configured, cancel_not_completed, cancellation_email_not_received, checkout_url_missing, real_checkout_not_completed, payment_link_not_found, webhook_not_delivered, reminder_outside_window, reminder_timing_not_observed, cancel_flow_not_configured, cancel_not_confirmed_in_stripe, acknowledgment_content_incomplete, cancel_replaced_by_other_subscription, not_judged, scan_config_missing, domain_not_verified, scanner_failed, stripe_api_error, timeout, canceled, internal_error.
         "code": Optional[str],
         "fix": "TestRunFix",
     },
@@ -4932,7 +5675,7 @@ TestRunStep = TypedDict(
 TestRunFailure = TypedDict(
     "TestRunFailure",
     {
-        #: Stable failure code: key_missing, key_not_test_mode, key_invalid, key_permission_missing, checkout_config_missing, price_not_in_test_mode, checkout_session_failed, checkout_page_unreadable, checkout_not_completed, subscription_create_failed, test_clock_failed, no_email_received_within, reminder_not_received, portal_not_configured, cancel_not_completed, cancellation_email_not_received, scan_config_missing, domain_not_verified, scanner_failed, stripe_api_error, timeout, canceled, internal_error.
+        #: Stable failure code: key_missing, key_not_test_mode, key_invalid, key_permission_missing, checkout_config_missing, price_not_in_test_mode, checkout_session_failed, checkout_page_unreadable, checkout_not_completed, subscription_create_failed, test_clock_failed, no_email_received_within, reminder_not_received, portal_not_configured, cancel_not_completed, cancellation_email_not_received, checkout_url_missing, real_checkout_not_completed, payment_link_not_found, webhook_not_delivered, reminder_outside_window, reminder_timing_not_observed, cancel_flow_not_configured, cancel_not_confirmed_in_stripe, acknowledgment_content_incomplete, cancel_replaced_by_other_subscription, not_judged, scan_config_missing, domain_not_verified, scanner_failed, stripe_api_error, timeout, canceled, internal_error.
         "code": str,
         #: What went wrong.
         "message": str,
@@ -5023,8 +5766,8 @@ TestRunStripe = TypedDict(
         "subscription": Optional[str],
         #: Mirrored test-mode Checkout Session.
         "checkout_session": Optional[str],
-        #: Where the checkout configuration came from.
-        "mirrored_from": Optional[Literal["registered", "live", "request"]],
+        #: Where the checkout configuration came from (mirror mode).
+        "mirrored_from": Optional[Literal["registered", "live", "request", "payment_link"]],
         #: Registered config used (scc_…).
         "checkout_config": Optional[str],
         #: Compliance fingerprint of the mirrored checkout.
@@ -5033,6 +5776,80 @@ TestRunStripe = TypedDict(
         "matches_live": Optional[bool],
         #: Whether the test clock (with its customer and subscription) was deleted.
         "cleaned_up": bool,
+    },
+    total=False,
+)
+
+
+TestRunProofWebhookEndpointsItem = TypedDict(
+    "TestRunProofWebhookEndpointsItem",
+    {
+        #: Host of the endpoint URL (the path is not shown).
+        "host": str,
+        #: Event types it listens for ("*" = all).
+        "enabled_events": List[str],
+        #: enabled or disabled.
+        "status": str,
+    },
+    total=False,
+)
+
+
+TestRunProofStripeEventsItem = TypedDict(
+    "TestRunProofStripeEventsItem",
+    {
+        #: Stripe event id (test mode).
+        "id": str,
+        #: Stripe event type.
+        "type": str,
+        #: When Stripe created it (unix seconds).
+        "created": int,
+        #: Deliveries Stripe still had pending when Checkbox looked (0 = acknowledged by every endpoint, or no endpoint).
+        "pending_webhooks": Optional[int],
+    },
+    total=False,
+)
+
+
+#: How the cancellation was attempted and what Stripe showed.
+TestRunProofCancellation = TypedDict(
+    "TestRunProofCancellation",
+    {
+        #: Where the shopper cancelled.
+        "via": Literal["merchant_flow", "stripe_portal", "cancel_url"],
+        #: false: nothing told Checkbox how customers cancel, so it used the Stripe portal (step warning cancel_flow_not_configured).
+        "declared_by_merchant": bool,
+        #: Stripe showed a subscription set to cancel after the shopper's flow.
+        "confirmed_in_stripe": bool,
+        #: The subscription Stripe showed canceled.
+        "subscription": Optional[str],
+        #: Why Stripe could not be checked, when it could not.
+        "note": Optional[str],
+    },
+    total=False,
+)
+
+
+#: What the run proves and the evidence beyond the steps (Stripe runs).
+TestRunProof = TypedDict(
+    "TestRunProof",
+    {
+        #: The run mode.
+        "mode": Literal["mirror", "real_checkout"],
+        #: What this run is evidence of, and what it is not, in one sentence.
+        "what_it_proves": str,
+        #: Notices mode of the site at the run: checkbox (Checkbox Notices sends; the run exercises them), merchant (you send; the run watches for yours) or off.
+        "notices": Optional[Literal["checkbox", "merchant", "off"]],
+        #: Who was expected to send the lifecycle emails.
+        "notices_sender": Optional[Literal["checkbox", "merchant"]],
+        #: Payment Link mirrored or bought through (plink_…).
+        "payment_link": Optional[str],
+        #: Your Stripe test-mode webhook endpoints (host only) when the key may read them.
+        "webhook_endpoints": List["TestRunProofWebhookEndpointsItem"],
+        #: Stripe events of the run's subscription (evidence). pending_webhooks > 0: an endpoint did not acknowledge it.
+        "stripe_events": List["TestRunProofStripeEventsItem"],
+        #: How the cancellation was attempted and what Stripe showed.
+        "cancellation": Optional["TestRunProofCancellation"],
     },
     total=False,
 )
@@ -5052,6 +5869,8 @@ TestRun = TypedDict(
         "site": str,
         #: stripe: Stripe test mode with a test clock; generic: any site with a test coupon / test account (no time travel).
         "type": Literal["stripe", "generic"],
+        #: Stripe runs: mirror (Checkbox mirrors your checkout into test mode and moves a test clock through trial and renewal) or real_checkout (the shopper buys through YOUR checkout on your test deployment, so your own webhook handlers and email code fire: the proof that your real system works). null for generic runs.
+        "mode": Optional[Literal["mirror", "real_checkout"]],
         #: succeeded means the run finished (steps may still have failing checks); failed means it stopped early (see failure).
         "status": Literal["queued", "running", "succeeded", "failed", "canceled"],
         #: Internal phase (prepare, checkout, await_ack, advance, settle, cancel, await_cancel_email, finalize, done).
@@ -5074,6 +5893,8 @@ TestRun = TypedDict(
         "result": Optional["TestRunResult"],
         #: Stripe test-mode objects of the run (type stripe).
         "stripe": Optional["TestRunStripe"],
+        #: What the run proves and the evidence beyond the steps (Stripe runs).
+        "proof": Optional["TestRunProof"],
         "next_action": "NextAction",
     },
     total=False,
@@ -5194,7 +6015,7 @@ Event = TypedDict(
         "id": str,
         #: String representing the object's type. Always "event".
         "object": Literal["event"],
-        #: Event type: site.score_changed, site.insurable_changed, finding.created, finding.resolved, scan.completed, scan.failed, law.changed, certificate.issued, certificate.lapsed, certificate.revoked, notice.sent, notice.due, notice.overdue, consent.created, receipt.created, test_run.completed, test_run.failed, plan.updated, site.compliant, task.verified.
+        #: Event type: site.score_changed, finding.created, finding.resolved, scan.completed, scan.failed, law.changed, certificate.issued, certificate.lapsed, certificate.revoked, notice.sent, notice.due, notice.overdue, consent.created, receipt.created, test_run.completed, test_run.failed, plan.updated, site.compliant, task.verified.
         "type": str,
         #: API version used to render data.object.
         "api_version": str,
@@ -5292,6 +6113,8 @@ CompliancePlanSummaryCounts = TypedDict(
         "verifying": int,
         #: Tasks waiting for a human answer.
         "manual": int,
+        #: Tasks that only wait for a live observation (count as compliant). (optional)
+        "pending_live_check": int,
         #: Done tasks.
         "done": int,
         #: Declined tasks.
@@ -5326,7 +6149,7 @@ CompliancePlanSummaryTasksItem = TypedDict(
         #: Task key.
         "key": str,
         #: Task status.
-        "status": Literal["open", "in_progress", "verifying", "done", "wont_fix", "manual"],
+        "status": Literal["open", "in_progress", "verifying", "done", "wont_fix", "manual", "pending_live_check"],
         #: Priority.
         "priority": Literal["critical", "high", "medium", "low"],
         #: Title.
@@ -5348,12 +6171,10 @@ CompliancePlanSummary = TypedDict(
         "livemode": bool,
         #: The site.
         "site": str,
-        #: action_required (an agent can apply open tasks now), verifying (changes applied; waiting for confirming observations), compliant (every applicable check Checkbox could observe passes — an automated assessment, not a legal determination; see coverage for what was not observed), blocked (only human answers or declined critical tasks remain).
+        #: action_required (an agent can apply open tasks now), verifying (changes applied; waiting for confirming observations), compliant (every required check passes or only waits for a live check — an automated assessment, not a legal determination; see compliance.pending_live_checks and coverage), blocked (only human answers ("Your call") or declined critical tasks remain).
         "status": Literal["action_required", "verifying", "compliant", "blocked"],
         #: Compliance score 0-100 of the latest evaluation.
         "score": Optional[int],
-        #: Preview flag the planned Checkbox Warranty will key on (no checks failing at high severity). No warranty or insurance is offered yet; this is not an underwriting decision.
-        "insurable": Optional[bool],
         #: Two or three sentences for an LLM: where the site stands and what comes next.
         "summary": str,
         #: Tasks per status.
@@ -5383,7 +6204,7 @@ Notice = TypedDict(
         #: The site.
         "site": str,
         #: Notice kind.
-        "kind": Literal["acknowledgment", "trial_ending", "renewal_reminder", "annual_terms", "price_change"],
+        "kind": Literal["acknowledgment", "trial_ending", "renewal_reminder", "annual_terms", "price_change", "cancellation_confirmation", "charge_notice"],
         #: Delivery status.
         "status": Literal["claimed", "sent", "failed", "bounced", "skipped"],
         #: Billing platform of the subscription.
@@ -5589,6 +6410,8 @@ VerifyTaskRequestParams = TypedDict(
         "html": str,
         #: stripe_params tasks: exactly what your code now passes to stripe.checkout.sessions.create. (optional)
         "stripe_checkout_session": Dict[str, Any],
+        #: stripe_params tasks with several Checkout code paths (one per plan, e.g. monthly and annual-with-trial): every params object your code passes to stripe.checkout.sessions.create. The pre-check fails when any of them fails. Without either field, every registered config (newest per name) is checked. (optional)
+        "stripe_checkout_sessions": List[Dict[str, Any]],
         #: email_copy tasks: the new email template (pre-check; the real email confirms). (optional)
         "email": "VerifyTaskRequestParamsEmail",
         #: Re-check a task that is already done (or declined) instead of returning its last result: Checkbox evaluates the site again now and queues a confirming scan, so a regression shows up (pilot: a cancel page switched to phone-only stayed "passed"). (optional)
@@ -5775,6 +6598,17 @@ ListLawUpdatesParams = TypedDict(
 )
 
 
+#: Parameters of `suggestions.for_site()` (listSiteSuggestions).
+ListSiteSuggestionsParams = TypedDict(
+    "ListSiteSuggestionsParams",
+    {
+        #: Comma-separated surfaces to include (default all). (optional)
+        "surfaces": str,
+    },
+    total=False,
+)
+
+
 #: Parameters of `consents.list()` (listConsents).
 ListConsentsParams = TypedDict(
     "ListConsentsParams",
@@ -5874,11 +6708,28 @@ ListStripeCheckoutConfigsParams = TypedDict(
 )
 
 
+#: A test account the shopper logs into: to buy as a logged-in user (real_checkout) and to cancel through your in-app flow. Mail to its address counts when you BCC the site's Checkbox address.
+CreateTestRunParamsStripeTestAccount = TypedDict(
+    "CreateTestRunParamsStripeTestAccount",
+    {
+        #: Login page of the test account on your (test) deployment.
+        "login_url": str,
+        #: Its email; "{{inbox}}" = the run inbox (the account the shopper creates at checkout).
+        "email": str,
+        #: Its password (stored encrypted, never returned). Generated for "{{inbox}}" accounts when omitted. (optional)
+        "password": str,
+        #: Custom login steps ({{email}}, {{password}}). (optional)
+        "login_steps": List["ScanStep"],
+    },
+    total=False,
+)
+
+
 #: Stripe options.
 CreateTestRunParamsStripe = TypedDict(
     "CreateTestRunParamsStripe",
     {
-        #: Registered checkout config (scc_…) to mirror; default: the newest one, else your latest live Checkout Session. (optional)
+        #: Registered checkout config (scc_…) to mirror; default: the newest one, else your latest live Checkout Session. "none" skips the registered configs (mirror your live checkout, stripe.price or stripe.payment_link instead). (optional)
         "checkout_config": str,
         #: A test-mode price to subscribe to when nothing is registered. (optional)
         "price": str,
@@ -5888,8 +6739,24 @@ CreateTestRunParamsStripe = TypedDict(
         "price_map": Dict[str, str],
         #: Steps that complete your hosted checkout with card 4242 4242 4242 4242 when it differs from Stripe's default page. (optional)
         "checkout_steps": List["ScanStep"],
-        #: Cancel on your own page instead of the Stripe customer portal (it must work for the test subscriber). (optional)
+        #: Your cancellation page (after login with test_account, or public). Checkbox never falls back to the Stripe portal when your flow fails. (optional)
         "cancel_url": str,
+        #: Clicks that cancel in your flow (after login / cancel_url), e.g. [{ "action": "click", "text": "Cancel subscription" }, { "action": "click", "text": "Confirm" }]. (optional)
+        "cancel_steps": List["ScanStep"],
+        #: How your customers cancel. Default: your flow when test_account / cancel_url / cancel_steps describe it, else the Stripe portal reported as a warning (cancel_flow_not_configured). (optional)
+        "cancel_via": Literal["merchant_flow", "stripe_portal"],
+        #: A test account the shopper logs into: to buy as a logged-in user (real_checkout) and to cancel through your in-app flow. Mail to its address counts when you BCC the site's Checkbox address. (optional)
+        "test_account": "CreateTestRunParamsStripeTestAccount",
+        #: A Stripe Payment Link (plink_… or its buy.stripe.com URL): mirror mode mirrors its prices, custom_text, consent_collection and trial; real_checkout buys through it (test-mode links only). (optional)
+        "payment_link": str,
+        #: real_checkout: the page of your TEST deployment that leads to your Stripe test-mode checkout (a pricing page, or a route that creates the Checkout Session and redirects). (optional)
+        "checkout_url": str,
+        #: real_checkout: clicks from checkout_url to the payment page, e.g. [{ "action": "click", "text": "Start free trial" }]. (optional)
+        "pre_checkout_steps": List["ScanStep"],
+        #: A page of your test deployment Checkbox opens before the checkout (after logging in) that CLEANS UP the test account (ends its subscription), so every run starts without one. Mirror mode opens it before cancelling the test account's subscription. (Round 3: renamed from reset_url, which meant the opposite of the site's test_account.reactivate_url.) (optional)
+        "cleanup_url": str,
+        #: Deprecated alias of cleanup_url. (optional)
+        "reset_url": str,
     },
     total=False,
 )
@@ -5948,6 +6815,8 @@ CreateTestRunParamsGeneric = TypedDict(
 CreateTestRunParams = TypedDict(
     "CreateTestRunParams",
     {
+        #: Stripe runs. mirror (default): Checkbox mirrors your checkout into test mode and moves a test clock through every legal notice window. real_checkout ("Run proof"): the shopper buys through YOUR checkout on your test deployment (stripe.checkout_url or stripe.payment_link) with card 4242 and the run inbox, so your own webhook handlers and email code fire; Checkbox watches the inbox, Stripe's events and your cancel flow. Needs your test deployment on Stripe TEST keys with a test-mode webhook endpoint. (optional)
+        "mode": Literal["mirror", "real_checkout"],
         #: stripe (default when a Stripe test key is stored or the site uses Stripe) or generic (test coupon / test account, no time travel). (optional)
         "type": Literal["stripe", "generic"],
         #: How long to wait for each email (acknowledgment, reminders, cancellation), 15-900 seconds (default 120). (optional)
@@ -5988,7 +6857,7 @@ CreateWebhookEndpointParams = TypedDict(
     {
         #: HTTPS URL.
         "url": str,
-        #: Event types to send, or ["*"] for all: site.score_changed, site.insurable_changed, finding.created, finding.resolved, scan.completed, scan.failed, law.changed, certificate.issued, certificate.lapsed, certificate.revoked, notice.sent, notice.due, notice.overdue, consent.created, receipt.created, test_run.completed, test_run.failed, plan.updated, site.compliant, task.verified.
+        #: Event types to send, or ["*"] for all: site.score_changed, finding.created, finding.resolved, scan.completed, scan.failed, law.changed, certificate.issued, certificate.lapsed, certificate.revoked, notice.sent, notice.due, notice.overdue, consent.created, receipt.created, test_run.completed, test_run.failed, plan.updated, site.compliant, task.verified.
         "enabled_events": List[str],
         #: Description. (optional)
         "description": str,
@@ -6020,7 +6889,7 @@ UpdateWebhookEndpointParams = TypedDict(
     {
         #: HTTPS URL. (optional)
         "url": str,
-        #: Event types to send, or ["*"] for all: site.score_changed, site.insurable_changed, finding.created, finding.resolved, scan.completed, scan.failed, law.changed, certificate.issued, certificate.lapsed, certificate.revoked, notice.sent, notice.due, notice.overdue, consent.created, receipt.created, test_run.completed, test_run.failed, plan.updated, site.compliant, task.verified. (optional)
+        #: Event types to send, or ["*"] for all: site.score_changed, finding.created, finding.resolved, scan.completed, scan.failed, law.changed, certificate.issued, certificate.lapsed, certificate.revoked, notice.sent, notice.due, notice.overdue, consent.created, receipt.created, test_run.completed, test_run.failed, plan.updated, site.compliant, task.verified. (optional)
         "enabled_events": List[str],
         #: Description (null clears it). (optional)
         "description": Optional[str],
@@ -6330,8 +7199,6 @@ CreateScanResponse = TypedDict(
         "evaluation": Optional[str],
         #: Score of that evaluation (0-100, one decimal place).
         "score": Optional[float],
-        #: Insurable flag of that evaluation.
-        "insurable": Optional[bool],
         #: When the scan started. Unix timestamp in seconds.
         "started": Optional[int],
         #: When the scan finished. Unix timestamp in seconds.
@@ -6369,8 +7236,6 @@ RetrieveScanResponse = TypedDict(
         "evaluation": Optional[str],
         #: Score of that evaluation (0-100, one decimal place).
         "score": Optional[float],
-        #: Insurable flag of that evaluation.
-        "insurable": Optional[bool],
         #: When the scan started. Unix timestamp in seconds.
         "started": Optional[int],
         #: When the scan finished. Unix timestamp in seconds.
@@ -6777,56 +7642,6 @@ SiteScoreChangedEvent = TypedDict(
         "pending_webhooks": int,
         #: What caused the event.
         "request": "SiteScoreChangedEventRequest",
-    },
-    total=False,
-)
-
-
-SiteInsurableChangedEventData = TypedDict(
-    "SiteInsurableChangedEventData",
-    {
-        "object": "Site",
-        #: Previous values of changed fields. (optional)
-        "previous_attributes": Dict[str, Any],
-    },
-    total=False,
-)
-
-
-#: What caused the event.
-SiteInsurableChangedEventRequest = TypedDict(
-    "SiteInsurableChangedEventRequest",
-    {
-        #: API request that caused the event (null for automatic changes).
-        "id": Optional[str],
-        #: Idempotency-Key of that request.
-        "idempotency_key": Optional[str],
-    },
-    total=False,
-)
-
-
-#: site.insurable_changed: A site became insurable or stopped being insurable.
-SiteInsurableChangedEvent = TypedDict(
-    "SiteInsurableChangedEvent",
-    {
-        #: Unique identifier of the event (evt_…).
-        "id": str,
-        #: String representing the object's type. Always "event".
-        "object": Literal["event"],
-        #: Event type.
-        "type": Literal["site.insurable_changed"],
-        #: API version used to render data.object.
-        "api_version": str,
-        #: When the event happened. Unix timestamp in seconds.
-        "created": int,
-        #: true for live-mode objects, false for test mode (ck_test_ keys act on an isolated sandbox).
-        "livemode": bool,
-        "data": "SiteInsurableChangedEventData",
-        #: Webhook deliveries not yet acknowledged.
-        "pending_webhooks": int,
-        #: What caused the event.
-        "request": "SiteInsurableChangedEventRequest",
     },
     total=False,
 )
@@ -7383,7 +8198,7 @@ SiteCompliantEvent = TypedDict(
 
 
 #: Every event Checkbox delivers to webhook endpoints, discriminated by ``type``.
-WebhookEvent = Union["PlanUpdatedEvent", "TaskVerifiedEvent", "NoticeDueEvent", "NoticeOverdueEvent", "ReceiptCreatedEvent", "TestRunCompletedEvent", "TestRunFailedEvent", "SiteScoreChangedEvent", "SiteInsurableChangedEvent", "FindingCreatedEvent", "FindingResolvedEvent", "ScanCompletedEvent", "ScanFailedEvent", "LawChangedEvent", "CertificateIssuedEvent", "CertificateLapsedEvent", "CertificateRevokedEvent", "NoticeSentEvent", "ConsentCreatedEvent", "SiteCompliantEvent"]
+WebhookEvent = Union["PlanUpdatedEvent", "TaskVerifiedEvent", "NoticeDueEvent", "NoticeOverdueEvent", "ReceiptCreatedEvent", "TestRunCompletedEvent", "TestRunFailedEvent", "SiteScoreChangedEvent", "FindingCreatedEvent", "FindingResolvedEvent", "ScanCompletedEvent", "ScanFailedEvent", "LawChangedEvent", "CertificateIssuedEvent", "CertificateLapsedEvent", "CertificateRevokedEvent", "NoticeSentEvent", "ConsentCreatedEvent", "SiteCompliantEvent"]
 
 WEBHOOK_EVENT_TYPES = (
     "plan.updated",
@@ -7394,7 +8209,6 @@ WEBHOOK_EVENT_TYPES = (
     "test_run.completed",
     "test_run.failed",
     "site.score_changed",
-    "site.insurable_changed",
     "finding.created",
     "finding.resolved",
     "scan.completed",

@@ -24,7 +24,7 @@ DEFAULT_TIMEOUT = 80.0
 DEFAULT_MAX_NETWORK_RETRIES = 2
 MAX_RETRY_DELAY = 20.0
 
-_KEY_MODE = re.compile(r"^(?:ck|rk|sk|pk)_(test|live)_")
+_KEY_MODE = re.compile(r"^(?:ckr|ck|rk|sk|pk)_(test|live)_")
 
 #: (method, url, headers, body, timeout) -> (status, headers, body bytes). Raise OSError/URLError on network failure.
 Transport = Callable[[str, str, Dict[str, str], Optional[bytes], float], Tuple[int, Dict[str, str], bytes]]
@@ -89,7 +89,8 @@ class Checkbox(ResourceNamespaces):
         """
         key = api_key if api_key is not None else (os.environ.get("CHECKBOX_API_KEY") or os.environ.get("CHECKBOX_SECRET_KEY"))
         self._api_key: Optional[str] = key.strip() if key and key.strip() else None
-        self.base_url = (base_url or os.environ.get("CHECKBOX_API_BASE") or DEFAULT_BASE_URL).rstrip("/")
+        # Round-4 pilot: accept the base URL with or without /v1 (the dashboard shows it with /v1).
+        self.base_url = re.sub(r"/v1$", "", (base_url or os.environ.get("CHECKBOX_API_BASE") or DEFAULT_BASE_URL).rstrip("/"), flags=re.IGNORECASE)
         self.api_version = api_version or API_VERSION
         self.max_network_retries = max(0, int(max_network_retries))
         self.timeout = float(timeout)

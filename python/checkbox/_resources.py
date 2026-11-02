@@ -1098,6 +1098,40 @@ OPERATIONS: Dict[str, Dict[str, Any]] = {
         "paginated": False,
         "summary": "Get the dates each required notice must be sent",
     },
+    "listSiteSuggestions": {
+        "operation_id": "listSiteSuggestions",
+        "namespace": "suggestions",
+        "method": "for_site",
+        "http_method": "GET",
+        "path": "/v1/sites/{site}/suggestions",
+        "path_params": ("site", ),
+        "query_params": ("surfaces", ),
+        "body": False,
+        "idempotent": False,
+        "auth": True,
+        "scope": "checks:read",
+        "response": "json",
+        "list": False,
+        "paginated": False,
+        "summary": "Get conversion suggestions for a site",
+    },
+    "suggestImprovements": {
+        "operation_id": "suggestImprovements",
+        "namespace": "suggestions",
+        "method": "generate",
+        "http_method": "POST",
+        "path": "/v1/suggestions",
+        "path_params": (),
+        "query_params": (),
+        "body": True,
+        "idempotent": False,
+        "auth": True,
+        "scope": "checks:read",
+        "response": "json",
+        "list": False,
+        "paginated": False,
+        "summary": "Get conversion suggestions for copy you send",
+    },
     "getElementsBundle": {
         "operation_id": "getElementsBundle",
         "namespace": "elements",
@@ -1906,7 +1940,7 @@ class SitesResource(Resource):
     def retrieve(self, site: str, params: Optional["types.RetrieveSiteParams"] = None, /, *, request_options: Optional[RequestOptions] = None, **kwargs: Any) -> "types.Site":
         """Retrieve a site.
 
-        Returns a site with its latest compliance verdict (score, insurable) and install details.
+        Returns a site with its latest compliance verdict (score, status) and install details.
 
         Parameters can be given as a dict (positional) or as keyword arguments.
 
@@ -1928,7 +1962,7 @@ class SitesResource(Resource):
     def delete(self, site: str, /, *, request_options: Optional[RequestOptions] = None) -> "types.Site":
         """Archive a site.
 
-        Archives (soft-deletes) the site: monitoring stops and it disappears from lists, but evidence and findings are retained for the warranty. Undo with restoreSite.
+        Archives (soft-deletes) the site: monitoring stops and it disappears from lists, but evidence and findings are retained. Undo with restoreSite.
 
         ``DELETE /v1/sites/{site}`` (operation ``deleteSite``, scope ``sites:write``).
         """
@@ -1946,7 +1980,7 @@ class SitesResource(Resource):
     def connect_billing_platform(self, site: str, params: Optional["types.ConnectBillingPlatformParams"] = None, /, *, request_options: Optional[RequestOptions] = None, **kwargs: Any) -> "types.Integration":
         """Connect a billing platform.
 
-        Connects the site's billing platform with read-only credentials (a Stripe restricted key, a Recharge token or a Shopify Admin API token), so Checkbox reads the customer-portal and reminder settings. Works for test-mode sites too (use an rk_test_ key). The credentials are validated by reading the settings once and stored encrypted. Pilot fix: this used to be possible only in the dashboard, which could not open test-mode sites.
+        Connects the site's billing platform with read-only credentials (a Stripe restricted key, a Recharge token or a Shopify Admin API token), so Checkbox reads the customer-portal and reminder settings. Works for test-mode sites too (use an rk_test_ key). The credentials are validated by reading the settings once and stored encrypted.
 
         Parameters can be given as a dict (positional) or as keyword arguments.
 
@@ -2062,7 +2096,7 @@ class EvaluationsResource(Resource):
     def retrieve(self, evaluation: str, /, *, request_options: Optional[RequestOptions] = None) -> "types.Evaluation":
         """Retrieve an evaluation.
 
-        Returns one verdict with all checks and the insurability blockers.
+        Returns one verdict with all checks and the blocking checks.
 
         ``GET /v1/evaluations/{evaluation}`` (operation ``retrieveEvaluation``, scope ``evaluations:read``).
         """
@@ -2071,7 +2105,7 @@ class EvaluationsResource(Resource):
     def retrieve_latest(self, site: str, /, *, request_options: Optional[RequestOptions] = None) -> "types.Evaluation":
         """Get the current verdict of a site.
 
-        The latest evaluation of the site: is it compliant (score) and insurable, and what blocks it. 404 resource_missing with next_action createScan when the site was never evaluated.
+        The latest evaluation of the site: is it compliant (score and status), and what blocks it. 404 resource_missing with next_action createScan when the site was never evaluated.
 
         ``GET /v1/sites/{site}/evaluation`` (operation ``retrieveLatestEvaluation``, scope ``evaluations:read``).
         """
@@ -2294,7 +2328,7 @@ class CertificatesResource(Resource):
     def create(self, site: str, params: Optional["types.CreateCertificateParams"] = None, /, *, request_options: Optional[RequestOptions] = None, **kwargs: Any) -> "types.Certificate":
         """Issue a certificate.
 
-        Issues a signed monitoring certificate once the site has been insurable for the required streak of days with a verified domain and fresh scans. Otherwise fails with resource_conflict and next_action describing what is missing.
+        Issues a signed monitoring certificate once the site has passed every critical and high check for the required streak of days with a verified domain and fresh scans. Otherwise fails with resource_conflict and next_action describing what is missing.
 
         Parameters can be given as a dict (positional) or as keyword arguments.
 
@@ -2500,6 +2534,32 @@ class ChecksResource(Resource):
         return self._call("checkNoticeSchedule", (), params, kwargs, request_options)  # type: ignore[no-any-return]
 
 
+class SuggestionsResource(Resource):
+    """``checkbox.suggestions``"""
+
+    def for_site(self, site: str, params: Optional["types.ListSiteSuggestionsParams"] = None, /, *, request_options: Optional[RequestOptions] = None, **kwargs: Any) -> "types.SuggestionReport":
+        """Get conversion suggestions for a site.
+
+        Suggestions for a site, detected from what Checkbox observed (checkout captures, emails, the test cancellation, billing settings, registered Stripe Checkout params) and its latest evaluation. Optional, deterministic suggestions (no LLM) from Checkbox’s curated library: each has the surface, what to change, why it commonly helps (no invented figures), a concrete before/after built from your plan terms, the exact copy / Stripe patch / flow change to apply, the legal guardrails it respects (catalog requirement ids, e.g. California’s and Minnesota’s save-offer rules), and the engine check of the after-example (only verified suggestions are offered). Surfaces whose compliance checks fail are held until fixed. Suggestions never block and never count toward compliance.
+
+        Parameters can be given as a dict (positional) or as keyword arguments.
+
+        ``GET /v1/sites/{site}/suggestions`` (operation ``listSiteSuggestions``, scope ``checks:read``).
+        """
+        return self._call("listSiteSuggestions", (site, ), params, kwargs, request_options)  # type: ignore[no-any-return]
+
+    def generate(self, params: Optional["types.SuggestionsParams"] = None, /, *, request_options: Optional[RequestOptions] = None, **kwargs: Any) -> "types.SuggestionReport":
+        """Get conversion suggestions for copy you send.
+
+        Stateless: send any of the inputs of /v1/checks/* (disclosure, page html, Stripe Checkout params, emails) plus a cancellation flow and your plan terms; get suggestions for them. The current status of what you send comes from the same preflight checks; nothing is stored. Optional, deterministic suggestions (no LLM) from Checkbox’s curated library: each has the surface, what to change, why it commonly helps (no invented figures), a concrete before/after built from your plan terms, the exact copy / Stripe patch / flow change to apply, the legal guardrails it respects (catalog requirement ids, e.g. California’s and Minnesota’s save-offer rules), and the engine check of the after-example (only verified suggestions are offered). Surfaces whose compliance checks fail are held until fixed. Suggestions never block and never count toward compliance.
+
+        Parameters can be given as a dict (positional) or as keyword arguments.
+
+        ``POST /v1/suggestions`` (operation ``suggestImprovements``, scope ``checks:read``).
+        """
+        return self._call("suggestImprovements", (), params, kwargs, request_options)  # type: ignore[no-any-return]
+
+
 class ElementsResource(Resource):
     """``checkbox.elements``"""
 
@@ -2682,7 +2742,7 @@ class ReceiptsResource(Resource):
     def export(self, receipt: str, /, *, request_options: Optional[RequestOptions] = None) -> "CheckboxFile":
         """Download a self-verifying receipt bundle.
 
-        ZIP for a lawyer, insurer or court expert: manifest.json (the receipt's evidence record with its chain links) + manifest.sig.json, the canonical receipt JSON under records/, receipt.sig.json (Checkbox's signature over the receipt hash), receipt.png and render.html (the reconstruction), README.md and verify.mjs (zero-dependency offline verifier: node verify.mjs --keys checkbox-keys.json).
+        ZIP for a lawyer or court expert: manifest.json (the receipt's evidence record with its chain links) + manifest.sig.json, the canonical receipt JSON under records/, receipt.sig.json (Checkbox's signature over the receipt hash), receipt.png and render.html (the reconstruction), README.md and verify.mjs (zero-dependency offline verifier: node verify.mjs --keys checkbox-keys.json).
 
         ``GET /v1/receipts/{receipt}/export`` (operation ``exportReceipt``, scope ``receipts:read``).
         """
@@ -2960,6 +3020,7 @@ class ResourceNamespaces:
     notices: NoticesResource
     law_updates: LawUpdatesResource
     checks: ChecksResource
+    suggestions: SuggestionsResource
     elements: ElementsResource
     disclosures: DisclosuresResource
     consents: ConsentsResource
@@ -2994,6 +3055,7 @@ RESOURCES = {
     "notices": NoticesResource,
     "law_updates": LawUpdatesResource,
     "checks": ChecksResource,
+    "suggestions": SuggestionsResource,
     "elements": ElementsResource,
     "disclosures": DisclosuresResource,
     "consents": ConsentsResource,

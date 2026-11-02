@@ -261,3 +261,25 @@ def test_every_operation_has_a_method():
         assert callable(getattr(ns, op["method"])), op_id
     assert callable(c.checks.stripe_checkout_session)
     assert callable(c.findings.list)
+
+
+def test_base_url_with_or_without_v1():
+    """Round-4 pilot: the dashboard shows the base URL with /v1; requests must not go to /v1/v1/."""
+    assert Checkbox("ck_test_x", base_url="http://localhost:4700/v1").base_url == "http://localhost:4700"
+    assert Checkbox("ck_test_x", base_url="http://localhost:4700/v1/").base_url == "http://localhost:4700"
+    assert Checkbox("ck_test_x", base_url="http://localhost:4700").base_url == "http://localhost:4700"
+
+
+def test_suggestions_for_site_and_stateless_generate(fake):
+    report = {"id": "sugr_1", "object": "suggestion_report", "optional": True, "counts_toward_compliance": False, "suggestions": []}
+    fake.script([{"body": report}, {"body": report}])
+    c = client(fake)
+    got = c.suggestions.for_site("site_1", surfaces="checkout_page,acknowledgment_email")
+    assert got["object"] == "suggestion_report" and got["counts_toward_compliance"] is False
+    req = fake.requests[0]
+    assert (req.method, req.path) == ("GET", "/v1/sites/site_1/suggestions")
+    assert req.query_dict == {"surfaces": "checkout_page,acknowledgment_email"}
+    c.suggestions.generate(terms={"price": 24, "interval": "month", "trial_days": 7}, disclosure={"text": "Renews monthly.", "button_text": "Subscribe"})
+    req = fake.requests[1]
+    assert (req.method, req.path) == ("POST", "/v1/suggestions")
+    assert req.body["disclosure"]["button_text"] == "Subscribe"

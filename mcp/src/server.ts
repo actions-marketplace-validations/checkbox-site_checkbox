@@ -9,7 +9,8 @@ import { CATALOG_URI, QUICKSTART_URI, loadCatalog, makeMyCheckoutCompliantPrompt
 import { TOOLS, ToolError, toolVisible, type IssuedKeys, type ToolContext, type ToolDef } from './tools.ts';
 
 export const SERVER_NAME = 'checkbox';
-export const SERVER_VERSION = '1.0.0';
+/** Kept equal to packages/mcp/package.json "version" (@checkbox-site/mcp); mcp.test.ts checks it. */
+export const SERVER_VERSION = '0.1.1';
 export const DEFAULT_MCP_URL = 'https://app.checkbox.site/mcp';
 
 export const SERVER_INSTRUCTIONS = `Checkbox: subscription / automatic-renewal law compliance (FTC ROSCA, California ARL, New York and ~26 other states) as an API for agents. Free to start.
@@ -62,7 +63,7 @@ export function createCheckboxMcpServer(opts: CheckboxMcpOptions): CheckboxMcp {
 
   const context = (): ToolContext => {
     const client = server.server.getClientVersion();
-    return {
+    const ctx: ToolContext = {
       api,
       key,
       transport: opts.transport,
@@ -77,12 +78,17 @@ export function createCheckboxMcpServer(opts: CheckboxMcpOptions): CheckboxMcp {
               const next = await opts.adoptKeys!(keys);
               api = next.api;
               key = next.key;
+              // Round-3 pilot (sveltekit): the running tool kept the keyless client, so the facts passed with device_code
+              // were dropped ("No API key provided"). The tool's own context now uses the new key at once.
+              ctx.api = next.api;
+              ctx.key = next.key;
               applyVisibility();
               return key;
             },
           }
         : {}),
     };
+    return ctx;
   };
 
   for (const def of TOOLS) {

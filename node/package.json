@@ -1,6 +1,6 @@
 {
   "name": "@checkbox-site/node",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Checkbox Node.js SDK: automatic-renewal-law compliance (ROSCA, California ARL, New York and other state laws) for subscription businesses. Zero dependencies. Published to npm as @checkbox-site/node.",
   "keywords": [
     "subscription",

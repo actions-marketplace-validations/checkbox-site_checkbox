@@ -48,8 +48,8 @@ export function keyAllows(key: KeyContext, scope: ToolScope): boolean {
 /** Infers the mode and kind from the key prefix (the server confirms with retrieveAccount when it can). */
 export function keyContextFromPrefix(apiKey: string | undefined, readOnly = false): KeyContext {
   if (!apiKey) return { ...NO_KEY, readOnly };
-  const mode = /^(ck|rk)_test_/.test(apiKey) ? 'test' : /^(ck|rk|sk)_live_/.test(apiKey) ? 'live' : 'unknown';
-  const kind = apiKey.startsWith('rk_') ? 'restricted' : 'secret';
+  const mode = /^(ckr|ck|rk)_test_/.test(apiKey) ? 'test' : /^(ckr|ck|rk|sk)_live_/.test(apiKey) ? 'live' : 'unknown';
+  const kind = (apiKey.startsWith('rk_') || apiKey.startsWith('ckr_')) ? 'restricted' : 'secret';
   // Restricted keys with unknown scopes: list everything and let the API answer insufficient_scope.
   return { authenticated: true, mode, kind: kind === 'restricted' ? undefined : kind, readOnly };
 }

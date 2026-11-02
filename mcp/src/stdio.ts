@@ -29,7 +29,8 @@ export function resolveConfig(env: NodeJS.ProcessEnv, argv: string[]): ResolvedC
     return eq?.slice(name.length + 1);
   };
   const apiKey = (flag('--api-key') ?? env.CHECKBOX_API_KEY ?? env.CHECKBOX_SECRET_KEY ?? '').trim() || undefined;
-  const apiBase = (flag('--api-base') ?? env.CHECKBOX_API_BASE ?? DEFAULT_API_BASE).replace(/\/+$/, '');
+  // Round-4 pilot (sveltekit): CHECKBOX_API_BASE=http://host/v1 requested /v1/v1/…; accept it with or without /v1.
+  const apiBase = (flag('--api-base') ?? env.CHECKBOX_API_BASE ?? DEFAULT_API_BASE).replace(/\/+$/, '').replace(/\/v1$/i, '');
   const readOnly = argv.includes('--read-only') || /^(1|true|yes)$/i.test(env.CHECKBOX_MCP_READ_ONLY ?? '');
   return { ...(apiKey ? { apiKey } : {}), apiBase, readOnly };
 }

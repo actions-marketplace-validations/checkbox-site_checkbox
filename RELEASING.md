@@ -21,8 +21,8 @@ PyPI. Versions already on a registry are skipped, so a failed run can be re-run.
 3. Merge to `main` with CI green, then tag and push:
 
    ```sh
-   git tag v0.1.0
-   git push origin v0.1.0
+   git tag v0.1.1
+   git push origin v0.1.1
    ```
 
 ## One-time setup
@@ -38,7 +38,7 @@ short-lived token; afterwards the workflow authenticates with GitHub's OIDC toke
    for writes, tick **Bypass two-factor authentication** (needed for CI).
 3. In this GitHub repository: Settings → Secrets and variables → Actions → New repository secret, name `NPM_TOKEN`,
    value the token.
-4. Tag and push `v0.1.0` (above). Both packages are published with provenance.
+4. Tag and push the release tag (above, e.g. `v0.1.1`). Both packages are published with provenance.
 5. For **each** package (`@checkbox-site/node`, `@checkbox-site/mcp`): npmjs.com → the package → Settings → Trusted
    Publisher → GitHub Actions: organization or user `checkbox-site`, repository `checkbox`, workflow filename
    `release.yml`, environment empty. Save. Optionally set Publishing access to "Require two-factor authentication and

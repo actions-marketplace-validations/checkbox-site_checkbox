@@ -27,6 +27,8 @@ export const OPERATION_TOOLS: Record<string, string> = {
   checkEmail: 'check_email',
   checkPage: 'check_page_html',
   checkNoticeSchedule: 'get_notice_schedule',
+  listSiteSuggestions: 'suggest_improvements',
+  suggestImprovements: 'suggest_improvements',
   listSites: 'list_sites',
   createSite: 'create_site',
   updateSite: 'update_site',
@@ -132,17 +134,73 @@ export interface ToolOutput {
 
 const MAX_JSON_CHARS = 60_000;
 
+/** The largest array in `data` (top level, or one level down), with its path. */
+function largestArray(data: unknown): { path: string[]; items: unknown[] } | null {
+  if (!data || typeof data !== 'object') return null;
+  let best: { path: string[]; items: unknown[]; size: number } | null = null;
+  const consider = (path: string[], v: unknown) => {
+    if (!Array.isArray(v) || v.length < 2) return;
+    const size = JSON.stringify(v).length;
+    if (!best || size > best.size) best = { path, items: v, size };
+  };
+  for (const [k, v] of Object.entries(data as Record<string, unknown>)) {
+    consider([k], v);
+    if (v && typeof v === 'object' && !Array.isArray(v)) for (const [k2, v2] of Object.entries(v as Record<string, unknown>)) consider([k, k2], v2);
+  }
+  return best;
+}
+
+function withItems(data: unknown, path: string[], items: unknown[]): unknown {
+  const root = { ...(data as Record<string, unknown>) };
+  if (path.length === 1) root[path[0]!] = items;
+  else root[path[0]!] = { ...(root[path[0]!] as Record<string, unknown>), [path[1]!]: items };
+  return root;
+}
+
+/**
+ * Round-3 pilot (nextjs, sveltekit): output was cut at 60 KB in the middle of the JSON, which agents then failed to
+ * parse. Output is always valid JSON: an oversized list is paged (the first items that fit, plus `_page` naming the
+ * ids of the rest to fetch one by one), never cut mid-value.
+ */
+export function fitJson(data: unknown, max = MAX_JSON_CHARS): { json: string; page?: string } {
+  const pretty = JSON.stringify(data, null, 2);
+  if (pretty.length <= max) return { json: pretty };
+  const arr = largestArray(data);
+  if (arr) {
+    let lo = 0;
+    let hi = arr.items.length;
+    const render = (n: number) => {
+      const rest = arr.items.slice(n);
+      const ids = rest.map((x) => (x && typeof x === 'object' ? (x as { id?: unknown }).id : undefined)).filter((x): x is string => typeof x === 'string');
+      return JSON.stringify(withItems({ ...(data as Record<string, unknown>), _page: { list: arr.path.join('.'), returned: n, total: arr.items.length, remaining_ids: ids.slice(0, 200) } }, arr.path, arr.items.slice(0, n)), null, 2);
+    };
+    while (lo < hi) {
+      const mid = Math.ceil((lo + hi) / 2);
+      if (render(mid).length <= max) lo = mid;
+      else hi = mid - 1;
+    }
+    const json = render(lo);
+    if (json.length <= max) {
+      return { json, page: `Output paged: ${lo} of ${arr.items.length} items of "${arr.path.join('.')}" shown. The JSON is complete and valid; fetch the others by id (_page.remaining_ids), e.g. get_task for plan tasks, or narrow the request (a smaller limit).` };
+    }
+  }
+  const compact = JSON.stringify(data);
+  if (compact.length <= max) return { json: compact, page: 'Output printed compactly (no indentation) to fit.' };
+  return {
+    json: JSON.stringify({ _truncated: true, size: compact.length, keys: data && typeof data === 'object' ? Object.keys(data as object) : [] }, null, 2),
+    page: `Output too large (${compact.length} characters): narrow the request (a smaller limit, or one item at a time).`,
+  };
+}
+
 export function renderOutput(out: ToolOutput): CallToolResult {
   const lines = [out.headline.trim()];
   for (const n of out.notes ?? []) if (n) lines.push(`- ${n}`);
   const next = describeNextAction(out.next === undefined ? nextActionOf(out.data) : out.next);
   if (next) lines.push(next);
   if (out.data !== undefined) {
-    let json = JSON.stringify(out.data, null, 2);
-    if (json.length > MAX_JSON_CHARS) {
-      json = `${json.slice(0, MAX_JSON_CHARS)}\n… (truncated ${json.length - MAX_JSON_CHARS} characters; narrow the request, e.g. a smaller limit or one task at a time)`;
-    }
-    lines.push('', '```json', json, '```');
+    const fitted = fitJson(out.data);
+    if (fitted.page) lines.push(`- ${fitted.page}`);
+    lines.push('', '```json', fitted.json, '```');
   }
   return { content: [{ type: 'text', text: lines.join('\n') }], ...(out.isError ? { isError: true } : {}) };
 }
