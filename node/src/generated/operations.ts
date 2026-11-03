@@ -346,6 +346,23 @@ export const OPERATIONS = {
     paginated: false,
     summary: "Check domain verification now",
   },
+  resyncBilling: {
+    operationId: "resyncBilling",
+    namespace: "billings",
+    method: "resync",
+    httpMethod: "POST",
+    path: "/v1/sites/{site}/billing/resync",
+    pathParams: ["site"],
+    queryParams: [],
+    body: false,
+    idempotent: true,
+    auth: true,
+    scope: "sites:write",
+    response: "json",
+    list: false,
+    paginated: false,
+    summary: "Re-sync Stripe settings",
+  },
   createScan: {
     operationId: "createScan",
     namespace: "scans",
@@ -1835,6 +1852,7 @@ export interface OperationTypes {
   retrieveDomainVerification: { args: { site: string }; response: T.DomainVerification };
   createDomainVerification: { args: { site: string } & T.CreateDomainVerificationParams; response: T.DomainVerification };
   checkDomainVerification: { args: { site: string }; response: T.DomainVerification };
+  resyncBilling: { args: { site: string }; response: T.BillingSync };
   createScan: { args: { site: string } & T.CreateScanParams; response: T.Scan };
   listScans: { args: T.ListScansParams; response: T.ScanList };
   retrieveScan: { args: { scan: string }; response: T.Scan };
@@ -2186,6 +2204,22 @@ export class DomainVerificationsResource extends Resource {
    */
   check(site: string, options?: RequestOptions): Promise<T.DomainVerification> {
     return this._request(OPERATIONS.checkDomainVerification, [site], undefined, options) as Promise<T.DomainVerification>;
+  }
+
+}
+
+/** `checkbox.billings` */
+export class BillingsResource extends Resource {
+  /**
+   * Re-sync Stripe settings.
+   *
+   * Re-reads the site's billing-platform settings now (Stripe customer-portal cancellation, trial-ending emails, plans) and re-evaluates the site, so a setting you just changed in Stripe shows up without waiting for the next scan. Every scan also re-reads them. Then poll retrieveLatestEvaluation (or listFindings) after about a minute.
+   *
+   * @param site Unique identifier of the site (site_…).
+   * @see POST /v1/sites/{site}/billing/resync (operation `resyncBilling`, scope `sites:write`)
+   */
+  resync(site: string, options?: RequestOptions): Promise<T.BillingSync> {
+    return this._request(OPERATIONS.resyncBilling, [site], undefined, options) as Promise<T.BillingSync>;
   }
 
 }
@@ -3291,6 +3325,7 @@ export const RESOURCES = {
   account: AccountResource,
   sites: SitesResource,
   domainVerifications: DomainVerificationsResource,
+  billings: BillingsResource,
   scans: ScansResource,
   evaluations: EvaluationsResource,
   findings: FindingsResource,

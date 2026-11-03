@@ -144,6 +144,11 @@
             "description": "The MCP tool that performs operation_id on the Checkbox MCP server (`call_api` when there is no dedicated tool).",
             "example": "call_api"
           },
+          "endpoint": {
+            "type": "string",
+            "description": "The HTTP method and path of operation_id, with path parameters in braces.",
+            "example": "POST /v1/sites/{site}/domain_verification"
+          },
           "url": {
             "type": "string",
             "description": "Documentation or dashboard URL for the step, when there is one.",
@@ -224,6 +229,7 @@
                 "message": "Verify your site domain to turn on live mode.",
                 "operation_id": "createDomainVerification",
                 "mcp_tool": "call_api",
+                "endpoint": "POST /v1/sites/{site}/domain_verification",
                 "url": "https://checkbox.site/docs/concepts/activation#verify"
               }
             }
@@ -256,6 +262,11 @@
             "type": "string",
             "description": "The MCP tool that performs operation_id (`call_api` when there is no dedicated tool).",
             "example": "update_setup"
+          },
+          "endpoint": {
+            "type": "string",
+            "description": "The HTTP method and path of operation_id, with path parameters in braces.",
+            "example": "POST /v1/sites/{site}/test_credentials"
           },
           "command": {
             "type": "string",
@@ -664,6 +675,7 @@
               "message": "Add <script async src=\"https://app.checkbox.site/s.js\" data-key=\"k3y9\"></script> to the <head> of every page, then report snippet_installed_in.",
               "operation_id": "updateSetupSession",
               "mcp_tool": "update_setup",
+              "endpoint": "POST /v1/sites/{site}/test_credentials",
               "command": "checkbox init --verify --json",
               "url": "https://dashboard.stripe.com/test/apikeys/create"
             }
@@ -1231,6 +1243,22 @@
                 "description": "Open needs-review findings.",
                 "example": 2
               },
+              "label": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The site roll-up label, the same everywhere (dashboard, plan, emails): \"2 fixes needed · 1 your call\", \"Compliant · 2 live checks pending\".",
+                "example": "1 fix needed · 1 to set up"
+              },
+              "status": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The site roll-up status: needs_fix, your_call, incomplete, compliant or not_checked.",
+                "example": "needs_fix"
+              },
               "top_findings": {
                 "type": "array",
                 "items": {
@@ -1279,6 +1307,8 @@
               "evaluated",
               "failing",
               "needs_review",
+              "label",
+              "status",
               "top_findings"
             ],
             "description": "Latest verdict of the test-mode site.",
@@ -1287,6 +1317,8 @@
               "evaluated": 1793318400,
               "failing": 3,
               "needs_review": 2,
+              "label": "1 fix needed · 1 to set up",
+              "status": "needs_fix",
               "top_findings": []
             }
           },
@@ -1703,6 +1735,8 @@
                   "evaluated": 1793318400,
                   "failing": 3,
                   "needs_review": 2,
+                  "label": "1 fix needed · 1 to set up",
+                  "status": "needs_fix",
                   "top_findings": []
                 },
                 "steps": [],
@@ -1711,6 +1745,7 @@
                   "message": "Add <script async src=\"https://app.checkbox.site/s.js\" data-key=\"k3y9\"></script> to the <head> of every page, then report snippet_installed_in.",
                   "operation_id": "updateSetupSession",
                   "mcp_tool": "update_setup",
+                  "endpoint": "POST /v1/sites/{site}/test_credentials",
                   "command": "checkbox init --verify --json",
                   "url": "https://dashboard.stripe.com/test/apikeys/create"
                 },
@@ -2109,6 +2144,7 @@
               "message": "Verify your site domain to turn on live mode.",
               "operation_id": "createDomainVerification",
               "mcp_tool": "call_api",
+              "endpoint": "POST /v1/sites/{site}/domain_verification",
               "url": "https://checkbox.site/docs/concepts/activation#verify"
             }
           }
@@ -2194,6 +2230,16 @@
             "example": [
               "card"
             ]
+          },
+          "checkout_type": {
+            "type": "string",
+            "enum": [
+              "own_page",
+              "stripe_checkout",
+              "payment_link"
+            ],
+            "description": "Where shoppers pay and consent. stripe_checkout / payment_link: your pages redirect to a Stripe-hosted page, so consent is checked on Stripe (consent_collection and custom_text of your registered Checkout configs or Payment Links), and your pricing page needs no checkbox of its own. Unset: detected from pay buttons that link to checkout.stripe.com / buy.stripe.com.",
+            "example": "payment_link"
           }
         },
         "description": "Business facts that decide which legal requirements apply."
@@ -2293,6 +2339,111 @@
           "due"
         ],
         "description": "A live check Checkbox has not observed yet, and how it completes."
+      },
+      "CheckoutVerdict": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Plan name, or the checkout when no plan was matched.",
+            "example": "Annual"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "own_page",
+              "stripe_checkout",
+              "payment_link",
+              "checkout_config",
+              "stripe_hosted"
+            ],
+            "description": "Where the purchase happens: own_page, stripe_checkout (your page → Stripe Checkout), payment_link, checkout_config (a registered Checkout Session config), stripe_hosted.",
+            "example": "payment_link"
+          },
+          "plan": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The declared plan this checkout sells, when matched.",
+            "example": "Annual"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "needs_fix",
+              "pending_live_check",
+              "verified_live",
+              "your_call",
+              "compliant",
+              "not_applicable",
+              "not_set_up",
+              "not_checked"
+            ],
+            "description": "User-facing status. needs_fix (a clear violation: `compliance.fix` is the one change), pending_live_check (everything Checkbox can see is right; the live event has not been observed yet — counts as compliant), verified_live (observed live: proof run, real BCC'd send, Stripe-confirmed cancellation), your_call (a real decision for a person: `compliance.question`), compliant (passes; grey areas carry a `compliance.note`), not_applicable, not_set_up (no sign the email or setting exists yet: `compliance.fix` is the one-click way to set it up; never counts as compliant), not_checked (Checkbox has not tried it yet, e.g. the cancel flow: `compliance.fix` says how; never counts as compliant).",
+            "example": "pending_live_check"
+          },
+          "label": {
+            "type": "string",
+            "description": "Label to show.",
+            "example": "Needs a fix"
+          },
+          "open": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "check_id": {
+                  "type": "string",
+                  "description": "Check id.",
+                  "example": "signup.disclosure.price"
+                },
+                "title": {
+                  "type": "string",
+                  "description": "Short check title.",
+                  "example": "recurring charge is stated"
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "needs_fix",
+                    "pending_live_check",
+                    "verified_live",
+                    "your_call",
+                    "compliant",
+                    "not_applicable",
+                    "not_set_up",
+                    "not_checked"
+                  ],
+                  "description": "User-facing status. needs_fix (a clear violation: `compliance.fix` is the one change), pending_live_check (everything Checkbox can see is right; the live event has not been observed yet — counts as compliant), verified_live (observed live: proof run, real BCC'd send, Stripe-confirmed cancellation), your_call (a real decision for a person: `compliance.question`), compliant (passes; grey areas carry a `compliance.note`), not_applicable, not_set_up (no sign the email or setting exists yet: `compliance.fix` is the one-click way to set it up; never counts as compliant), not_checked (Checkbox has not tried it yet, e.g. the cancel flow: `compliance.fix` says how; never counts as compliant).",
+                  "example": "pending_live_check"
+                }
+              },
+              "required": [
+                "check_id",
+                "title",
+                "status"
+              ]
+            },
+            "description": "Sign-up checks still open on this checkout.",
+            "example": [
+              {
+                "check_id": "signup.disclosure.price",
+                "title": "recurring charge is stated",
+                "status": "pending_live_check"
+              }
+            ]
+          }
+        },
+        "required": [
+          "name",
+          "kind",
+          "plan",
+          "status",
+          "label",
+          "open"
+        ],
+        "description": "One plan / checkout of the site and its sign-up verdict."
       },
       "ComplianceRollup": {
         "type": "object",
@@ -2417,6 +2568,29 @@
             "type": "integer",
             "description": "Recommended / extra items open (never block compliant).",
             "example": 1
+          },
+          "checkouts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CheckoutVerdict"
+            },
+            "description": "Per-plan / per-checkout verdicts, in the same vocabulary as the roll-up. Present when the site has two or more checkouts, or one on Stripe.",
+            "example": [
+              {
+                "name": "Annual",
+                "kind": "payment_link",
+                "plan": "Annual",
+                "status": "pending_live_check",
+                "label": "Needs a fix",
+                "open": [
+                  {
+                    "check_id": "signup.disclosure.price",
+                    "title": "recurring charge is stated",
+                    "status": "pending_live_check"
+                  }
+                ]
+              }
+            ]
           }
         },
         "required": [
@@ -2889,6 +3063,11 @@
                 "type": "string",
                 "description": "The MCP tool that performs operation_id (`call_api` when there is no dedicated tool).",
                 "example": "call_api"
+              },
+              "endpoint": {
+                "type": "string",
+                "description": "The HTTP method and path of operation_id.",
+                "example": "POST /v1/sites/{site}/domain_verification/check"
               }
             },
             "required": [
@@ -2900,7 +3079,8 @@
               "type": "publish_dns_record",
               "message": "Publish the TXT record, then call checkDomainVerification.",
               "operation_id": "checkDomainVerification",
-              "mcp_tool": "call_api"
+              "mcp_tool": "call_api",
+              "endpoint": "POST /v1/sites/{site}/domain_verification/check"
             }
           }
         },
@@ -3319,7 +3499,8 @@
                   "plan_price_id": "price_1Pabc",
                   "payment_methods": [
                     "card"
-                  ]
+                  ],
+                  "checkout_type": "payment_link"
                 },
                 "checkout": {
                   "url": "https://acme.example/pricing",
@@ -3380,7 +3561,23 @@
                         "due": "2026-11-20"
                       }
                     ],
-                    "suggestions": 1
+                    "suggestions": 1,
+                    "checkouts": [
+                      {
+                        "name": "Annual",
+                        "kind": "payment_link",
+                        "plan": "Annual",
+                        "status": "pending_live_check",
+                        "label": "Needs a fix",
+                        "open": [
+                          {
+                            "check_id": "signup.disclosure.price",
+                            "title": "recurring charge is stated",
+                            "status": "pending_live_check"
+                          }
+                        ]
+                      }
+                    ]
                   }
                 },
                 "install": {
@@ -3437,7 +3634,8 @@
                     "type": "publish_dns_record",
                     "message": "Publish the TXT record, then call checkDomainVerification.",
                     "operation_id": "checkDomainVerification",
-                    "mcp_tool": "call_api"
+                    "mcp_tool": "call_api",
+                    "endpoint": "POST /v1/sites/{site}/domain_verification/check"
                   }
                 }
               }
@@ -4197,6 +4395,41 @@
             ],
             "description": "Which requirement tiers Checkbox shows. minimum: the legal floor only (required items). balanced (default): required items plus recommended suggestions (consent receipts, a cancellation confirmation email…), collapsed and never blocking \"compliant\". maximum: everything, including extra protections (a separate checkbox per term, a pre-purchase summary). Only required items can make a site not compliant, at every level.",
             "example": "balanced"
+          },
+          "checkout": {
+            "type": "object",
+            "properties": {
+              "url": {
+                "type": "string",
+                "maxLength": 2048,
+                "description": "Same as checkout_url.",
+                "example": "https://shop.example/checkout"
+              },
+              "account_url": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "maxLength": 2048,
+                "description": "Same as account_url.",
+                "example": "https://shop.example/account"
+              },
+              "terms_url": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "maxLength": 2048,
+                "description": "Same as terms_url.",
+                "example": "https://shop.example/terms"
+              }
+            },
+            "description": "The URLs nested as the site object returns them (checkout.url, checkout.account_url, checkout.terms_url); the flat fields win when both are given.",
+            "example": {
+              "url": "https://shop.example/checkout",
+              "account_url": "https://shop.example/account",
+              "terms_url": "https://shop.example/terms"
+            }
           }
         }
       },
@@ -4288,6 +4521,96 @@
           "platform",
           "credentials"
         ]
+      },
+      "BillingSync": {
+        "type": "object",
+        "properties": {
+          "object": {
+            "type": "string",
+            "enum": [
+              "billing_sync"
+            ],
+            "description": "String representing the object's type. Always \"billing_sync\".",
+            "example": "billing_sync"
+          },
+          "site": {
+            "type": "string",
+            "description": "The site whose billing settings are re-read.",
+            "example": "site_3f9a1c2e7b4d4e0f9a8b7c6d5e4f3a2b"
+          },
+          "platforms": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "platform": {
+                  "type": "string",
+                  "enum": [
+                    "stripe",
+                    "shopify",
+                    "recharge",
+                    "chargebee",
+                    "recurly",
+                    "paddle",
+                    "woocommerce",
+                    "custom"
+                  ],
+                  "description": "The connected billing platform.",
+                  "example": "stripe"
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "queued"
+                  ],
+                  "description": "The re-read is queued; settings refresh within a minute.",
+                  "example": "queued"
+                },
+                "last_synced": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "description": "When the settings were last read successfully. Unix timestamp in seconds.",
+                  "example": 1793318400
+                },
+                "last_error": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Why the last read failed, if it did.",
+                  "example": null
+                }
+              },
+              "required": [
+                "platform",
+                "status",
+                "last_synced",
+                "last_error"
+              ]
+            },
+            "description": "One entry per connected billing platform.",
+            "example": [
+              {
+                "platform": "stripe",
+                "status": "queued",
+                "last_synced": 1793318400,
+                "last_error": null
+              }
+            ]
+          },
+          "next_action": {
+            "$ref": "#/components/schemas/NextAction"
+          }
+        },
+        "required": [
+          "object",
+          "site",
+          "platforms",
+          "next_action"
+        ],
+        "description": "A queued re-read of the site's billing-platform settings, followed by a re-evaluation."
       },
       "ScanList": {
         "type": "object",
@@ -4641,7 +4964,23 @@
                       "due": "2026-11-20"
                     }
                   ],
-                  "suggestions": 1
+                  "suggestions": 1,
+                  "checkouts": [
+                    {
+                      "name": "Annual",
+                      "kind": "payment_link",
+                      "plan": "Annual",
+                      "status": "pending_live_check",
+                      "label": "Needs a fix",
+                      "open": [
+                        {
+                          "check_id": "signup.disclosure.price",
+                          "title": "recurring charge is stated",
+                          "status": "pending_live_check"
+                        }
+                      ]
+                    }
+                  ]
                 },
                 "checks": [
                   {
@@ -6733,7 +7072,23 @@
                   "due": "2026-11-20"
                 }
               ],
-              "suggestions": 1
+              "suggestions": 1,
+              "checkouts": [
+                {
+                  "name": "Annual",
+                  "kind": "payment_link",
+                  "plan": "Annual",
+                  "status": "pending_live_check",
+                  "label": "Needs a fix",
+                  "open": [
+                    {
+                      "check_id": "signup.disclosure.price",
+                      "title": "recurring charge is stated",
+                      "status": "pending_live_check"
+                    }
+                  ]
+                }
+              ]
             }
           },
           "coverage": {
@@ -7120,9 +7475,11 @@
               "pending",
               "passed",
               "passed_with_gaps",
+              "not_checked",
+              "pending_live_check",
               "failed"
             ],
-            "description": "pending (waiting for the confirming scan / re-evaluation), passed (Checkbox observed the expected result), passed_with_gaps (nothing observed fails, but some checks could not be observed: observed missing_data — not verified), failed (it did not: see diff).",
+            "description": "pending (waiting for the confirming scan / re-evaluation), passed (Checkbox observed the expected result), passed_with_gaps (nothing observed fails, but some checks could not be observed: observed missing_data — not verified), not_checked (a task whose checks could only not be observed yet: nothing to change in the code; next_action says what evidence to provide), pending_live_check (an email whose content passes but that Checkbox has not seen sent for a real event yet: nothing to change; it completes on the first real send or a proof run), failed (it did not: see diff).",
             "example": "pending"
           },
           "method": {
@@ -8506,6 +8863,7 @@
               "message": "Verify your site domain to turn on live mode.",
               "operation_id": "createDomainVerification",
               "mcp_tool": "call_api",
+              "endpoint": "POST /v1/sites/{site}/domain_verification",
               "url": "https://checkbox.site/docs/concepts/activation#verify"
             }
           }
@@ -9013,6 +9371,7 @@
               "message": "Verify your site domain to turn on live mode.",
               "operation_id": "createDomainVerification",
               "mcp_tool": "call_api",
+              "endpoint": "POST /v1/sites/{site}/domain_verification",
               "url": "https://checkbox.site/docs/concepts/activation#verify"
             }
           }
@@ -9121,6 +9480,7 @@
                   "message": "Verify your site domain to turn on live mode.",
                   "operation_id": "createDomainVerification",
                   "mcp_tool": "call_api",
+                  "endpoint": "POST /v1/sites/{site}/domain_verification",
                   "url": "https://checkbox.site/docs/concepts/activation#verify"
                 }
               }
@@ -9472,6 +9832,7 @@
               "message": "Verify your site domain to turn on live mode.",
               "operation_id": "createDomainVerification",
               "mcp_tool": "call_api",
+              "endpoint": "POST /v1/sites/{site}/domain_verification",
               "url": "https://checkbox.site/docs/concepts/activation#verify"
             }
           }
@@ -10807,6 +11168,33 @@
             "description": "Free-trial length in days (0 or absent = no trial).",
             "example": 14
           },
+          "intro_price": {
+            "anyOf": [
+              {
+                "type": "number",
+                "exclusiveMinimum": 0
+              },
+              {
+                "type": "string",
+                "maxLength": 40
+              }
+            ],
+            "description": "Intro / first-period price in major units (\"$34.50 for your first box, then $69 every 2 weeks\"). Or give `intro_amount` in minor units.",
+            "example": 9.99
+          },
+          "intro_amount": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "description": "Intro / first-period price in minor units.",
+            "example": 999
+          },
+          "intro_periods": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 36,
+            "description": "How many billing periods the intro price lasts (default 1).",
+            "example": 1
+          },
           "cancel_url": {
             "type": "string",
             "maxLength": 2048,
@@ -11539,6 +11927,33 @@
             "description": "Free-trial length in days (0 or absent = no trial).",
             "example": 14
           },
+          "intro_price": {
+            "anyOf": [
+              {
+                "type": "number",
+                "exclusiveMinimum": 0
+              },
+              {
+                "type": "string",
+                "maxLength": 40
+              }
+            ],
+            "description": "Intro / first-period price in major units (\"$34.50 for your first box, then $69 every 2 weeks\"). Or give `intro_amount` in minor units.",
+            "example": 9.99
+          },
+          "intro_amount": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "description": "Intro / first-period price in minor units.",
+            "example": 999
+          },
+          "intro_periods": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 36,
+            "description": "How many billing periods the intro price lasts (default 1).",
+            "example": 1
+          },
           "cancel_url": {
             "type": "string",
             "maxLength": 2048,
@@ -11555,7 +11970,7 @@
             "example": "period_end"
           }
         },
-        "description": "What Stripe params do not say: merchant_name, cancel_url, and price / interval when line_items reference a Price id."
+        "description": "What Stripe params do not say: merchant_name, cancel_url, and price / interval when line_items reference a Price id. Also accepted as `terms`."
       },
       "StripeCheckParams": {
         "type": "object",
@@ -12635,7 +13050,7 @@
                 }
               }
             ],
-            "description": "The plan the email is about (price, interval and cancel_url at least).",
+            "description": "The plan the email is about (price, interval and cancel_url at least). Also accepted as `merchant`.",
             "example": {
               "merchant_name": "Acme",
               "plan_name": "Pro",
@@ -12645,6 +13060,9 @@
               "interval": "month",
               "interval_count": 1,
               "trial_days": 14,
+              "intro_price": 9.99,
+              "intro_amount": 999,
+              "intro_periods": 1,
               "cancel_url": "https://acme.example/account/cancel",
               "cancel_timing": "period_end"
             }
@@ -13209,7 +13627,7 @@
                 "$ref": "#/components/schemas/CheckPlanTerms"
               },
               {
-                "description": "The subscription plan the checkout / email is about."
+                "description": "The plan sold on the page. Also accepted as `merchant`."
               }
             ],
             "example": {
@@ -13221,6 +13639,9 @@
               "interval": "month",
               "interval_count": 1,
               "trial_days": 14,
+              "intro_price": 9.99,
+              "intro_amount": 999,
+              "intro_periods": 1,
               "cancel_url": "https://acme.example/account/cancel",
               "cancel_timing": "period_end"
             }
@@ -13580,7 +14001,7 @@
                 "$ref": "#/components/schemas/CheckPlanTerms"
               },
               {
-                "description": "The plan: price, interval, interval_count, trial_days."
+                "description": "The plan: price, interval, interval_count, trial_days. Also accepted as `merchant`."
               }
             ],
             "example": {
@@ -13592,6 +14013,9 @@
               "interval": "month",
               "interval_count": 1,
               "trial_days": 14,
+              "intro_price": 9.99,
+              "intro_amount": 999,
+              "intro_periods": 1,
               "cancel_url": "https://acme.example/account/cancel",
               "cancel_timing": "period_end"
             }
@@ -13809,16 +14233,27 @@
                 "type": "string",
                 "description": "Your current copy (or a typical example).",
                 "example": "Subscribe"
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "your_copy",
+                  "example"
+                ],
+                "description": "your_copy: the text is your own copy (captured by Checkbox or sent by you); example: typical copy, not yours (label it “Example”).",
+                "example": "your_copy"
               }
             },
             "required": [
               "label",
-              "text"
+              "text",
+              "source"
             ],
             "description": "Before.",
             "example": {
               "label": "Button",
-              "text": "Subscribe"
+              "text": "Subscribe",
+              "source": "your_copy"
             }
           },
           "after": {
@@ -14260,7 +14695,8 @@
                 "reason": "Your button says “Subscribe”, which does not mention the trial.",
                 "before": {
                   "label": "Button",
-                  "text": "Subscribe"
+                  "text": "Subscribe",
+                  "source": "your_copy"
                 },
                 "after": {
                   "label": "Button",
@@ -14385,6 +14821,11 @@
                 "type": "string",
                 "description": "The MCP tool for operation_id.",
                 "example": "get_compliance_plan"
+              },
+              "endpoint": {
+                "type": "string",
+                "description": "The HTTP method and path of operation_id.",
+                "example": "GET /v1/sites/{site}/plan"
               }
             },
             "required": [
@@ -14396,7 +14837,8 @@
               "type": "apply_suggestion",
               "message": "Optional. Pick a suggestion, apply suggestion.apply.content exactly where apply.where says…",
               "operation_id": "retrieveCompliancePlan",
-              "mcp_tool": "get_compliance_plan"
+              "mcp_tool": "get_compliance_plan",
+              "endpoint": "GET /v1/sites/{site}/plan"
             }
           },
           "disclaimer": {
@@ -14448,6 +14890,9 @@
               "interval": "month",
               "interval_count": 1,
               "trial_days": 14,
+              "intro_price": 9.99,
+              "intro_amount": 999,
+              "intro_periods": 1,
               "cancel_url": "https://acme.example/account/cancel",
               "cancel_timing": "period_end"
             }
@@ -14465,13 +14910,10 @@
                     "name": {
                       "type": "string",
                       "maxLength": 80,
-                      "description": "Plan name shown to subscribers.",
+                      "description": "Plan name shown to subscribers (or give plan_name, as in the checks).",
                       "example": "Lite"
                     }
-                  },
-                  "required": [
-                    "name"
-                  ]
+                  }
                 }
               ],
               "description": "The subscription plan the checkout / email is about."
@@ -14488,6 +14930,9 @@
                 "interval": "month",
                 "interval_count": 1,
                 "trial_days": 14,
+                "intro_price": 9.99,
+                "intro_amount": 999,
+                "intro_periods": 1,
                 "cancel_url": "https://acme.example/account/cancel",
                 "cancel_timing": "period_end"
               }
@@ -14915,6 +15360,17 @@
             "maxLength": 500,
             "description": "Your site’s base URL (used in example links).",
             "example": "https://joybox.example"
+          },
+          "account_url": {
+            "type": "string",
+            "maxLength": 500,
+            "description": "Where subscribers manage their subscription (restart and switch-plan links; never the cancel step). Default: derived from terms.cancel_url.",
+            "example": "https://joybox.example/account"
+          },
+          "sells_goods": {
+            "type": "boolean",
+            "description": "You ship physical goods (boxes, deliveries): examples talk about the next box instead of access. Default: inferred from your plan names and copy.",
+            "example": true
           }
         },
         "description": "What to suggest improvements for: the same inputs as /v1/checks/*, any subset."
@@ -14925,12 +15381,12 @@
           "version": {
             "type": "string",
             "description": "Semver of the bundle.",
-            "example": "1.3.0"
+            "example": "1.4.0"
           },
           "url": {
             "type": "string",
             "description": "Immutable URL of this version.",
-            "example": "https://app.checkbox.site/v1/elements/1.3.0/elements.js"
+            "example": "https://app.checkbox.site/v1/elements/1.4.0/elements.js"
           },
           "integrity": {
             "type": "string",
@@ -14972,8 +15428,8 @@
             "description": "Every released version, newest first.",
             "example": [
               {
-                "version": "1.3.0",
-                "url": "https://app.checkbox.site/v1/elements/1.3.0/elements.js",
+                "version": "1.4.0",
+                "url": "https://app.checkbox.site/v1/elements/1.4.0/elements.js",
                 "integrity": "sha384-…",
                 "size": 33000
               }
@@ -15218,6 +15674,20 @@
             "description": "Free-trial length in days (0 or absent: no trial).",
             "example": 14
           },
+          "intro_amount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000000,
+            "description": "Intro / first-period charge in minor units, stated before the regular price (\"$34.50 for your first 2 weeks, then $69.00 every 2 weeks\"). Must be below amount.",
+            "example": 999
+          },
+          "intro_periods": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 36,
+            "description": "How many billing periods the intro price lasts (default 1).",
+            "example": 1
+          },
           "cancel_url": {
             "type": "string",
             "maxLength": 2048,
@@ -15442,7 +15912,7 @@
               "null"
             ],
             "description": "elements.js version.",
-            "example": "1.3.0"
+            "example": "1.4.0"
           },
           "client_timestamp": {
             "type": [
@@ -15888,6 +16358,8 @@
               "interval": "month",
               "interval_count": 1,
               "trial_days": 14,
+              "intro_amount": 999,
+              "intro_periods": 1,
               "cancel_url": "https://app.checkbox.site/cancel/acme",
               "cancel_timing": "period_end"
             }
@@ -15957,7 +16429,7 @@
             "type": "string",
             "maxLength": 20,
             "description": "elements.js version that rendered the disclosure.",
-            "example": "1.3.0"
+            "example": "1.4.0"
           },
           "presentation": {
             "$ref": "#/components/schemas/ConsentPresentationInput"
@@ -16082,7 +16554,7 @@
                 "customer_reference": "cs_test_a1b2c3",
                 "client_reference": null,
                 "source": "elements",
-                "element_version": "1.3.0",
+                "element_version": "1.4.0",
                 "client_timestamp": null,
                 "presentation": {
                   "violations": [],
@@ -16107,6 +16579,7 @@
                   "message": "Verify your site domain to turn on live mode.",
                   "operation_id": "createDomainVerification",
                   "mcp_tool": "call_api",
+                  "endpoint": "POST /v1/sites/{site}/domain_verification",
                   "url": "https://checkbox.site/docs/concepts/activation#verify"
                 }
               }
@@ -17215,6 +17688,7 @@
                   "message": "Verify your site domain to turn on live mode.",
                   "operation_id": "createDomainVerification",
                   "mcp_tool": "call_api",
+                  "endpoint": "POST /v1/sites/{site}/domain_verification",
                   "url": "https://checkbox.site/docs/concepts/activation#verify"
                 }
               }
@@ -19011,6 +19485,7 @@
                   "message": "Verify your site domain to turn on live mode.",
                   "operation_id": "createDomainVerification",
                   "mcp_tool": "call_api",
+                  "endpoint": "POST /v1/sites/{site}/domain_verification",
                   "url": "https://checkbox.site/docs/concepts/activation#verify"
                 }
               }
@@ -21591,6 +22066,91 @@
                       "description": "Proof that the account controls the site domain. Verifying any live site activates live mode."
                     }
                   ]
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Error. See error.code (stable) and error.next_action.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "Error. See error.code (stable) and error.next_action.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sites/{site}/billing/resync": {
+      "post": {
+        "operationId": "resyncBilling",
+        "summary": "Re-sync Stripe settings",
+        "description": "Re-reads the site's billing-platform settings now (Stripe customer-portal cancellation, trial-ending emails, plans) and re-evaluates the site, so a setting you just changed in Stripe shows up without waiting for the next scan. Every scan also re-reads them. Then poll retrieveLatestEvaluation (or listFindings) after about a minute.",
+        "tags": [
+          "Sites"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "basicAuth": []
+          }
+        ],
+        "x-checkbox-scope": "sites:write",
+        "x-checkbox-idempotent": true,
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Unique identifier of the site (site_…).",
+              "example": "site_3f9a1c2e7b4d4e0f9a8b7c6d5e4f3a2b"
+            },
+            "required": true,
+            "name": "site",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "API version (date). Defaults to the version your account is pinned to. Known: 2026-10-30.",
+              "example": "2026-10-30"
+            },
+            "required": false,
+            "name": "Checkbox-Version",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 255,
+              "description": "Makes the POST safe to retry: the same key and body within 24 hours return the stored response.",
+              "example": "7f8c3b0e-setup-site-1"
+            },
+            "required": false,
+            "name": "Idempotency-Key",
+            "in": "header"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BillingSync"
                 }
               }
             }
@@ -26006,7 +26566,7 @@
             "schema": {
               "type": "string",
               "description": "Semver, e.g. 1.0.0.",
-              "example": "1.3.0"
+              "example": "1.4.0"
             },
             "required": true,
             "name": "version",
@@ -30382,6 +30942,7 @@
                               "message": "Verify your site domain to turn on live mode.",
                               "operation_id": "createDomainVerification",
                               "mcp_tool": "call_api",
+                              "endpoint": "POST /v1/sites/{site}/domain_verification",
                               "url": "https://checkbox.site/docs/concepts/activation#verify"
                             }
                           },
@@ -30550,6 +31111,7 @@
                               "message": "Verify your site domain to turn on live mode.",
                               "operation_id": "createDomainVerification",
                               "mcp_tool": "call_api",
+                              "endpoint": "POST /v1/sites/{site}/domain_verification",
                               "url": "https://checkbox.site/docs/concepts/activation#verify"
                             }
                           },
@@ -30718,6 +31280,7 @@
                               "message": "Verify your site domain to turn on live mode.",
                               "operation_id": "createDomainVerification",
                               "mcp_tool": "call_api",
+                              "endpoint": "POST /v1/sites/{site}/domain_verification",
                               "url": "https://checkbox.site/docs/concepts/activation#verify"
                             }
                           },
@@ -30802,7 +31365,8 @@
                               "plan_price_id": "price_1Pabc",
                               "payment_methods": [
                                 "card"
-                              ]
+                              ],
+                              "checkout_type": "payment_link"
                             },
                             "checkout": {
                               "url": "https://acme.example/pricing",
@@ -30863,7 +31427,23 @@
                                     "due": "2026-11-20"
                                   }
                                 ],
-                                "suggestions": 1
+                                "suggestions": 1,
+                                "checkouts": [
+                                  {
+                                    "name": "Annual",
+                                    "kind": "payment_link",
+                                    "plan": "Annual",
+                                    "status": "pending_live_check",
+                                    "label": "Needs a fix",
+                                    "open": [
+                                      {
+                                        "check_id": "signup.disclosure.price",
+                                        "title": "recurring charge is stated",
+                                        "status": "pending_live_check"
+                                      }
+                                    ]
+                                  }
+                                ]
                               }
                             },
                             "install": {
@@ -30920,7 +31500,8 @@
                                 "type": "publish_dns_record",
                                 "message": "Publish the TXT record, then call checkDomainVerification.",
                                 "operation_id": "checkDomainVerification",
-                                "mcp_tool": "call_api"
+                                "mcp_tool": "call_api",
+                                "endpoint": "POST /v1/sites/{site}/domain_verification/check"
                               }
                             }
                           },
@@ -31972,7 +32553,7 @@
                             "customer_reference": "cs_test_a1b2c3",
                             "client_reference": null,
                             "source": "elements",
-                            "element_version": "1.3.0",
+                            "element_version": "1.4.0",
                             "client_timestamp": null,
                             "presentation": {
                               "violations": [],
@@ -31997,6 +32578,7 @@
                               "message": "Verify your site domain to turn on live mode.",
                               "operation_id": "createDomainVerification",
                               "mcp_tool": "call_api",
+                              "endpoint": "POST /v1/sites/{site}/domain_verification",
                               "url": "https://checkbox.site/docs/concepts/activation#verify"
                             }
                           },
@@ -32081,7 +32663,8 @@
                               "plan_price_id": "price_1Pabc",
                               "payment_methods": [
                                 "card"
-                              ]
+                              ],
+                              "checkout_type": "payment_link"
                             },
                             "checkout": {
                               "url": "https://acme.example/pricing",
@@ -32142,7 +32725,23 @@
                                     "due": "2026-11-20"
                                   }
                                 ],
-                                "suggestions": 1
+                                "suggestions": 1,
+                                "checkouts": [
+                                  {
+                                    "name": "Annual",
+                                    "kind": "payment_link",
+                                    "plan": "Annual",
+                                    "status": "pending_live_check",
+                                    "label": "Needs a fix",
+                                    "open": [
+                                      {
+                                        "check_id": "signup.disclosure.price",
+                                        "title": "recurring charge is stated",
+                                        "status": "pending_live_check"
+                                      }
+                                    ]
+                                  }
+                                ]
                               }
                             },
                             "install": {
@@ -32199,7 +32798,8 @@
                                 "type": "publish_dns_record",
                                 "message": "Publish the TXT record, then call checkDomainVerification.",
                                 "operation_id": "checkDomainVerification",
-                                "mcp_tool": "call_api"
+                                "mcp_tool": "call_api",
+                                "endpoint": "POST /v1/sites/{site}/domain_verification/check"
                               }
                             }
                           },

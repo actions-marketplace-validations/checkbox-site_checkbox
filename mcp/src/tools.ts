@@ -375,6 +375,9 @@ async function setupOverOAuth(
   if (session.review_url) notes.push(`Human review page: ${session.review_url}`);
   let next: NextAction | undefined;
   let firstCheck: unknown;
+  // Normal round 3 (nextjs): the response's steps said "checks: action_required, Not started" next to first_check's
+  // "checks: done". The session returned is the one after the first check, so both agree.
+  let fresh: Record<string, unknown> | undefined;
   if (session.business?.site_url) {
     try {
       const v = await api.request<{ scan?: unknown; evaluated?: boolean; setup_session?: { next_action?: NextAction; steps?: Array<{ key: string; status: string }> } }>(
@@ -382,6 +385,7 @@ async function setupOverOAuth(
         `/v1/setup_sessions/${enc(session.id)}/verify`,
         { body: {} },
       );
+      if (v.setup_session && typeof v.setup_session === 'object') fresh = v.setup_session as Record<string, unknown>;
       next = v.setup_session?.next_action;
       firstCheck = { evaluated: v.evaluated ?? false, scan: v.scan ?? null, steps: v.setup_session?.steps?.map((st) => `${st.key}: ${st.status}`) ?? [] };
       notes.push(firstCheckNote(next));
@@ -395,7 +399,7 @@ async function setupOverOAuth(
     headline: `Setup session ${session.id} started${session.business?.site_url ? ` for ${untrusted(session.business.site_url, 100)}` : ''}${session.site ? ` (test-mode site ${session.site})` : ''}.`,
     notes,
     ...(next ? { next } : {}),
-    data: { ...session, ...(firstCheck ? { first_check: firstCheck } : {}) },
+    data: { ...session, ...(fresh ?? {}), ...(firstCheck ? { first_check: firstCheck } : {}) },
   };
 }
 
@@ -729,7 +733,16 @@ const verifyTask: ToolDef = {
     });
     return {
       headline: `Verification ${v.id} of ${String(args.task)}: ${statusLine(v.status)}${v.plan_status ? `; plan is now ${v.plan_status}` : ''}.`,
-      notes: v.status === 'failed' ? ['The change did not satisfy the check: read diff (expected vs observed), fix the code, and call verify_task again.'] : v.status === 'pending' ? ['Waiting for a confirming observation; call get_verification later (or continue with other tasks).'] : [],
+      notes:
+        v.status === 'failed'
+          ? ['The change did not satisfy the check: read diff (expected vs observed), fix the code, and call verify_task again.']
+          : v.status === 'not_checked'
+            ? ['Not checked yet: Checkbox is missing evidence (see next_action), not a code problem. Do not change the code for this; provide what next_action asks for.']
+            : v.status === 'pending_live_check'
+              ? ['Live check pending: the email content passes; Checkbox has not seen it sent for a real event yet. Nothing to change in the code: it completes on the first real send (or a proof run).']
+              : v.status === 'pending'
+              ? ['Waiting for a confirming observation; call get_verification later (or continue with other tasks).']
+              : [],
       data: v,
     };
   },
@@ -739,7 +752,7 @@ const answerTask: ToolDef = {
   name: 'answer_task',
   title: 'Record the human\'s answer to a manual task',
   description:
-    'For tasks with status "manual": record the HUMAN\'s answer to task.question. Ask the human first and pass their words; never answer on their behalf (answers are legal attestations stored in the evidence vault). answer is one of task.question.options (yes / no, or confirmed / needs_change). "no" / "needs_change" turns the task into a change you can apply.',
+    'For tasks with status "manual": record the HUMAN\'s answer to task.question. Ask the human first and pass their words; never answer on their behalf (answers are legal attestations stored in the evidence vault). answer is one of task.question.options; yes / no also work (= confirmed / needs_change). "no" turns the task into a change you can apply.',
   input: {
     task: z.string().max(100).describe('Task id (task_…) with status manual.'),
     answer: z.string().max(40).describe('One of the task.question.options, as the human chose.'),
@@ -1079,7 +1092,7 @@ interface SuggestionLite {
   title: string;
   match: string;
   reason: string;
-  before: { label: string; text: string };
+  before: { label: string; text: string; source?: 'your_copy' | 'example' };
   after: { label: string; text: string };
   apply: { type: string; where: string; content: string; instructions: string; json_patch?: unknown[] };
   preconditions: string[];
@@ -1118,7 +1131,7 @@ const suggestImprovements: ToolDef = {
   input: {
     site: siteId.optional(),
     terms: planTerms.optional().describe('The plan sold (price or amount, interval, trial_days, merchant_name, cancel_url). Required with disclosure or emails.'),
-    other_plans: z.array(planTerms.extend({ name: z.string().max(80).describe('Plan name, e.g. "Lite".') })).max(10).optional().describe('Other plans you sell (enables cheaper-plan / plan-choice suggestions).'),
+    other_plans: z.array(planTerms.extend({ name: z.string().max(80).optional().describe('Plan name, e.g. "Lite" (or plan_name).') })).max(10).optional().describe('Other plans you sell (enables cheaper-plan / plan-choice suggestions).'),
     disclosure: z
       .object({
         text: z.string().min(1).max(5000).describe('Disclosure next to the purchase button, as rendered.'),
@@ -1179,7 +1192,10 @@ const suggestImprovements: ToolDef = {
       notes.push(
         [
           `${i + 1}. [${s.surface} · ${s.match}] ${s.title} (${s.key})`,
-          `   before (${s.before.label}): ${s.match === 'detected' ? untrusted(s.before.text, 160) : JSON.stringify(s.before.text.slice(0, 160))}`,
+          // "From your copy" only for the merchant's own text; anything else is an example (never present it as theirs).
+          s.before.source === 'your_copy' || (!s.before.source && s.match === 'detected')
+            ? `   before, from your copy (${s.before.label}): ${untrusted(s.before.text, 160)}`
+            : `   before, example (${s.before.label}): ${JSON.stringify(s.before.text.slice(0, 160))}`,
           `   apply (${s.apply.type}) at ${s.apply.where}: ${JSON.stringify(s.apply.content.length > 600 ? `${s.apply.content.slice(0, 600)}…` : s.apply.content)}`,
           `   how: ${s.apply.instructions}`,
           ...(s.preconditions.length ? [`   only if true: ${s.preconditions.join(' ')}`] : []),
@@ -1351,10 +1367,10 @@ const getSiteStatus: ToolDef = {
 const listFindings: ToolDef = {
   name: 'list_findings',
   title: 'List compliance findings',
-  description: 'Findings (one per legal check per site) ordered by urgency: failing first, then by severity, each with citations. Filter by site, status (fail, needs_review, pass, not_applicable) and state (open, acknowledged, resolved, accepted_risk). Default: open failing findings. Use get_finding for the fix of one.',
+  description: 'Findings (one per legal check per site) ordered by urgency: failing first, then by severity, each with citations. Filter by site, status (fail, needs_review, pass, not_applicable) and state (open, acknowledged, resolved, accepted_risk). Default: every open finding of every status. Use get_finding for the fix of one.',
   input: {
     site: z.string().max(100).optional().describe('Only this site (site_…).'),
-    status: z.enum(['pass', 'fail', 'needs_review', 'not_applicable']).optional().describe('Default fail.'),
+    status: z.enum(['pass', 'fail', 'needs_review', 'not_applicable']).optional().describe('Default: all statuses.'),
     state: z.enum(['open', 'acknowledged', 'resolved', 'accepted_risk']).optional().describe('Default open.'),
     limit: listLimit,
     starting_after: startingAfter,
@@ -1365,7 +1381,8 @@ const listFindings: ToolDef = {
     const list = await api.request<ListResponse<{ id: string; check_id: string; title: string; severity: string; status: string; site: string; requirements?: Array<{ citation: string }>; compliance?: { label: string } }>>('GET', '/v1/findings', {
       query: {
         site: args.site as string | undefined,
-        status: (args.status as string | undefined) ?? 'fail',
+        // Normal round 3: with no filter, every open finding (it returned "0 finding(s)" while 13 were active).
+        status: args.status as string | undefined,
         state: (args.state as string | undefined) ?? 'open',
         limit: args.limit as number | undefined,
         starting_after: args.starting_after as string | undefined,

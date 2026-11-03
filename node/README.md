@@ -31,6 +31,7 @@ sandbox and never need activation.
 | Retries | Network errors, 409 `idempotency_key_in_use`, 429 (honours `Retry-After`) and 5xx are retried with exponential backoff and jitter (`maxNetworkRetries`, default 2) |
 | Idempotency | Every POST that changes something gets an `Idempotency-Key` automatically, reused across retries; pass your own with `{ idempotencyKey }` |
 | Versioning | Sends `Checkbox-Version: 2026-10-30` (the version the SDK was generated for); override with `new Checkbox(key, { apiVersion })` or per request |
+| Base URL | `new Checkbox(key, { baseUrl: 'http://localhost:4000' })`, or the `CHECKBOX_API_BASE` environment variable (the same one the MCP server reads); a trailing `/v1` is ignored. Default `https://app.checkbox.site` |
 | Mode | `checkbox.mode` is `'test'` or `'live'` from the key prefix (`ck_test_` / `ck_live_` / `rk_…` / legacy `sk_live_`) |
 | Errors | `CheckboxInvalidRequestError`, `CheckboxAuthenticationError`, `CheckboxPermissionError`, `CheckboxRateLimitError`, `CheckboxIdempotencyError`, `CheckboxAPIError`, `CheckboxConnectionError` (all `CheckboxError`), each with a stable `code`, `param`, `statusCode`, `requestId`, `docUrl` and `nextAction` |
 | Webhooks | `checkbox.webhooks.constructEvent(rawBody, signatureHeader, secret)` verifies `Checkbox-Signature` and returns a typed `WebhookEvent`; `constructEventAsync` for edge runtimes |
@@ -45,6 +46,7 @@ const checkbox = new Checkbox(process.env.CHECKBOX_API_KEY, {
   maxNetworkRetries: 2, // default
   timeout: 80_000, // ms per attempt
   appInfo: { name: 'my-app', version: '1.0.0' },
+  // baseUrl: 'http://localhost:4000', // API origin (default https://app.checkbox.site); or set CHECKBOX_API_BASE
 });
 
 // Register a site (idempotent per key) and read its compliance plan: ordered tasks with the law, the exact change and

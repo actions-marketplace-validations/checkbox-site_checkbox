@@ -21,6 +21,8 @@ NextAction = TypedDict(
         "operation_id": str,
         #: The MCP tool that performs operation_id on the Checkbox MCP server (`call_api` when there is no dedicated tool). (optional)
         "mcp_tool": str,
+        #: The HTTP method and path of operation_id, with path parameters in braces. (optional)
+        "endpoint": str,
         #: Documentation or dashboard URL for the step, when there is one. (optional)
         "url": str,
     },
@@ -74,6 +76,8 @@ SetupNextAction = TypedDict(
         "operation_id": str,
         #: The MCP tool that performs operation_id (`call_api` when there is no dedicated tool). (optional)
         "mcp_tool": str,
+        #: The HTTP method and path of operation_id, with path parameters in braces. (optional)
+        "endpoint": str,
         #: The equivalent `checkbox` CLI command, when there is one. (optional)
         "command": str,
         #: Documentation or dashboard URL for the step. (optional)
@@ -428,6 +432,10 @@ SetupSessionCompliance = TypedDict(
         "failing": int,
         #: Open needs-review findings.
         "needs_review": int,
+        #: The site roll-up label, the same everywhere (dashboard, plan, emails): "2 fixes needed · 1 your call", "Compliant · 2 live checks pending".
+        "label": Optional[str],
+        #: The site roll-up status: needs_fix, your_call, incomplete, compliant or not_checked.
+        "status": Optional[str],
         #: Most urgent open findings (details: retrieveFinding; ordered tasks: `checkbox plan --json`).
         "top_findings": List["SetupSessionComplianceTopFindingsItem"],
     },
@@ -773,6 +781,8 @@ SiteFacts = TypedDict(
         "plan_price_id": str,
         #: Accepted payment methods (debit / ACH bring in Reg E). (optional)
         "payment_methods": List[Literal["card", "debit", "ach", "wallet", "other"]],
+        #: Where shoppers pay and consent. stripe_checkout / payment_link: your pages redirect to a Stripe-hosted page, so consent is checked on Stripe (consent_collection and custom_text of your registered Checkout configs or Payment Links), and your pricing page needs no checkbox of its own. Unset: detected from pay buttons that link to checkout.stripe.com / buy.stripe.com. (optional)
+        "checkout_type": Literal["own_page", "stripe_checkout", "payment_link"],
     },
     total=False,
 )
@@ -811,6 +821,41 @@ PendingLiveCheck = TypedDict(
         "action": Literal["run_proof", "bcc_real_sends", "wait_for_event", "connect_billing", "resync_billing", "scan", "check_rendered_page", "register_checkout", "publish_policy"],
         #: ISO date when it completes on its own (a reminder window), when known.
         "due": Optional[str],
+    },
+    total=False,
+)
+
+
+CheckoutVerdictOpenItem = TypedDict(
+    "CheckoutVerdictOpenItem",
+    {
+        #: Check id.
+        "check_id": str,
+        #: Short check title.
+        "title": str,
+        #: User-facing status. needs_fix (a clear violation: `compliance.fix` is the one change), pending_live_check (everything Checkbox can see is right; the live event has not been observed yet — counts as compliant), verified_live (observed live: proof run, real BCC'd send, Stripe-confirmed cancellation), your_call (a real decision for a person: `compliance.question`), compliant (passes; grey areas carry a `compliance.note`), not_applicable, not_set_up (no sign the email or setting exists yet: `compliance.fix` is the one-click way to set it up; never counts as compliant), not_checked (Checkbox has not tried it yet, e.g. the cancel flow: `compliance.fix` says how; never counts as compliant).
+        "status": Literal["needs_fix", "pending_live_check", "verified_live", "your_call", "compliant", "not_applicable", "not_set_up", "not_checked"],
+    },
+    total=False,
+)
+
+
+#: One plan / checkout of the site and its sign-up verdict.
+CheckoutVerdict = TypedDict(
+    "CheckoutVerdict",
+    {
+        #: Plan name, or the checkout when no plan was matched.
+        "name": str,
+        #: Where the purchase happens: own_page, stripe_checkout (your page → Stripe Checkout), payment_link, checkout_config (a registered Checkout Session config), stripe_hosted.
+        "kind": Literal["own_page", "stripe_checkout", "payment_link", "checkout_config", "stripe_hosted"],
+        #: The declared plan this checkout sells, when matched.
+        "plan": Optional[str],
+        #: User-facing status. needs_fix (a clear violation: `compliance.fix` is the one change), pending_live_check (everything Checkbox can see is right; the live event has not been observed yet — counts as compliant), verified_live (observed live: proof run, real BCC'd send, Stripe-confirmed cancellation), your_call (a real decision for a person: `compliance.question`), compliant (passes; grey areas carry a `compliance.note`), not_applicable, not_set_up (no sign the email or setting exists yet: `compliance.fix` is the one-click way to set it up; never counts as compliant), not_checked (Checkbox has not tried it yet, e.g. the cancel flow: `compliance.fix` says how; never counts as compliant).
+        "status": Literal["needs_fix", "pending_live_check", "verified_live", "your_call", "compliant", "not_applicable", "not_set_up", "not_checked"],
+        #: Label to show.
+        "label": str,
+        #: Sign-up checks still open on this checkout.
+        "open": List["CheckoutVerdictOpenItem"],
     },
     total=False,
 )
@@ -873,6 +918,8 @@ ComplianceRollup = TypedDict(
         "pending_live_checks": List["ComplianceRollupPendingLiveChecksItem"],
         #: Recommended / extra items open (never block compliant).
         "suggestions": int,
+        #: Per-plan / per-checkout verdicts, in the same vocabulary as the roll-up. Present when the site has two or more checkouts, or one on Stripe. (optional)
+        "checkouts": List["CheckoutVerdict"],
     },
     total=False,
 )
@@ -998,6 +1045,8 @@ DomainVerificationNextAction = TypedDict(
         "operation_id": str,
         #: The MCP tool that performs operation_id (`call_api` when there is no dedicated tool). (optional)
         "mcp_tool": str,
+        #: The HTTP method and path of operation_id. (optional)
+        "endpoint": str,
     },
     total=False,
 )
@@ -1286,6 +1335,21 @@ CreateSiteParams = TypedDict(
 )
 
 
+#: The URLs nested as the site object returns them (checkout.url, checkout.account_url, checkout.terms_url); the flat fields win when both are given.
+UpdateSiteParamsCheckout = TypedDict(
+    "UpdateSiteParamsCheckout",
+    {
+        #: Same as checkout_url. (optional)
+        "url": str,
+        #: Same as account_url. (optional)
+        "account_url": Optional[str],
+        #: Same as terms_url. (optional)
+        "terms_url": Optional[str],
+    },
+    total=False,
+)
+
+
 UpdateSiteParams = TypedDict(
     "UpdateSiteParams",
     {
@@ -1321,6 +1385,8 @@ UpdateSiteParams = TypedDict(
         "monitoring_interval_minutes": int,
         #: Which requirement tiers Checkbox shows. minimum: the legal floor only (required items). balanced (default): required items plus recommended suggestions (consent receipts, a cancellation confirmation email…), collapsed and never blocking "compliant". maximum: everything, including extra protections (a separate checkbox per term, a pre-purchase summary). Only required items can make a site not compliant, at every level. (optional)
         "protection_level": Literal["minimum", "balanced", "maximum"],
+        #: The URLs nested as the site object returns them (checkout.url, checkout.account_url, checkout.terms_url); the flat fields win when both are given. (optional)
+        "checkout": "UpdateSiteParamsCheckout",
     },
     total=False,
 )
@@ -1356,6 +1422,38 @@ ConnectBillingPlatformParams = TypedDict(
         "platform": Literal["stripe", "recharge", "shopify"],
         #: Read-only credentials. Stripe: { "secretKey": "rk_test_…" } (a restricted key with read access; rk_test_ in test mode). Recharge: { "apiToken": "…" }. Shopify: { "shop": "store.myshopify.com", "accessToken": "shpat_…" }.
         "credentials": Dict[str, str],
+    },
+    total=False,
+)
+
+
+BillingSyncPlatformsItem = TypedDict(
+    "BillingSyncPlatformsItem",
+    {
+        #: The connected billing platform.
+        "platform": Literal["stripe", "shopify", "recharge", "chargebee", "recurly", "paddle", "woocommerce", "custom"],
+        #: The re-read is queued; settings refresh within a minute.
+        "status": Literal["queued"],
+        #: When the settings were last read successfully. Unix timestamp in seconds.
+        "last_synced": Optional[int],
+        #: Why the last read failed, if it did.
+        "last_error": Optional[str],
+    },
+    total=False,
+)
+
+
+#: A queued re-read of the site's billing-platform settings, followed by a re-evaluation.
+BillingSync = TypedDict(
+    "BillingSync",
+    {
+        #: String representing the object's type. Always "billing_sync".
+        "object": Literal["billing_sync"],
+        #: The site whose billing settings are re-read.
+        "site": str,
+        #: One entry per connected billing platform.
+        "platforms": List["BillingSyncPlatformsItem"],
+        "next_action": "NextAction",
     },
     total=False,
 )
@@ -2211,8 +2309,8 @@ Verification = TypedDict(
         "task": Optional[str],
         #: One task or the whole site.
         "scope": Literal["task", "site"],
-        #: pending (waiting for the confirming scan / re-evaluation), passed (Checkbox observed the expected result), passed_with_gaps (nothing observed fails, but some checks could not be observed: observed missing_data — not verified), failed (it did not: see diff).
-        "status": Literal["pending", "passed", "passed_with_gaps", "failed"],
+        #: pending (waiting for the confirming scan / re-evaluation), passed (Checkbox observed the expected result), passed_with_gaps (nothing observed fails, but some checks could not be observed: observed missing_data — not verified), not_checked (a task whose checks could only not be observed yet: nothing to change in the code; next_action says what evidence to provide), pending_live_check (an email whose content passes but that Checkbox has not seen sent for a real event yet: nothing to change; it completes on the first real send or a proof run), failed (it did not: see diff).
+        "status": Literal["pending", "passed", "passed_with_gaps", "not_checked", "pending_live_check", "failed"],
         #: How it was re-checked.
         "method": Literal["page_fetch", "policy_refetch", "stripe_params", "email_copy", "platform_sync", "attestation", "evaluation", "test_run"],
         #: The fast pre-check run immediately (seconds). A failing pre-check fails the verification at once.
@@ -3340,6 +3438,12 @@ DisclosureCheckParams = TypedDict(
         "interval_count": int,
         #: Free-trial length in days (0 or absent = no trial). (optional)
         "trial_days": int,
+        #: Intro / first-period price in major units ("$34.50 for your first box, then $69 every 2 weeks"). Or give `intro_amount` in minor units. (optional)
+        "intro_price": Union[float, str],
+        #: Intro / first-period price in minor units. (optional)
+        "intro_amount": int,
+        #: How many billing periods the intro price lasts (default 1). (optional)
+        "intro_periods": int,
         #: https URL where subscribers cancel online (used in generated text; a {{cancel_url}} placeholder otherwise). (optional)
         "cancel_url": str,
         #: When a cancellation takes effect (default period_end). (optional)
@@ -3488,7 +3592,7 @@ StripeCheckoutSessionCheckResult = TypedDict(
 )
 
 
-#: What Stripe params do not say: merchant_name, cancel_url, and price / interval when line_items reference a Price id.
+#: What Stripe params do not say: merchant_name, cancel_url, and price / interval when line_items reference a Price id. Also accepted as `terms`.
 CheckPlanTerms = TypedDict(
     "CheckPlanTerms",
     {
@@ -3508,6 +3612,12 @@ CheckPlanTerms = TypedDict(
         "interval_count": int,
         #: Free-trial length in days (0 or absent = no trial). (optional)
         "trial_days": int,
+        #: Intro / first-period price in major units ("$34.50 for your first box, then $69 every 2 weeks"). Or give `intro_amount` in minor units. (optional)
+        "intro_price": Union[float, str],
+        #: Intro / first-period price in minor units. (optional)
+        "intro_amount": int,
+        #: How many billing periods the intro price lasts (default 1). (optional)
+        "intro_periods": int,
         #: https URL where subscribers cancel online (used in generated text; a {{cancel_url}} placeholder otherwise). (optional)
         "cancel_url": str,
         #: When a cancellation takes effect (default period_end). (optional)
@@ -3762,6 +3872,12 @@ EmailCheckParamsTerms = TypedDict(
         "interval_count": int,
         #: Free-trial length in days (0 or absent = no trial). (optional)
         "trial_days": int,
+        #: Intro / first-period price in major units ("$34.50 for your first box, then $69 every 2 weeks"). Or give `intro_amount` in minor units. (optional)
+        "intro_price": Union[float, str],
+        #: Intro / first-period price in minor units. (optional)
+        "intro_amount": int,
+        #: How many billing periods the intro price lasts (default 1). (optional)
+        "intro_periods": int,
         #: https URL where subscribers cancel online (used in generated text; a {{cancel_url}} placeholder otherwise). (optional)
         "cancel_url": str,
         #: When a cancellation takes effect (default period_end). (optional)
@@ -3789,7 +3905,7 @@ EmailCheckParams = TypedDict(
         "text": str,
         #: HTML body. (optional)
         "html": str,
-        #: The plan the email is about (price, interval and cancel_url at least).
+        #: The plan the email is about (price, interval and cancel_url at least). Also accepted as `merchant`.
         "terms": "EmailCheckParamsTerms",
         #: Where you sell: "all" (default) or state codes ("US-CA", "CA", "US-NY"; "US-FED" is always included). (optional)
         "jurisdictions": Union[Literal["all"], List[str]],
@@ -4090,6 +4206,8 @@ SuggestionBefore = TypedDict(
         "label": str,
         #: Your current copy (or a typical example).
         "text": str,
+        #: your_copy: the text is your own copy (captured by Checkbox or sent by you); example: typical copy, not yours (label it “Example”).
+        "source": Literal["your_copy", "example"],
     },
     total=False,
 )
@@ -4237,6 +4355,8 @@ SuggestionReportNextAction = TypedDict(
         "operation_id": str,
         #: The MCP tool for operation_id. (optional)
         "mcp_tool": str,
+        #: The HTTP method and path of operation_id. (optional)
+        "endpoint": str,
     },
     total=False,
 )
@@ -4306,11 +4426,17 @@ SuggestionsParamsOtherPlansItem = TypedDict(
         "interval_count": int,
         #: Free-trial length in days (0 or absent = no trial). (optional)
         "trial_days": int,
+        #: Intro / first-period price in major units ("$34.50 for your first box, then $69 every 2 weeks"). Or give `intro_amount` in minor units. (optional)
+        "intro_price": Union[float, str],
+        #: Intro / first-period price in minor units. (optional)
+        "intro_amount": int,
+        #: How many billing periods the intro price lasts (default 1). (optional)
+        "intro_periods": int,
         #: https URL where subscribers cancel online (used in generated text; a {{cancel_url}} placeholder otherwise). (optional)
         "cancel_url": str,
         #: When a cancellation takes effect (default period_end). (optional)
         "cancel_timing": Literal["period_end", "immediately"],
-        #: Plan name shown to subscribers.
+        #: Plan name shown to subscribers (or give plan_name, as in the checks). (optional)
         "name": str,
     },
     total=False,
@@ -4473,6 +4599,10 @@ SuggestionsParams = TypedDict(
         "trial_reminders": bool,
         #: Your site’s base URL (used in example links). (optional)
         "site_url": str,
+        #: Where subscribers manage their subscription (restart and switch-plan links; never the cancel step). Default: derived from terms.cancel_url. (optional)
+        "account_url": str,
+        #: You ship physical goods (boxes, deliveries): examples talk about the next box instead of access. Default: inferred from your plan names and copy. (optional)
+        "sells_goods": bool,
     },
     total=False,
 )
@@ -4600,6 +4730,10 @@ DisclosureTerms = TypedDict(
         "interval_count": int,
         #: Free-trial length in days (0 or absent: no trial). (optional)
         "trial_days": int,
+        #: Intro / first-period charge in minor units, stated before the regular price ("$34.50 for your first 2 weeks, then $69.00 every 2 weeks"). Must be below amount. (optional)
+        "intro_amount": int,
+        #: How many billing periods the intro price lasts (default 1). (optional)
+        "intro_periods": int,
         #: https address where subscribers cancel online. (optional)
         "cancel_url": str,
         #: When a cancellation takes effect (default period_end). (optional)
@@ -4858,6 +4992,10 @@ ConsentCreateParamsTerms = TypedDict(
         "interval_count": int,
         #: Free-trial length in days (0 or absent: no trial). (optional)
         "trial_days": int,
+        #: Intro / first-period charge in minor units, stated before the regular price ("$34.50 for your first 2 weeks, then $69.00 every 2 weeks"). Must be below amount. (optional)
+        "intro_amount": int,
+        #: How many billing periods the intro price lasts (default 1). (optional)
+        "intro_periods": int,
         #: https address where subscribers cancel online.
         "cancel_url": str,
         #: When a cancellation takes effect (default period_end). (optional)
@@ -6967,6 +7105,8 @@ RetrieveDomainVerificationResponseNextAction = TypedDict(
         "operation_id": str,
         #: The MCP tool that performs operation_id (`call_api` when there is no dedicated tool). (optional)
         "mcp_tool": str,
+        #: The HTTP method and path of operation_id. (optional)
+        "endpoint": str,
     },
     total=False,
 )
@@ -7049,6 +7189,8 @@ CreateDomainVerificationResponseNextAction = TypedDict(
         "operation_id": str,
         #: The MCP tool that performs operation_id (`call_api` when there is no dedicated tool). (optional)
         "mcp_tool": str,
+        #: The HTTP method and path of operation_id. (optional)
+        "endpoint": str,
     },
     total=False,
 )
@@ -7131,6 +7273,8 @@ CheckDomainVerificationResponseNextAction = TypedDict(
         "operation_id": str,
         #: The MCP tool that performs operation_id (`call_api` when there is no dedicated tool). (optional)
         "mcp_tool": str,
+        #: The HTTP method and path of operation_id. (optional)
+        "endpoint": str,
     },
     total=False,
 )

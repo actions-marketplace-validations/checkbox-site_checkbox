@@ -350,6 +350,23 @@ OPERATIONS: Dict[str, Dict[str, Any]] = {
         "paginated": False,
         "summary": "Check domain verification now",
     },
+    "resyncBilling": {
+        "operation_id": "resyncBilling",
+        "namespace": "billings",
+        "method": "resync",
+        "http_method": "POST",
+        "path": "/v1/sites/{site}/billing/resync",
+        "path_params": ("site", ),
+        "query_params": (),
+        "body": False,
+        "idempotent": True,
+        "auth": True,
+        "scope": "sites:write",
+        "response": "json",
+        "list": False,
+        "paginated": False,
+        "summary": "Re-sync Stripe settings",
+    },
     "createScan": {
         "operation_id": "createScan",
         "namespace": "scans",
@@ -2033,6 +2050,19 @@ class DomainVerificationsResource(Resource):
         return self._call("checkDomainVerification", (site, ), None, None, request_options)  # type: ignore[no-any-return]
 
 
+class BillingsResource(Resource):
+    """``checkbox.billings``"""
+
+    def resync(self, site: str, /, *, request_options: Optional[RequestOptions] = None) -> "types.BillingSync":
+        """Re-sync Stripe settings.
+
+        Re-reads the site's billing-platform settings now (Stripe customer-portal cancellation, trial-ending emails, plans) and re-evaluates the site, so a setting you just changed in Stripe shows up without waiting for the next scan. Every scan also re-reads them. Then poll retrieveLatestEvaluation (or listFindings) after about a minute.
+
+        ``POST /v1/sites/{site}/billing/resync`` (operation ``resyncBilling``, scope ``sites:write``).
+        """
+        return self._call("resyncBilling", (site, ), None, None, request_options)  # type: ignore[no-any-return]
+
+
 class ScansResource(Resource):
     """``checkbox.scans``"""
 
@@ -3007,6 +3037,7 @@ class ResourceNamespaces:
     account: AccountResource
     sites: SitesResource
     domain_verifications: DomainVerificationsResource
+    billings: BillingsResource
     scans: ScansResource
     evaluations: EvaluationsResource
     findings: FindingsResource
@@ -3042,6 +3073,7 @@ RESOURCES = {
     "account": AccountResource,
     "sites": SitesResource,
     "domain_verifications": DomainVerificationsResource,
+    "billings": BillingsResource,
     "scans": ScansResource,
     "evaluations": EvaluationsResource,
     "findings": FindingsResource,

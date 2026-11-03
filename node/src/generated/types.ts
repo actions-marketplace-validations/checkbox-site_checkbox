@@ -23,6 +23,8 @@ export interface NextAction {
   operation_id?: string;
   /** The MCP tool that performs operation_id on the Checkbox MCP server (`call_api` when there is no dedicated tool). */
   mcp_tool?: string;
+  /** The HTTP method and path of operation_id, with path parameters in braces. */
+  endpoint?: string;
   /** Documentation or dashboard URL for the step, when there is one. */
   url?: string;
 }
@@ -57,6 +59,8 @@ export interface SetupNextAction {
   operation_id?: string;
   /** The MCP tool that performs operation_id (`call_api` when there is no dedicated tool). */
   mcp_tool?: string;
+  /** The HTTP method and path of operation_id, with path parameters in braces. */
+  endpoint?: string;
   /** The equivalent `checkbox` CLI command, when there is one. */
   command?: string;
   /** Documentation or dashboard URL for the step. */
@@ -315,6 +319,10 @@ export interface SetupSession {
     failing: number;
     /** Open needs-review findings. */
     needs_review: number;
+    /** The site roll-up label, the same everywhere (dashboard, plan, emails): "2 fixes needed · 1 your call", "Compliant · 2 live checks pending". */
+    label: string | null;
+    /** The site roll-up status: needs_fix, your_call, incomplete, compliant or not_checked. */
+    status: string | null;
     /** Most urgent open findings (details: retrieveFinding; ordered tasks: `checkbox plan --json`). */
     top_findings: Array<{
       /** Unique identifier of the finding (fnd_…). */
@@ -533,6 +541,8 @@ export interface SiteFacts {
   plan_price_id?: string;
   /** Accepted payment methods (debit / ACH bring in Reg E). */
   payment_methods?: Array<"card" | "debit" | "ach" | "wallet" | "other">;
+  /** Where shoppers pay and consent. stripe_checkout / payment_link: your pages redirect to a Stripe-hosted page, so consent is checked on Stripe (consent_collection and custom_text of your registered Checkout configs or Payment Links), and your pricing page needs no checkbox of its own. Unset: detected from pay buttons that link to checkout.stripe.com / buy.stripe.com. */
+  checkout_type?: "own_page" | "stripe_checkout" | "payment_link";
 }
 
 /** Scheduled monitoring. */
@@ -561,6 +571,29 @@ export interface PendingLiveCheck {
   action: "run_proof" | "bcc_real_sends" | "wait_for_event" | "connect_billing" | "resync_billing" | "scan" | "check_rendered_page" | "register_checkout" | "publish_policy";
   /** ISO date when it completes on its own (a reminder window), when known. */
   due: string | null;
+}
+
+/** One plan / checkout of the site and its sign-up verdict. */
+export interface CheckoutVerdict {
+  /** Plan name, or the checkout when no plan was matched. */
+  name: string;
+  /** Where the purchase happens: own_page, stripe_checkout (your page → Stripe Checkout), payment_link, checkout_config (a registered Checkout Session config), stripe_hosted. */
+  kind: "own_page" | "stripe_checkout" | "payment_link" | "checkout_config" | "stripe_hosted";
+  /** The declared plan this checkout sells, when matched. */
+  plan: string | null;
+  /** User-facing status. needs_fix (a clear violation: `compliance.fix` is the one change), pending_live_check (everything Checkbox can see is right; the live event has not been observed yet — counts as compliant), verified_live (observed live: proof run, real BCC'd send, Stripe-confirmed cancellation), your_call (a real decision for a person: `compliance.question`), compliant (passes; grey areas carry a `compliance.note`), not_applicable, not_set_up (no sign the email or setting exists yet: `compliance.fix` is the one-click way to set it up; never counts as compliant), not_checked (Checkbox has not tried it yet, e.g. the cancel flow: `compliance.fix` says how; never counts as compliant). */
+  status: "needs_fix" | "pending_live_check" | "verified_live" | "your_call" | "compliant" | "not_applicable" | "not_set_up" | "not_checked";
+  /** Label to show. */
+  label: string;
+  /** Sign-up checks still open on this checkout. */
+  open: Array<{
+    /** Check id. */
+    check_id: string;
+    /** Short check title. */
+    title: string;
+    /** User-facing status. needs_fix (a clear violation: `compliance.fix` is the one change), pending_live_check (everything Checkbox can see is right; the live event has not been observed yet — counts as compliant), verified_live (observed live: proof run, real BCC'd send, Stripe-confirmed cancellation), your_call (a real decision for a person: `compliance.question`), compliant (passes; grey areas carry a `compliance.note`), not_applicable, not_set_up (no sign the email or setting exists yet: `compliance.fix` is the one-click way to set it up; never counts as compliant), not_checked (Checkbox has not tried it yet, e.g. the cancel flow: `compliance.fix` says how; never counts as compliant). */
+    status: "needs_fix" | "pending_live_check" | "verified_live" | "your_call" | "compliant" | "not_applicable" | "not_set_up" | "not_checked";
+  }>;
 }
 
 /** Roll-up of the user-facing statuses of the required checks. */
@@ -595,6 +628,8 @@ export interface ComplianceRollup {
   }>;
   /** Recommended / extra items open (never block compliant). */
   suggestions: number;
+  /** Per-plan / per-checkout verdicts, in the same vocabulary as the roll-up. Present when the site has two or more checkouts, or one on Stripe. */
+  checkouts?: Array<CheckoutVerdict>;
 }
 
 /** Latest verdict; null until the first evaluation. */
@@ -708,6 +743,8 @@ export interface DomainVerification {
     operation_id?: string;
     /** The MCP tool that performs operation_id (`call_api` when there is no dedicated tool). */
     mcp_tool?: string;
+    /** The HTTP method and path of operation_id. */
+    endpoint?: string;
   } | null;
 }
 
@@ -905,6 +942,15 @@ export interface UpdateSiteParams {
   monitoring_interval_minutes?: number;
   /** Which requirement tiers Checkbox shows. minimum: the legal floor only (required items). balanced (default): required items plus recommended suggestions (consent receipts, a cancellation confirmation email…), collapsed and never blocking "compliant". maximum: everything, including extra protections (a separate checkbox per term, a pre-purchase summary). Only required items can make a site not compliant, at every level. */
   protection_level?: "minimum" | "balanced" | "maximum";
+  /** The URLs nested as the site object returns them (checkout.url, checkout.account_url, checkout.terms_url); the flat fields win when both are given. */
+  checkout?: {
+    /** Same as checkout_url. */
+    url?: string;
+    /** Same as account_url. */
+    account_url?: string | null;
+    /** Same as terms_url. */
+    terms_url?: string | null;
+  };
 }
 
 /** A billing-platform connection of a site. */
@@ -930,6 +976,26 @@ export interface ConnectBillingPlatformParams {
   platform: "stripe" | "recharge" | "shopify";
   /** Read-only credentials. Stripe: { "secretKey": "rk_test_…" } (a restricted key with read access; rk_test_ in test mode). Recharge: { "apiToken": "…" }. Shopify: { "shop": "store.myshopify.com", "accessToken": "shpat_…" }. */
   credentials: Record<string, string>;
+}
+
+/** A queued re-read of the site's billing-platform settings, followed by a re-evaluation. */
+export interface BillingSync {
+  /** String representing the object's type. Always "billing_sync". */
+  object: "billing_sync";
+  /** The site whose billing settings are re-read. */
+  site: string;
+  /** One entry per connected billing platform. */
+  platforms: Array<{
+    /** The connected billing platform. */
+    platform: "stripe" | "shopify" | "recharge" | "chargebee" | "recurly" | "paddle" | "woocommerce" | "custom";
+    /** The re-read is queued; settings refresh within a minute. */
+    status: "queued";
+    /** When the settings were last read successfully. Unix timestamp in seconds. */
+    last_synced: number | null;
+    /** Why the last read failed, if it did. */
+    last_error: string | null;
+  }>;
+  next_action: NextAction;
 }
 
 /** A page of scans, newest first. */
@@ -1513,8 +1579,8 @@ export interface Verification {
   task: string | null;
   /** One task or the whole site. */
   scope: "task" | "site";
-  /** pending (waiting for the confirming scan / re-evaluation), passed (Checkbox observed the expected result), passed_with_gaps (nothing observed fails, but some checks could not be observed: observed missing_data — not verified), failed (it did not: see diff). */
-  status: "pending" | "passed" | "passed_with_gaps" | "failed";
+  /** pending (waiting for the confirming scan / re-evaluation), passed (Checkbox observed the expected result), passed_with_gaps (nothing observed fails, but some checks could not be observed: observed missing_data — not verified), not_checked (a task whose checks could only not be observed yet: nothing to change in the code; next_action says what evidence to provide), pending_live_check (an email whose content passes but that Checkbox has not seen sent for a real event yet: nothing to change; it completes on the first real send or a proof run), failed (it did not: see diff). */
+  status: "pending" | "passed" | "passed_with_gaps" | "not_checked" | "pending_live_check" | "failed";
   /** How it was re-checked. */
   method: "page_fetch" | "policy_refetch" | "stripe_params" | "email_copy" | "platform_sync" | "attestation" | "evaluation" | "test_run";
   /** The fast pre-check run immediately (seconds). A failing pre-check fails the verification at once. */
@@ -2310,6 +2376,12 @@ export interface DisclosureCheckParams {
   interval_count?: number;
   /** Free-trial length in days (0 or absent = no trial). */
   trial_days?: number;
+  /** Intro / first-period price in major units ("$34.50 for your first box, then $69 every 2 weeks"). Or give `intro_amount` in minor units. */
+  intro_price?: number | string;
+  /** Intro / first-period price in minor units. */
+  intro_amount?: number;
+  /** How many billing periods the intro price lasts (default 1). */
+  intro_periods?: number;
   /** https URL where subscribers cancel online (used in generated text; a {{cancel_url}} placeholder otherwise). */
   cancel_url?: string;
   /** When a cancellation takes effect (default period_end). */
@@ -2438,7 +2510,7 @@ export interface StripeCheckoutSessionCheckResult {
   };
 }
 
-/** What Stripe params do not say: merchant_name, cancel_url, and price / interval when line_items reference a Price id. */
+/** What Stripe params do not say: merchant_name, cancel_url, and price / interval when line_items reference a Price id. Also accepted as `terms`. */
 export interface CheckPlanTerms {
   /** Brand shown to subscribers; used in generated text. */
   merchant_name?: string;
@@ -2456,6 +2528,12 @@ export interface CheckPlanTerms {
   interval_count?: number;
   /** Free-trial length in days (0 or absent = no trial). */
   trial_days?: number;
+  /** Intro / first-period price in major units ("$34.50 for your first box, then $69 every 2 weeks"). Or give `intro_amount` in minor units. */
+  intro_price?: number | string;
+  /** Intro / first-period price in minor units. */
+  intro_amount?: number;
+  /** How many billing periods the intro price lasts (default 1). */
+  intro_periods?: number;
   /** https URL where subscribers cancel online (used in generated text; a {{cancel_url}} placeholder otherwise). */
   cancel_url?: string;
   /** When a cancellation takes effect (default period_end). */
@@ -2635,7 +2713,7 @@ export interface EmailCheckParams {
   text?: string;
   /** HTML body. */
   html?: string;
-  /** The plan the email is about (price, interval and cancel_url at least). */
+  /** The plan the email is about (price, interval and cancel_url at least). Also accepted as `merchant`. */
   terms: CheckPlanTerms & {
     /** price_change only: the OLD price before the change, major units. price / amount is the NEW price the email announces. */
     previous_price?: number | string;
@@ -2872,6 +2950,8 @@ export interface Suggestion {
     label: string;
     /** Your current copy (or a typical example). */
     text: string;
+    /** your_copy: the text is your own copy (captured by Checkbox or sent by you); example: typical copy, not yours (label it “Example”). */
+    source: "your_copy" | "example";
   };
   /** After. */
   after: {
@@ -2986,6 +3066,8 @@ export interface SuggestionReport {
     operation_id?: string;
     /** The MCP tool for operation_id. */
     mcp_tool?: string;
+    /** The HTTP method and path of operation_id. */
+    endpoint?: string;
   };
   /** Not legal advice; optional; results vary. */
   disclaimer: string;
@@ -2996,8 +3078,8 @@ export interface SuggestionsParams {
   terms?: CheckPlanTerms;
   /** Other plans you sell (enables “point to a cheaper plan” and plan-choice suggestions). */
   other_plans?: Array<CheckPlanTerms & {
-    /** Plan name shown to subscribers. */
-    name: string;
+    /** Plan name shown to subscribers (or give plan_name, as in the checks). */
+    name?: string;
   }>;
   /** Where you sell: "all" (default) or state codes ("US-CA", "CA", "US-NY"; "US-FED" is always included). */
   jurisdictions?: "all" | Array<string>;
@@ -3085,6 +3167,10 @@ export interface SuggestionsParams {
   trial_reminders?: boolean;
   /** Your site’s base URL (used in example links). */
   site_url?: string;
+  /** Where subscribers manage their subscription (restart and switch-plan links; never the cancel step). Default: derived from terms.cancel_url. */
+  account_url?: string;
+  /** You ship physical goods (boxes, deliveries): examples talk about the next box instead of access. Default: inferred from your plan names and copy. */
+  sells_goods?: boolean;
 }
 
 export interface ElementsRelease {
@@ -3176,6 +3262,10 @@ export interface DisclosureTerms {
   interval_count?: number;
   /** Free-trial length in days (0 or absent: no trial). */
   trial_days?: number;
+  /** Intro / first-period charge in minor units, stated before the regular price ("$34.50 for your first 2 weeks, then $69.00 every 2 weeks"). Must be below amount. */
+  intro_amount?: number;
+  /** How many billing periods the intro price lasts (default 1). */
+  intro_periods?: number;
   /** https address where subscribers cancel online. */
   cancel_url?: string;
   /** When a cancellation takes effect (default period_end). */
