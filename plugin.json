@@ -1,0 +1,23 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "checkbox",
+  "version": "1.1.0",
+  "description": "Automatic-renewal law checks for subscription code: when you build a subscription, free trial, Stripe Checkout, pricing page or cancel flow, check it against ROSCA, California, New York and other state laws and get exact fixes. Remote MCP server with OAuth.",
+  "author": {
+    "name": "Checkbox",
+    "email": "support@checkbox.site",
+    "url": "https://checkbox.site"
+  },
+  "homepage": "https://checkbox.site/docs/build-with-ai",
+  "repository": "https://github.com/checkbox-site/checkbox",
+  "license": "MIT",
+  "keywords": [
+    "subscriptions",
+    "auto-renewal",
+    "compliance",
+    "stripe",
+    "rosca",
+    "checkout",
+    "mcp"
+  ]
+}

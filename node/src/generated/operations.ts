@@ -1808,6 +1808,23 @@ export const OPERATIONS = {
     paginated: false,
     summary: "Send feedback",
   },
+  claimReviewPrompt: {
+    operationId: "claimReviewPrompt",
+    namespace: "reviewPrompts",
+    method: "claim",
+    httpMethod: "POST",
+    path: "/v1/sites/{site}/review_prompt",
+    pathParams: ["site"],
+    queryParams: [],
+    body: true,
+    idempotent: false,
+    auth: true,
+    scope: "compliance_plans:read",
+    response: "json",
+    list: false,
+    paginated: false,
+    summary: "Claim the one-time review prompt for a site",
+  },
 } as const satisfies Record<string, OperationSpec>;
 
 export interface OperationSpec {
@@ -1938,6 +1955,7 @@ export interface OperationTypes {
   listEvents: { args: T.ListEventsParams; response: T.EventList };
   retrieveEvent: { args: { event: string }; response: T.Event };
   createFeedback: { args: T.FeedbackParams; response: T.Feedback };
+  claimReviewPrompt: { args: { site: string } & T.ReviewPromptParams; response: T.ReviewPrompt };
 }
 
 /** `checkbox.device` */
@@ -2056,7 +2074,7 @@ export class AccountResource extends Resource {
   /**
    * Update the account.
    *
-   * Pins the account to an API version (requests without a Checkbox-Version header use it). Known versions: 2026-10-30.
+   * Pins the account to an API version (requests without a Checkbox-Version header use it; known versions: 2026-10-30), sets the default retention, and turns the account-wide legal hold on or off. Retention and legal hold apply to the key's mode (test mode has its own).
    *
    * @see POST /v1/account (operation `updateAccount`, scope `account:write`)
    */
@@ -2093,7 +2111,7 @@ export class SitesResource extends Resource {
   /**
    * Retrieve a site.
    *
-   * Returns a site with its latest compliance verdict (score, status) and install details.
+   * Returns a site with its latest compliance status (label and counts) and install details.
    *
    * @param site Unique identifier of the site (site_…).
    * @see GET /v1/sites/{site} (operation `retrieveSite`, scope `sites:read`)
@@ -2280,7 +2298,7 @@ export class EvaluationsResource extends Resource {
   /**
    * List evaluations.
    *
-   * Verdicts newest first (score history), optionally for one site.
+   * Verdicts newest first (status history), optionally for one site.
    *
    * @see GET /v1/evaluations (operation `listEvaluations`, scope `evaluations:read`)
    */
@@ -2303,7 +2321,7 @@ export class EvaluationsResource extends Resource {
   /**
    * Get the current verdict of a site.
    *
-   * The latest evaluation of the site: is it compliant (score and status), and what blocks it. 404 resource_missing with next_action createScan when the site was never evaluated.
+   * The latest evaluation of the site: its compliance status and what blocks it. 404 resource_missing with next_action createScan when the site was never evaluated.
    *
    * @param site Unique identifier of the site (site_…).
    * @see GET /v1/sites/{site}/evaluation (operation `retrieveLatestEvaluation`, scope `evaluations:read`)
@@ -3308,12 +3326,28 @@ export class FeedbacksResource extends Resource {
   /**
    * Send feedback.
    *
-   * Report a problem or a missing feature in Checkbox. Include what you tried, what happened and what you expected, and the site / request id when there is one. The Checkbox team reads every message. Rate limited to 20 per key per hour.
+   * Report a problem or a missing feature in Checkbox. Include what you tried, what happened and what you expected, and the site / request id when there is one. With type review, send a structured review of Checkbox the product (score 0-10, liked, disliked, wrong_verdicts, would_keep_using, stack) — only after the human said yes and saw the text. A review describes what worked or did not in Checkbox: it never states that the site broke a law or had unfixed problems, and carries no site names, URLs, customer data or quotes of the site's pages or emails (URLs are removed and no site is attached). Never include secrets or customer data: anything that looks like a secret, card number or email address is replaced with [redacted]. The Checkbox team reads every message. Rate limited to 20 per key per hour.
    *
    * @see POST /v1/feedback (operation `createFeedback`, scope `account:read`)
    */
-  create(params: T.FeedbackParams, options?: RequestOptions): Promise<T.Feedback> {
+  create(params?: T.FeedbackParams, options?: RequestOptions): Promise<T.Feedback> {
     return this._request(OPERATIONS.createFeedback, [], params, options) as Promise<T.Feedback>;
+  }
+
+}
+
+/** `checkbox.reviewPrompts` */
+export class ReviewPromptsResource extends Resource {
+  /**
+   * Claim the one-time review prompt for a site.
+   *
+   * The MCP tools call this when a site's compliance plan reaches compliant (including "Compliant · N live checks pending"). show is true exactly once per site: the agent then asks the human once whether they want to send a quick review of Checkbox (createFeedback with type review), and sends it only on a yes, after showing the text. Never send a review without the human's yes.
+   *
+   * @param site Unique identifier of the site (site_…).
+   * @see POST /v1/sites/{site}/review_prompt (operation `claimReviewPrompt`, scope `compliance_plans:read`)
+   */
+  claim(site: string, params?: T.ReviewPromptParams, options?: RequestOptions): Promise<T.ReviewPrompt> {
+    return this._request(OPERATIONS.claimReviewPrompt, [site], params, options) as Promise<T.ReviewPrompt>;
   }
 
 }
@@ -3352,4 +3386,5 @@ export const RESOURCES = {
   webhookEndpoints: WebhookEndpointsResource,
   events: EventsResource,
   feedbacks: FeedbacksResource,
+  reviewPrompts: ReviewPromptsResource,
 } as const;

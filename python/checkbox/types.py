@@ -420,24 +420,44 @@ SetupSessionComplianceTopFindingsItem = TypedDict(
 )
 
 
+SetupSessionComplianceTodoItem = TypedDict(
+    "SetupSessionComplianceTodoItem",
+    {
+        #: Plan task id (task_…); its findings are the evidence.
+        "task": str,
+        #: Task key.
+        "key": str,
+        #: Task title, the same as in the plan.
+        "title": str,
+        #: The status the site roll-up counts the task under.
+        "status": Literal["needs_fix", "not_set_up", "your_call", "not_checked"],
+        #: Needs a fix, Not set up yet, Your call or Not checked yet.
+        "label": str,
+    },
+    total=False,
+)
+
+
 #: Latest verdict of the test-mode site.
 SetupSessionCompliance = TypedDict(
     "SetupSessionCompliance",
     {
-        #: 0-100.
+        #: Deprecated: the legacy 0-100 score, kept populated for backward compatibility. No Checkbox surface shows it; read `label` / `status` and `todo`.
         "score": float,
         #: When it was evaluated. Unix timestamp in seconds.
         "evaluated": int,
-        #: Open failing findings.
+        #: Deprecated: open failing findings (per check). Read `label` (counted in tasks) and `todo` instead.
         "failing": int,
-        #: Open needs-review findings.
+        #: Deprecated: open needs-review findings (per check). Read `label` (counted in tasks) and `todo` instead.
         "needs_review": int,
         #: The site roll-up label, the same everywhere (dashboard, plan, emails): "2 fixes needed · 1 your call", "Compliant · 2 live checks pending".
         "label": Optional[str],
         #: The site roll-up status: needs_fix, your_call, incomplete, compliant or not_checked.
         "status": Optional[str],
-        #: Most urgent open findings (details: retrieveFinding; ordered tasks: `checkbox plan --json`).
+        #: Deprecated: open findings (evidence). The to-do list is `todo` (the compliance plan's ordered open tasks).
         "top_findings": List["SetupSessionComplianceTopFindingsItem"],
+        #: The to-do list: the compliance plan's ordered open required tasks (same titles, order and counts as the dashboard, MCP get_site_status and the summary email). (optional)
+        "todo": List["SetupSessionComplianceTodoItem"],
     },
     total=False,
 )
@@ -665,6 +685,36 @@ SetupVerification = TypedDict(
 )
 
 
+#: Account default retention (sites without their own setting use it).
+Retention = TypedDict(
+    "Retention",
+    {
+        #: Years good-practice records are kept (consent receipts, disclosures as shown, passing scans, certificates, compliant emails, confirmed cancellations, evidence-chain entries). Default 7.
+        "good_practice_years": int,
+        #: Days after a problem is resolved before its history is deleted (resolved findings, captures of the failing page, fix history); only aggregate counts stay. Open problems are never deleted. Default 30.
+        "problem_history_days": int,
+    },
+    total=False,
+)
+
+
+#: Account-wide legal hold: while active, nothing of this mode's data is deleted.
+LegalHold = TypedDict(
+    "LegalHold",
+    {
+        #: A legal hold suspends every automatic deletion and refuses deletions and retention shortening.
+        "active": bool,
+        #: What the active hold was set on (an account hold covers every site).
+        "scope": Optional[Literal["site", "account"]],
+        #: When the hold was turned on. Unix timestamp in seconds.
+        "set": Optional[int],
+        #: Note recorded with the hold.
+        "reason": Optional[str],
+    },
+    total=False,
+)
+
+
 #: Live-mode activation. Test mode never needs it.
 AccountActivation = TypedDict(
     "AccountActivation",
@@ -751,9 +801,37 @@ Account = TypedDict(
         "publishable_key": str,
         #: Commercial status.
         "billing": "AccountBilling",
+        "retention": "Retention",
+        "legal_hold": "LegalHold",
         #: When the account was created. Unix timestamp in seconds.
         "created": int,
         "next_action": Optional["NextAction"],
+    },
+    total=False,
+)
+
+
+#: Default retention for every site without its own setting. Problem history also shows how fast you fixed things; keep it longer if you want that record.
+RetentionParams = TypedDict(
+    "RetentionParams",
+    {
+        #: Years (1-10). On a site, null returns to the account default. (optional)
+        "good_practice_years": Optional[int],
+        #: Days (7-730). On a site, null returns to the account default. (optional)
+        "problem_history_days": Optional[int],
+    },
+    total=False,
+)
+
+
+#: Account-wide legal hold: suspends every deletion of the account's records until turned off.
+LegalHoldParams = TypedDict(
+    "LegalHoldParams",
+    {
+        #: true turns the hold on, false turns it off.
+        "active": bool,
+        #: Note stored with the hold (who asked, matter). (optional)
+        "reason": str,
     },
     total=False,
 )
@@ -809,6 +887,21 @@ SiteMonitoring = TypedDict(
 )
 
 
+#: The retention in effect for the site.
+SiteRetention = TypedDict(
+    "SiteRetention",
+    {
+        #: Years good-practice records are kept (consent receipts, disclosures as shown, passing scans, certificates, compliant emails, confirmed cancellations, evidence-chain entries). Default 7.
+        "good_practice_years": int,
+        #: Days after a problem is resolved before its history is deleted (resolved findings, captures of the failing page, fix history); only aggregate counts stay. Open problems are never deleted. Default 30.
+        "problem_history_days": int,
+        #: Both values come from the account default (no site override).
+        "inherited": bool,
+    },
+    total=False,
+)
+
+
 #: A live check Checkbox has not observed yet, and how it completes.
 PendingLiveCheck = TypedDict(
     "PendingLiveCheck",
@@ -833,7 +926,7 @@ CheckoutVerdictOpenItem = TypedDict(
         "check_id": str,
         #: Short check title.
         "title": str,
-        #: User-facing status. needs_fix (a clear violation: `compliance.fix` is the one change), pending_live_check (everything Checkbox can see is right; the live event has not been observed yet — counts as compliant), verified_live (observed live: proof run, real BCC'd send, Stripe-confirmed cancellation), your_call (a real decision for a person: `compliance.question`), compliant (passes; grey areas carry a `compliance.note`), not_applicable, not_set_up (no sign the email or setting exists yet: `compliance.fix` is the one-click way to set it up; never counts as compliant), not_checked (Checkbox has not tried it yet, e.g. the cancel flow: `compliance.fix` says how; never counts as compliant).
+        #: User-facing status. needs_fix (a requirement is clearly not met: `compliance.fix` is the one change), pending_live_check (everything Checkbox can see is right; the live event has not been observed yet — counts as compliant), verified_live (observed live: proof run, real BCC'd send, Stripe-confirmed cancellation), your_call (a real decision for a person: `compliance.question`), compliant (passes; grey areas carry a `compliance.note`), not_applicable, not_set_up (no sign the email or setting exists yet: `compliance.fix` is the one-click way to set it up; never counts as compliant), not_checked (Checkbox has not tried it yet, e.g. the cancel flow: `compliance.fix` says how; never counts as compliant).
         "status": Literal["needs_fix", "pending_live_check", "verified_live", "your_call", "compliant", "not_applicable", "not_set_up", "not_checked"],
     },
     total=False,
@@ -850,7 +943,7 @@ CheckoutVerdict = TypedDict(
         "kind": Literal["own_page", "stripe_checkout", "payment_link", "checkout_config", "stripe_hosted"],
         #: The declared plan this checkout sells, when matched.
         "plan": Optional[str],
-        #: User-facing status. needs_fix (a clear violation: `compliance.fix` is the one change), pending_live_check (everything Checkbox can see is right; the live event has not been observed yet — counts as compliant), verified_live (observed live: proof run, real BCC'd send, Stripe-confirmed cancellation), your_call (a real decision for a person: `compliance.question`), compliant (passes; grey areas carry a `compliance.note`), not_applicable, not_set_up (no sign the email or setting exists yet: `compliance.fix` is the one-click way to set it up; never counts as compliant), not_checked (Checkbox has not tried it yet, e.g. the cancel flow: `compliance.fix` says how; never counts as compliant).
+        #: User-facing status. needs_fix (a requirement is clearly not met: `compliance.fix` is the one change), pending_live_check (everything Checkbox can see is right; the live event has not been observed yet — counts as compliant), verified_live (observed live: proof run, real BCC'd send, Stripe-confirmed cancellation), your_call (a real decision for a person: `compliance.question`), compliant (passes; grey areas carry a `compliance.note`), not_applicable, not_set_up (no sign the email or setting exists yet: `compliance.fix` is the one-click way to set it up; never counts as compliant), not_checked (Checkbox has not tried it yet, e.g. the cancel flow: `compliance.fix` says how; never counts as compliant).
         "status": Literal["needs_fix", "pending_live_check", "verified_live", "your_call", "compliant", "not_applicable", "not_set_up", "not_checked"],
         #: Label to show.
         "label": str,
@@ -929,7 +1022,7 @@ ComplianceRollup = TypedDict(
 SiteComplianceValue = TypedDict(
     "SiteComplianceValue",
     {
-        #: Compliance score 0-100 (one decimal place).
+        #: Deprecated: the legacy 0-100 score (one decimal place), kept populated for backward compatibility. No Checkbox surface shows it; read `compliance` (status, label, counts) and the compliance plan instead.
         "score": float,
         #: When the latest evaluation ran. Unix timestamp in seconds.
         "evaluated": int,
@@ -992,7 +1085,7 @@ Scan = TypedDict(
         "warnings": List[str],
         #: The evaluation this scan produced (null until evaluated).
         "evaluation": Optional[str],
-        #: Score of that evaluation (0-100, one decimal place).
+        #: Deprecated: the legacy 0-100 score of that evaluation, kept for backward compatibility. Read the evaluation's `compliance` status instead.
         "score": Optional[float],
         #: When the scan started. Unix timestamp in seconds.
         "started": Optional[int],
@@ -1157,6 +1250,8 @@ Site = TypedDict(
         "monitoring": "SiteMonitoring",
         #: Which requirement tiers Checkbox shows (minimum: required only; balanced: + recommended suggestions; maximum: + extras). Only required items affect compliance.
         "protection_level": Literal["minimum", "balanced", "maximum"],
+        "retention": "SiteRetention",
+        "legal_hold": "LegalHold",
         "compliance": "SiteCompliance",
         "install": "SiteInstall",
         #: Archived (soft-deleted); evidence is retained.
@@ -1387,6 +1482,10 @@ UpdateSiteParams = TypedDict(
         "protection_level": Literal["minimum", "balanced", "maximum"],
         #: The URLs nested as the site object returns them (checkout.url, checkout.account_url, checkout.terms_url); the flat fields win when both are given. (optional)
         "checkout": "UpdateSiteParamsCheckout",
+        #: (optional)
+        "retention": "RetentionParams",
+        #: (optional)
+        "legal_hold": "LegalHoldParams",
     },
     total=False,
 )
@@ -1490,7 +1589,7 @@ CheckSummary = TypedDict(
         "severity": Literal["critical", "high", "medium", "low"],
         #: Lifecycle stage.
         "stage": Literal["signup", "confirmation", "reminder", "cancellation", "config"],
-        #: User-facing status. needs_fix (a clear violation: `compliance.fix` is the one change), pending_live_check (everything Checkbox can see is right; the live event has not been observed yet — counts as compliant), verified_live (observed live: proof run, real BCC'd send, Stripe-confirmed cancellation), your_call (a real decision for a person: `compliance.question`), compliant (passes; grey areas carry a `compliance.note`), not_applicable, not_set_up (no sign the email or setting exists yet: `compliance.fix` is the one-click way to set it up; never counts as compliant), not_checked (Checkbox has not tried it yet, e.g. the cancel flow: `compliance.fix` says how; never counts as compliant).
+        #: User-facing status. needs_fix (a requirement is clearly not met: `compliance.fix` is the one change), pending_live_check (everything Checkbox can see is right; the live event has not been observed yet — counts as compliant), verified_live (observed live: proof run, real BCC'd send, Stripe-confirmed cancellation), your_call (a real decision for a person: `compliance.question`), compliant (passes; grey areas carry a `compliance.note`), not_applicable, not_set_up (no sign the email or setting exists yet: `compliance.fix` is the one-click way to set it up; never counts as compliant), not_checked (Checkbox has not tried it yet, e.g. the cancel flow: `compliance.fix` says how; never counts as compliant).
         "compliance_status": Literal["needs_fix", "pending_live_check", "verified_live", "your_call", "compliant", "not_applicable", "not_set_up", "not_checked"],
     },
     total=False,
@@ -1528,7 +1627,7 @@ Evaluation = TypedDict(
         "site": str,
         #: The scan row this evaluation belongs to.
         "scan": str,
-        #: Compliance score 0-100 (severity-weighted, one decimal place, e.g. 82.5).
+        #: Deprecated: the legacy severity-weighted 0-100 score (one decimal place), kept populated for backward compatibility. No Checkbox surface shows it; read `compliance` (status, label, counts) and the compliance plan instead.
         "score": float,
         #: Legal catalog / rules version used.
         "rules_version": str,
@@ -1706,13 +1805,13 @@ ComplianceInfoQuestion = TypedDict(
 ComplianceInfo = TypedDict(
     "ComplianceInfo",
     {
-        #: User-facing status. needs_fix (a clear violation: `compliance.fix` is the one change), pending_live_check (everything Checkbox can see is right; the live event has not been observed yet — counts as compliant), verified_live (observed live: proof run, real BCC'd send, Stripe-confirmed cancellation), your_call (a real decision for a person: `compliance.question`), compliant (passes; grey areas carry a `compliance.note`), not_applicable, not_set_up (no sign the email or setting exists yet: `compliance.fix` is the one-click way to set it up; never counts as compliant), not_checked (Checkbox has not tried it yet, e.g. the cancel flow: `compliance.fix` says how; never counts as compliant).
+        #: User-facing status. needs_fix (a requirement is clearly not met: `compliance.fix` is the one change), pending_live_check (everything Checkbox can see is right; the live event has not been observed yet — counts as compliant), verified_live (observed live: proof run, real BCC'd send, Stripe-confirmed cancellation), your_call (a real decision for a person: `compliance.question`), compliant (passes; grey areas carry a `compliance.note`), not_applicable, not_set_up (no sign the email or setting exists yet: `compliance.fix` is the one-click way to set it up; never counts as compliant), not_checked (Checkbox has not tried it yet, e.g. the cancel flow: `compliance.fix` says how; never counts as compliant).
         "status": Literal["needs_fix", "pending_live_check", "verified_live", "your_call", "compliant", "not_applicable", "not_set_up", "not_checked"],
         #: Label to show: "Needs a fix", "Not set up yet", "Not checked yet", "Looks compliant — live check pending", "Verified live", "Your call", "Compliant", "Looks compliant", "Looks compliant with a note", "Not applicable".
         "label": str,
         #: Stable code of the mapping rule (docs/ACCURACY.md).
         "reason": str,
-        #: required (legal floor: the only tier that can make a site not compliant), recommended (lowers lawsuit risk, conversion-neutral), extra (maximum protection).
+        #: required (legal floor: the only tier that can make a site not compliant), recommended (clearer records beyond the legal floor, conversion-neutral), extra (maximum protection).
         "tier": Literal["required", "recommended", "extra"],
         #: needs_fix: the one change that fixes it.
         "fix": Optional[str],
@@ -1766,7 +1865,7 @@ Finding = TypedDict(
         #: Check-specific details (failing regions/devices/URLs, measurements, quotes).
         "details": Dict[str, Any],
         "evidence": "VerdictEvidence",
-        #: User-facing status. needs_fix (a clear violation: `compliance.fix` is the one change), pending_live_check (everything Checkbox can see is right; the live event has not been observed yet — counts as compliant), verified_live (observed live: proof run, real BCC'd send, Stripe-confirmed cancellation), your_call (a real decision for a person: `compliance.question`), compliant (passes; grey areas carry a `compliance.note`), not_applicable, not_set_up (no sign the email or setting exists yet: `compliance.fix` is the one-click way to set it up; never counts as compliant), not_checked (Checkbox has not tried it yet, e.g. the cancel flow: `compliance.fix` says how; never counts as compliant).
+        #: User-facing status. needs_fix (a requirement is clearly not met: `compliance.fix` is the one change), pending_live_check (everything Checkbox can see is right; the live event has not been observed yet — counts as compliant), verified_live (observed live: proof run, real BCC'd send, Stripe-confirmed cancellation), your_call (a real decision for a person: `compliance.question`), compliant (passes; grey areas carry a `compliance.note`), not_applicable, not_set_up (no sign the email or setting exists yet: `compliance.fix` is the one-click way to set it up; never counts as compliant), not_checked (Checkbox has not tried it yet, e.g. the cancel flow: `compliance.fix` says how; never counts as compliant).
         "compliance_status": Literal["needs_fix", "pending_live_check", "verified_live", "your_call", "compliant", "not_applicable", "not_set_up", "not_checked"],
         "compliance": "ComplianceInfo",
         #: Scan that produced the latest result.
@@ -2031,9 +2130,9 @@ Task = TypedDict(
         "status": Literal["open", "in_progress", "verifying", "done", "wont_fix", "manual", "pending_live_check"],
         #: Strictest severity among the task's legal checks.
         "priority": Literal["critical", "high", "medium", "low"],
-        #: required (the legal floor: the only tier that can keep the site from being compliant), recommended (lowers lawsuit risk, conversion-neutral; shown at protection level balanced and maximum, never blocks), extra (maximum protection only). Always present on API responses. (optional)
+        #: required (the legal floor: the only tier that can keep the site from being compliant), recommended (clearer records beyond the legal floor, conversion-neutral; shown at protection level balanced and maximum, never blocks), extra (maximum protection only). Always present on API responses. (optional)
         "tier": Literal["required", "recommended", "extra"],
-        #: User-facing status. needs_fix (a clear violation: `compliance.fix` is the one change), pending_live_check (everything Checkbox can see is right; the live event has not been observed yet — counts as compliant), verified_live (observed live: proof run, real BCC'd send, Stripe-confirmed cancellation), your_call (a real decision for a person: `compliance.question`), compliant (passes; grey areas carry a `compliance.note`), not_applicable, not_set_up (no sign the email or setting exists yet: `compliance.fix` is the one-click way to set it up; never counts as compliant), not_checked (Checkbox has not tried it yet, e.g. the cancel flow: `compliance.fix` says how; never counts as compliant). (optional)
+        #: User-facing status. needs_fix (a requirement is clearly not met: `compliance.fix` is the one change), pending_live_check (everything Checkbox can see is right; the live event has not been observed yet — counts as compliant), verified_live (observed live: proof run, real BCC'd send, Stripe-confirmed cancellation), your_call (a real decision for a person: `compliance.question`), compliant (passes; grey areas carry a `compliance.note`), not_applicable, not_set_up (no sign the email or setting exists yet: `compliance.fix` is the one-click way to set it up; never counts as compliant), not_checked (Checkbox has not tried it yet, e.g. the cancel flow: `compliance.fix` says how; never counts as compliant). (optional)
         "compliance_status": Literal["needs_fix", "pending_live_check", "verified_live", "your_call", "compliant", "not_applicable", "not_set_up", "not_checked"],
         #: Position in the plan (1 = do first). Dependency-aware.
         "order": int,
@@ -2198,7 +2297,7 @@ CompliancePlan = TypedDict(
         "site": str,
         #: action_required (an agent can apply open tasks now), verifying (changes applied; waiting for confirming observations), compliant (every required check passes or only waits for a live check — an automated assessment, not a legal determination; see compliance.pending_live_checks and coverage), blocked (only human answers ("Your call") or declined critical tasks remain).
         "status": Literal["action_required", "verifying", "compliant", "blocked"],
-        #: Compliance score 0-100 of the latest evaluation.
+        #: Deprecated: the legacy 0-100 score of the latest evaluation, kept populated for backward compatibility. No Checkbox surface shows it; read `compliance` (status, label, counts) and the open tasks instead.
         "score": Optional[int],
         #: The evaluation the plan was built from (null before the first check).
         "evaluation": Optional[str],
@@ -2280,7 +2379,7 @@ VerificationCheck = TypedDict(
 VerificationPrecheck = TypedDict(
     "VerificationPrecheck",
     {
-        #: static_fetch, html, stripe_params, email or policy_fetch.
+        #: static_fetch, html, stripe_params, email, policy_fetch, or billing_sync (Stripe was re-read before judging; its verdict is always needs_review and only carries the note: the re-evaluation decides).
         "source": str,
         #: Pre-check verdict for the task's checks.
         "verdict": Literal["pass", "fail", "needs_review"],
@@ -3242,7 +3341,7 @@ CheckVerdict = TypedDict(
         #: Page checks on static HTML: the engine status on the estimated layout. (optional)
         "static_estimate": Literal["pass", "fail", "needs_review", "not_applicable"],
         "evidence": "VerdictEvidence",
-        #: User-facing status. needs_fix (a clear violation: `compliance.fix` is the one change), pending_live_check (everything Checkbox can see is right; the live event has not been observed yet — counts as compliant), verified_live (observed live: proof run, real BCC'd send, Stripe-confirmed cancellation), your_call (a real decision for a person: `compliance.question`), compliant (passes; grey areas carry a `compliance.note`), not_applicable, not_set_up (no sign the email or setting exists yet: `compliance.fix` is the one-click way to set it up; never counts as compliant), not_checked (Checkbox has not tried it yet, e.g. the cancel flow: `compliance.fix` says how; never counts as compliant).
+        #: User-facing status. needs_fix (a requirement is clearly not met: `compliance.fix` is the one change), pending_live_check (everything Checkbox can see is right; the live event has not been observed yet — counts as compliant), verified_live (observed live: proof run, real BCC'd send, Stripe-confirmed cancellation), your_call (a real decision for a person: `compliance.question`), compliant (passes; grey areas carry a `compliance.note`), not_applicable, not_set_up (no sign the email or setting exists yet: `compliance.fix` is the one-click way to set it up; never counts as compliant), not_checked (Checkbox has not tried it yet, e.g. the cancel flow: `compliance.fix` says how; never counts as compliant).
         "compliance_status": Literal["needs_fix", "pending_live_check", "verified_live", "your_call", "compliant", "not_applicable", "not_set_up", "not_checked"],
         "compliance": "ComplianceInfo",
     },
@@ -4797,7 +4896,7 @@ ConsentCheckbox = TypedDict(
 ConsentPresentation = TypedDict(
     "ConsentPresentation",
     {
-        #: Guard-rail violations measured on screen.
+        #: Guard-rail issues measured on screen.
         "violations": List[str],
         #: Safe styles replaced the theme.
         "fallback_applied": bool,
@@ -4968,7 +5067,7 @@ ConsentPresentationInput = TypedDict(
         "submit_text": Optional[str],
         #: Viewport size. (optional)
         "viewport": Optional["ConsentPresentationInputViewport"],
-        #: Guard-rail violations the element detected. (optional)
+        #: Guard-rail issues the element detected. (optional)
         "violations": List[str],
         #: The element replaced the theme with safe styles. (optional)
         "fallback_applied": bool,
@@ -6198,9 +6297,11 @@ Feedback = TypedDict(
         #: String representing the object's type. Always "feedback".
         "object": Literal["feedback"],
         #: Kind of feedback.
-        "type": Literal["bug", "idea", "question"],
+        "type": Literal["bug", "idea", "question", "review"],
         #: open until Checkbox staff reply or close it.
         "status": Literal["open", "replied", "closed"],
+        #: true when text that looked like a secret, card number or email address was replaced with [redacted] before it was stored.
+        "redacted": bool,
         #: When it was received. Unix timestamp in seconds.
         "created": int,
     },
@@ -6208,7 +6309,7 @@ Feedback = TypedDict(
 )
 
 
-#: Optional context that helps us reproduce it.
+#: Optional context that helps us reproduce it. For type review only agent and tool are kept (reviews never carry the site or request id).
 FeedbackParamsContext = TypedDict(
     "FeedbackParamsContext",
     {
@@ -6228,12 +6329,55 @@ FeedbackParamsContext = TypedDict(
 FeedbackParams = TypedDict(
     "FeedbackParams",
     {
-        #: bug: something is broken; idea: a missing feature or improvement; question: something unclear. Default idea. (optional)
-        "type": Literal["bug", "idea", "question"],
-        #: What you tried, what happened and what you expected (at most 5000 characters).
+        #: bug: something is broken; idea: a missing feature or improvement; question: something unclear; review: a structured review of Checkbox the product (send only after the human said yes and saw the text; no site names, URLs, customer data, quotes of the site's pages or emails, or claims that the site broke a law). Default idea. (optional)
+        "type": Literal["bug", "idea", "question", "review"],
+        #: What you tried, what happened and what you expected (at most 5000 characters). Required except for type review. Secrets, card numbers and email addresses are replaced with [redacted]. (optional)
         "message": str,
-        #: Optional context that helps us reproduce it. (optional)
+        #: type review (required): how likely the human is to recommend Checkbox, 0-10. (optional)
+        "score": int,
+        #: type review: what worked, at most 5 short phrases. (optional)
+        "liked": List[str],
+        #: type review: what did not work, at most 5 short phrases. (optional)
+        "disliked": List[str],
+        #: type review: Checkbox verdicts the human believes were wrong, each "<check id>: <short reason about Checkbox's verdict>" (at most 5; the reason is kept to 200 characters). (optional)
+        "wrong_verdicts": List[str],
+        #: type review: whether the human would keep using Checkbox. (optional)
+        "would_keep_using": bool,
+        #: type review: framework and billing, short. (optional)
+        "stack": str,
+        #: Optional context that helps us reproduce it. For type review only agent and tool are kept (reviews never carry the site or request id). (optional)
         "context": "FeedbackParamsContext",
+    },
+    total=False,
+)
+
+
+#: The one-time prompt to ask the human for a review of the session.
+ReviewPrompt = TypedDict(
+    "ReviewPrompt",
+    {
+        #: String representing the object's type. Always "review_prompt".
+        "object": Literal["review_prompt"],
+        #: The site.
+        "site": str,
+        #: true exactly once per site, while its plan is compliant: ask the human once whether they want to send a review. false afterwards.
+        "show": bool,
+        #: Why show is true or false.
+        "reason": Literal["first_time", "already_shown", "not_compliant"],
+        #: The instruction for the agent when show is true; null otherwise.
+        "message": Optional[str],
+        #: When the prompt was first shown for this site (null before). Unix timestamp in seconds.
+        "shown_at": Optional[int],
+    },
+    total=False,
+)
+
+
+ReviewPromptParams = TypedDict(
+    "ReviewPromptParams",
+    {
+        #: What reached compliant: the plan (retrieveCompliancePlan) or the verification of the last required task (verifyTask). Default plan_compliant. (optional)
+        "trigger": Literal["plan_compliant", "last_task_verified"],
     },
     total=False,
 )
@@ -6311,7 +6455,7 @@ CompliancePlanSummary = TypedDict(
         "site": str,
         #: action_required (an agent can apply open tasks now), verifying (changes applied; waiting for confirming observations), compliant (every required check passes or only waits for a live check — an automated assessment, not a legal determination; see compliance.pending_live_checks and coverage), blocked (only human answers ("Your call") or declined critical tasks remain).
         "status": Literal["action_required", "verifying", "compliant", "blocked"],
-        #: Compliance score 0-100 of the latest evaluation.
+        #: Deprecated: the legacy 0-100 score of the latest evaluation, kept populated for backward compatibility. No Checkbox surface shows it; read `compliance` (status, label, counts) and the open tasks instead.
         "score": Optional[int],
         #: Two or three sentences for an LLM: where the site stands and what comes next.
         "summary": str,
@@ -6396,6 +6540,10 @@ UpdateAccountParams = TypedDict(
     {
         #: API version to pin. (optional)
         "api_version": str,
+        #: (optional)
+        "retention": "RetentionParams",
+        #: (optional)
+        "legal_hold": "LegalHoldParams",
     },
     total=False,
 )
@@ -7341,7 +7489,7 @@ CreateScanResponse = TypedDict(
         "warnings": List[str],
         #: The evaluation this scan produced (null until evaluated).
         "evaluation": Optional[str],
-        #: Score of that evaluation (0-100, one decimal place).
+        #: Deprecated: the legacy 0-100 score of that evaluation, kept for backward compatibility. Read the evaluation's `compliance` status instead.
         "score": Optional[float],
         #: When the scan started. Unix timestamp in seconds.
         "started": Optional[int],
@@ -7378,7 +7526,7 @@ RetrieveScanResponse = TypedDict(
         "warnings": List[str],
         #: The evaluation this scan produced (null until evaluated).
         "evaluation": Optional[str],
-        #: Score of that evaluation (0-100, one decimal place).
+        #: Deprecated: the legacy 0-100 score of that evaluation, kept for backward compatibility. Read the evaluation's `compliance` status instead.
         "score": Optional[float],
         #: When the scan started. Unix timestamp in seconds.
         "started": Optional[int],
@@ -8401,6 +8549,7 @@ ERROR_CODES: Dict[str, Dict[str, Any]] = {
     "scan_already_queued": {"status": 409, "type": "invalid_request_error", "description": "A scan of this site is already queued or running."},
     "consent_reference_locked": {"status": 409, "type": "invalid_request_error", "description": "The consent already carries a different customer_reference; references are set once and never changed."},
     "test_run_in_progress": {"status": 409, "type": "invalid_request_error", "description": "The site already has a queued or running test run; wait for it (retrieveTestRun) or cancel it (cancelTestRun)."},
+    "legal_hold_active": {"status": 409, "type": "invalid_request_error", "description": "A legal hold is on for the account or the site: deleting data and shortening retention are refused until it is turned off (updateAccount / updateSite legal_hold)."},
     "idempotency_key_in_use": {"status": 409, "type": "idempotency_error", "description": "A request with this Idempotency-Key is still being processed; retry shortly."},
     "resource_archived": {"status": 410, "type": "invalid_request_error", "description": "The object is archived; restore it before changing it."},
     "body_too_large": {"status": 413, "type": "invalid_request_error", "description": "The request body is too large."},

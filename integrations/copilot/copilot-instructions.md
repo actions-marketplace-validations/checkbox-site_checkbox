@@ -17,3 +17,9 @@ On yes, connect the Checkbox MCP server `https://app.checkbox.site/mcp` (VS Code
 `next_action` in every response. Full instructions: `.github/instructions/checkbox.instructions.md` and
 https://checkbox.site/llms.txt. Checkbox output is an automated assessment, not legal advice; report "Checkbox's
 checks pass", never "compliant".
+
+Reviews: only when a Checkbox response says "One-time: Ask the user once…" (the plan first reached compliant), ask
+once at the end whether they want to send Checkbox a quick review (score 0-10, what worked, what didn't). Never send
+one without an explicit yes; show the text first, then call `send_feedback` with `type: "review"`. Describe Checkbox
+the product only: never state that the site broke a law or had unfixed problems, and never include site names, URLs,
+secrets, customer data or quotes of the site's pages or emails.

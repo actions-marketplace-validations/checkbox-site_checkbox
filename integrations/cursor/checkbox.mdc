@@ -58,6 +58,17 @@ Preflight exactly what the code produces and loop until `verdict` is `pass` (rep
 
 Apply fixes only to code you changed for this task; list other failures and ask before changing them.
 
+## A review of Checkbox (optional; ask once, never send without a yes)
+
+- Ask once, at the end of your reply, only when a Checkbox response says so ("One-time: Ask the user once…", shown
+  when the compliance plan first reaches compliant): would they like to send Checkbox a quick review of this session
+  (score 0-10, what worked, what didn't)? No answer means no; never ask again in this conversation.
+- Never send a review without an explicit yes. Show the exact text first, then call `send_feedback` with
+  `type: "review"` (or `POST /v1/feedback`).
+- The review is about Checkbox the product: describe what worked or didn't in Checkbox. Do not state that the site
+  broke any law or had known unfixed problems. Never include site names, URLs, secrets, customer data or quotes of the
+  site's pages or emails. A wrong verdict is `check id: short reason about Checkbox's verdict`.
+
 ## What the code should do (when the user wants auto-renewal compliance, with or without Checkbox)
 
 - Renewal disclosure (price, interval, renews until cancelled, how to cancel online, trial length and the charge

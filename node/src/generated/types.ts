@@ -311,19 +311,31 @@ export interface SetupSession {
   } | null;
   /** Latest verdict of the test-mode site. */
   compliance: {
-    /** 0-100. */
+    /**
+     * Deprecated: the legacy 0-100 score, kept populated for backward compatibility. No Checkbox surface shows it; read `label` / `status` and `todo`.
+     * @deprecated
+     */
     score: number;
     /** When it was evaluated. Unix timestamp in seconds. */
     evaluated: number;
-    /** Open failing findings. */
+    /**
+     * Deprecated: open failing findings (per check). Read `label` (counted in tasks) and `todo` instead.
+     * @deprecated
+     */
     failing: number;
-    /** Open needs-review findings. */
+    /**
+     * Deprecated: open needs-review findings (per check). Read `label` (counted in tasks) and `todo` instead.
+     * @deprecated
+     */
     needs_review: number;
     /** The site roll-up label, the same everywhere (dashboard, plan, emails): "2 fixes needed · 1 your call", "Compliant · 2 live checks pending". */
     label: string | null;
     /** The site roll-up status: needs_fix, your_call, incomplete, compliant or not_checked. */
     status: string | null;
-    /** Most urgent open findings (details: retrieveFinding; ordered tasks: `checkbox plan --json`). */
+    /**
+     * Deprecated: open findings (evidence). The to-do list is `todo` (the compliance plan's ordered open tasks).
+     * @deprecated
+     */
     top_findings: Array<{
       /** Unique identifier of the finding (fnd_…). */
       id: string;
@@ -335,6 +347,19 @@ export interface SetupSession {
       severity: string;
       /** What is wrong. */
       title: string;
+    }>;
+    /** The to-do list: the compliance plan's ordered open required tasks (same titles, order and counts as the dashboard, MCP get_site_status and the summary email). */
+    todo?: Array<{
+      /** Plan task id (task_…); its findings are the evidence. */
+      task: string;
+      /** Task key. */
+      key: string;
+      /** Task title, the same as in the plan. */
+      title: string;
+      /** The status the site roll-up counts the task under. */
+      status: "needs_fix" | "not_set_up" | "your_call" | "not_checked";
+      /** Needs a fix, Not set up yet, Your call or Not checked yet. */
+      label: string;
     }>;
   } | null;
   /** The setup checklist, in order. */
@@ -464,6 +489,26 @@ export interface SetupVerification {
   setup_session: SetupSession;
 }
 
+/** Account default retention (sites without their own setting use it). */
+export interface Retention {
+  /** Years good-practice records are kept (consent receipts, disclosures as shown, passing scans, certificates, compliant emails, confirmed cancellations, evidence-chain entries). Default 7. */
+  good_practice_years: number;
+  /** Days after a problem is resolved before its history is deleted (resolved findings, captures of the failing page, fix history); only aggregate counts stay. Open problems are never deleted. Default 30. */
+  problem_history_days: number;
+}
+
+/** Account-wide legal hold: while active, nothing of this mode's data is deleted. */
+export interface LegalHold {
+  /** A legal hold suspends every automatic deletion and refuses deletions and retention shortening. */
+  active: boolean;
+  /** What the active hold was set on (an account hold covers every site). */
+  scope: "site" | "account" | null;
+  /** When the hold was turned on. Unix timestamp in seconds. */
+  set: number | null;
+  /** Note recorded with the hold. */
+  reason: string | null;
+}
+
 /** The Checkbox account behind the API key. */
 export interface Account {
   /** Unique identifier of the account (acct_…). */
@@ -516,9 +561,27 @@ export interface Account {
     /** Checkbox is free to use. */
     plan: "free";
   };
+  retention: Retention;
+  legal_hold: LegalHold;
   /** When the account was created. Unix timestamp in seconds. */
   created: number;
   next_action: NextAction | null;
+}
+
+/** Default retention for every site without its own setting. Problem history also shows how fast you fixed things; keep it longer if you want that record. */
+export interface RetentionParams {
+  /** Years (1-10). On a site, null returns to the account default. */
+  good_practice_years?: number | null;
+  /** Days (7-730). On a site, null returns to the account default. */
+  problem_history_days?: number | null;
+}
+
+/** Account-wide legal hold: suspends every deletion of the account's records until turned off. */
+export interface LegalHoldParams {
+  /** true turns the hold on, false turns it off. */
+  active: boolean;
+  /** Note stored with the hold (who asked, matter). */
+  reason?: string;
 }
 
 /** Business facts that decide which legal requirements apply. */
@@ -561,6 +624,12 @@ export interface SiteMonitoring {
   verify_domains: Array<string>;
 }
 
+/** The retention in effect for the site. */
+export type SiteRetention = Retention & {
+  /** Both values come from the account default (no site override). */
+  inherited: boolean;
+};
+
 /** A live check Checkbox has not observed yet, and how it completes. */
 export interface PendingLiveCheck {
   /** What has not been observed yet. */
@@ -581,7 +650,7 @@ export interface CheckoutVerdict {
   kind: "own_page" | "stripe_checkout" | "payment_link" | "checkout_config" | "stripe_hosted";
   /** The declared plan this checkout sells, when matched. */
   plan: string | null;
-  /** User-facing status. needs_fix (a clear violation: `compliance.fix` is the one change), pending_live_check (everything Checkbox can see is right; the live event has not been observed yet — counts as compliant), verified_live (observed live: proof run, real BCC'd send, Stripe-confirmed cancellation), your_call (a real decision for a person: `compliance.question`), compliant (passes; grey areas carry a `compliance.note`), not_applicable, not_set_up (no sign the email or setting exists yet: `compliance.fix` is the one-click way to set it up; never counts as compliant), not_checked (Checkbox has not tried it yet, e.g. the cancel flow: `compliance.fix` says how; never counts as compliant). */
+  /** User-facing status. needs_fix (a requirement is clearly not met: `compliance.fix` is the one change), pending_live_check (everything Checkbox can see is right; the live event has not been observed yet — counts as compliant), verified_live (observed live: proof run, real BCC'd send, Stripe-confirmed cancellation), your_call (a real decision for a person: `compliance.question`), compliant (passes; grey areas carry a `compliance.note`), not_applicable, not_set_up (no sign the email or setting exists yet: `compliance.fix` is the one-click way to set it up; never counts as compliant), not_checked (Checkbox has not tried it yet, e.g. the cancel flow: `compliance.fix` says how; never counts as compliant). */
   status: "needs_fix" | "pending_live_check" | "verified_live" | "your_call" | "compliant" | "not_applicable" | "not_set_up" | "not_checked";
   /** Label to show. */
   label: string;
@@ -591,7 +660,7 @@ export interface CheckoutVerdict {
     check_id: string;
     /** Short check title. */
     title: string;
-    /** User-facing status. needs_fix (a clear violation: `compliance.fix` is the one change), pending_live_check (everything Checkbox can see is right; the live event has not been observed yet — counts as compliant), verified_live (observed live: proof run, real BCC'd send, Stripe-confirmed cancellation), your_call (a real decision for a person: `compliance.question`), compliant (passes; grey areas carry a `compliance.note`), not_applicable, not_set_up (no sign the email or setting exists yet: `compliance.fix` is the one-click way to set it up; never counts as compliant), not_checked (Checkbox has not tried it yet, e.g. the cancel flow: `compliance.fix` says how; never counts as compliant). */
+    /** User-facing status. needs_fix (a requirement is clearly not met: `compliance.fix` is the one change), pending_live_check (everything Checkbox can see is right; the live event has not been observed yet — counts as compliant), verified_live (observed live: proof run, real BCC'd send, Stripe-confirmed cancellation), your_call (a real decision for a person: `compliance.question`), compliant (passes; grey areas carry a `compliance.note`), not_applicable, not_set_up (no sign the email or setting exists yet: `compliance.fix` is the one-click way to set it up; never counts as compliant), not_checked (Checkbox has not tried it yet, e.g. the cancel flow: `compliance.fix` says how; never counts as compliant). */
     status: "needs_fix" | "pending_live_check" | "verified_live" | "your_call" | "compliant" | "not_applicable" | "not_set_up" | "not_checked";
   }>;
 }
@@ -634,7 +703,10 @@ export interface ComplianceRollup {
 
 /** Latest verdict; null until the first evaluation. */
 export type SiteCompliance = {
-  /** Compliance score 0-100 (one decimal place). */
+  /**
+   * Deprecated: the legacy 0-100 score (one decimal place), kept populated for backward compatibility. No Checkbox surface shows it; read `compliance` (status, label, counts) and the compliance plan instead.
+   * @deprecated
+   */
   score: number;
   /** When the latest evaluation ran. Unix timestamp in seconds. */
   evaluated: number;
@@ -683,7 +755,10 @@ export interface Scan {
   warnings: Array<string>;
   /** The evaluation this scan produced (null until evaluated). */
   evaluation: string | null;
-  /** Score of that evaluation (0-100, one decimal place). */
+  /**
+   * Deprecated: the legacy 0-100 score of that evaluation, kept for backward compatibility. Read the evaluation's `compliance` status instead.
+   * @deprecated
+   */
   score: number | null;
   /** When the scan started. Unix timestamp in seconds. */
   started: number | null;
@@ -798,6 +873,8 @@ export interface Site {
   monitoring: SiteMonitoring;
   /** Which requirement tiers Checkbox shows (minimum: required only; balanced: + recommended suggestions; maximum: + extras). Only required items affect compliance. */
   protection_level: "minimum" | "balanced" | "maximum";
+  retention: SiteRetention;
+  legal_hold: LegalHold;
   compliance: SiteCompliance;
   install: SiteInstall;
   /** Archived (soft-deleted); evidence is retained. */
@@ -951,6 +1028,8 @@ export interface UpdateSiteParams {
     /** Same as terms_url. */
     terms_url?: string | null;
   };
+  retention?: RetentionParams;
+  legal_hold?: LegalHoldParams;
 }
 
 /** A billing-platform connection of a site. */
@@ -1022,7 +1101,7 @@ export interface CheckSummary {
   severity: "critical" | "high" | "medium" | "low";
   /** Lifecycle stage. */
   stage: "signup" | "confirmation" | "reminder" | "cancellation" | "config";
-  /** User-facing status. needs_fix (a clear violation: `compliance.fix` is the one change), pending_live_check (everything Checkbox can see is right; the live event has not been observed yet — counts as compliant), verified_live (observed live: proof run, real BCC'd send, Stripe-confirmed cancellation), your_call (a real decision for a person: `compliance.question`), compliant (passes; grey areas carry a `compliance.note`), not_applicable, not_set_up (no sign the email or setting exists yet: `compliance.fix` is the one-click way to set it up; never counts as compliant), not_checked (Checkbox has not tried it yet, e.g. the cancel flow: `compliance.fix` says how; never counts as compliant). */
+  /** User-facing status. needs_fix (a requirement is clearly not met: `compliance.fix` is the one change), pending_live_check (everything Checkbox can see is right; the live event has not been observed yet — counts as compliant), verified_live (observed live: proof run, real BCC'd send, Stripe-confirmed cancellation), your_call (a real decision for a person: `compliance.question`), compliant (passes; grey areas carry a `compliance.note`), not_applicable, not_set_up (no sign the email or setting exists yet: `compliance.fix` is the one-click way to set it up; never counts as compliant), not_checked (Checkbox has not tried it yet, e.g. the cancel flow: `compliance.fix` says how; never counts as compliant). */
   compliance_status: "needs_fix" | "pending_live_check" | "verified_live" | "your_call" | "compliant" | "not_applicable" | "not_set_up" | "not_checked";
 }
 
@@ -1038,7 +1117,10 @@ export interface Evaluation {
   site: string;
   /** The scan row this evaluation belongs to. */
   scan: string;
-  /** Compliance score 0-100 (severity-weighted, one decimal place, e.g. 82.5). */
+  /**
+   * Deprecated: the legacy severity-weighted 0-100 score (one decimal place), kept populated for backward compatibility. No Checkbox surface shows it; read `compliance` (status, label, counts) and the compliance plan instead.
+   * @deprecated
+   */
   score: number;
   /** Legal catalog / rules version used. */
   rules_version: string;
@@ -1160,13 +1242,13 @@ export interface VerdictEvidence {
 
 /** What a person should do about one check (the user-facing layer over `status`). */
 export interface ComplianceInfo {
-  /** User-facing status. needs_fix (a clear violation: `compliance.fix` is the one change), pending_live_check (everything Checkbox can see is right; the live event has not been observed yet — counts as compliant), verified_live (observed live: proof run, real BCC'd send, Stripe-confirmed cancellation), your_call (a real decision for a person: `compliance.question`), compliant (passes; grey areas carry a `compliance.note`), not_applicable, not_set_up (no sign the email or setting exists yet: `compliance.fix` is the one-click way to set it up; never counts as compliant), not_checked (Checkbox has not tried it yet, e.g. the cancel flow: `compliance.fix` says how; never counts as compliant). */
+  /** User-facing status. needs_fix (a requirement is clearly not met: `compliance.fix` is the one change), pending_live_check (everything Checkbox can see is right; the live event has not been observed yet — counts as compliant), verified_live (observed live: proof run, real BCC'd send, Stripe-confirmed cancellation), your_call (a real decision for a person: `compliance.question`), compliant (passes; grey areas carry a `compliance.note`), not_applicable, not_set_up (no sign the email or setting exists yet: `compliance.fix` is the one-click way to set it up; never counts as compliant), not_checked (Checkbox has not tried it yet, e.g. the cancel flow: `compliance.fix` says how; never counts as compliant). */
   status: "needs_fix" | "pending_live_check" | "verified_live" | "your_call" | "compliant" | "not_applicable" | "not_set_up" | "not_checked";
   /** Label to show: "Needs a fix", "Not set up yet", "Not checked yet", "Looks compliant — live check pending", "Verified live", "Your call", "Compliant", "Looks compliant", "Looks compliant with a note", "Not applicable". */
   label: string;
   /** Stable code of the mapping rule (docs/ACCURACY.md). */
   reason: string;
-  /** required (legal floor: the only tier that can make a site not compliant), recommended (lowers lawsuit risk, conversion-neutral), extra (maximum protection). */
+  /** required (legal floor: the only tier that can make a site not compliant), recommended (clearer records beyond the legal floor, conversion-neutral), extra (maximum protection). */
   tier: "required" | "recommended" | "extra";
   /** needs_fix: the one change that fixes it. */
   fix: string | null;
@@ -1222,7 +1304,7 @@ export interface Finding {
   /** Check-specific details (failing regions/devices/URLs, measurements, quotes). */
   details: Record<string, unknown>;
   evidence: VerdictEvidence;
-  /** User-facing status. needs_fix (a clear violation: `compliance.fix` is the one change), pending_live_check (everything Checkbox can see is right; the live event has not been observed yet — counts as compliant), verified_live (observed live: proof run, real BCC'd send, Stripe-confirmed cancellation), your_call (a real decision for a person: `compliance.question`), compliant (passes; grey areas carry a `compliance.note`), not_applicable, not_set_up (no sign the email or setting exists yet: `compliance.fix` is the one-click way to set it up; never counts as compliant), not_checked (Checkbox has not tried it yet, e.g. the cancel flow: `compliance.fix` says how; never counts as compliant). */
+  /** User-facing status. needs_fix (a requirement is clearly not met: `compliance.fix` is the one change), pending_live_check (everything Checkbox can see is right; the live event has not been observed yet — counts as compliant), verified_live (observed live: proof run, real BCC'd send, Stripe-confirmed cancellation), your_call (a real decision for a person: `compliance.question`), compliant (passes; grey areas carry a `compliance.note`), not_applicable, not_set_up (no sign the email or setting exists yet: `compliance.fix` is the one-click way to set it up; never counts as compliant), not_checked (Checkbox has not tried it yet, e.g. the cancel flow: `compliance.fix` says how; never counts as compliant). */
   compliance_status: "needs_fix" | "pending_live_check" | "verified_live" | "your_call" | "compliant" | "not_applicable" | "not_set_up" | "not_checked";
   compliance: ComplianceInfo;
   /** Scan that produced the latest result. */
@@ -1314,9 +1396,9 @@ export interface Task {
   status: "open" | "in_progress" | "verifying" | "done" | "wont_fix" | "manual" | "pending_live_check";
   /** Strictest severity among the task's legal checks. */
   priority: "critical" | "high" | "medium" | "low";
-  /** required (the legal floor: the only tier that can keep the site from being compliant), recommended (lowers lawsuit risk, conversion-neutral; shown at protection level balanced and maximum, never blocks), extra (maximum protection only). Always present on API responses. */
+  /** required (the legal floor: the only tier that can keep the site from being compliant), recommended (clearer records beyond the legal floor, conversion-neutral; shown at protection level balanced and maximum, never blocks), extra (maximum protection only). Always present on API responses. */
   tier?: "required" | "recommended" | "extra";
-  /** User-facing status. needs_fix (a clear violation: `compliance.fix` is the one change), pending_live_check (everything Checkbox can see is right; the live event has not been observed yet — counts as compliant), verified_live (observed live: proof run, real BCC'd send, Stripe-confirmed cancellation), your_call (a real decision for a person: `compliance.question`), compliant (passes; grey areas carry a `compliance.note`), not_applicable, not_set_up (no sign the email or setting exists yet: `compliance.fix` is the one-click way to set it up; never counts as compliant), not_checked (Checkbox has not tried it yet, e.g. the cancel flow: `compliance.fix` says how; never counts as compliant). */
+  /** User-facing status. needs_fix (a requirement is clearly not met: `compliance.fix` is the one change), pending_live_check (everything Checkbox can see is right; the live event has not been observed yet — counts as compliant), verified_live (observed live: proof run, real BCC'd send, Stripe-confirmed cancellation), your_call (a real decision for a person: `compliance.question`), compliant (passes; grey areas carry a `compliance.note`), not_applicable, not_set_up (no sign the email or setting exists yet: `compliance.fix` is the one-click way to set it up; never counts as compliant), not_checked (Checkbox has not tried it yet, e.g. the cancel flow: `compliance.fix` says how; never counts as compliant). */
   compliance_status?: "needs_fix" | "pending_live_check" | "verified_live" | "your_call" | "compliant" | "not_applicable" | "not_set_up" | "not_checked";
   /** Position in the plan (1 = do first). Dependency-aware. */
   order: number;
@@ -1447,7 +1529,10 @@ export interface CompliancePlan {
   site: string;
   /** action_required (an agent can apply open tasks now), verifying (changes applied; waiting for confirming observations), compliant (every required check passes or only waits for a live check — an automated assessment, not a legal determination; see compliance.pending_live_checks and coverage), blocked (only human answers ("Your call") or declined critical tasks remain). */
   status: "action_required" | "verifying" | "compliant" | "blocked";
-  /** Compliance score 0-100 of the latest evaluation. */
+  /**
+   * Deprecated: the legacy 0-100 score of the latest evaluation, kept populated for backward compatibility. No Checkbox surface shows it; read `compliance` (status, label, counts) and the open tasks instead.
+   * @deprecated
+   */
   score: number | null;
   /** The evaluation the plan was built from (null before the first check). */
   evaluation: string | null;
@@ -1585,7 +1670,7 @@ export interface Verification {
   method: "page_fetch" | "policy_refetch" | "stripe_params" | "email_copy" | "platform_sync" | "attestation" | "evaluation" | "test_run";
   /** The fast pre-check run immediately (seconds). A failing pre-check fails the verification at once. */
   precheck: {
-    /** static_fetch, html, stripe_params, email or policy_fetch. */
+    /** static_fetch, html, stripe_params, email, policy_fetch, or billing_sync (Stripe was re-read before judging; its verdict is always needs_review and only carries the note: the re-evaluation decides). */
     source: string;
     /** Pre-check verdict for the task's checks. */
     verdict: "pass" | "fail" | "needs_review";
@@ -2263,7 +2348,7 @@ export interface CheckVerdict {
   /** Page checks on static HTML: the engine status on the estimated layout. */
   static_estimate?: "pass" | "fail" | "needs_review" | "not_applicable";
   evidence: VerdictEvidence;
-  /** User-facing status. needs_fix (a clear violation: `compliance.fix` is the one change), pending_live_check (everything Checkbox can see is right; the live event has not been observed yet — counts as compliant), verified_live (observed live: proof run, real BCC'd send, Stripe-confirmed cancellation), your_call (a real decision for a person: `compliance.question`), compliant (passes; grey areas carry a `compliance.note`), not_applicable, not_set_up (no sign the email or setting exists yet: `compliance.fix` is the one-click way to set it up; never counts as compliant), not_checked (Checkbox has not tried it yet, e.g. the cancel flow: `compliance.fix` says how; never counts as compliant). */
+  /** User-facing status. needs_fix (a requirement is clearly not met: `compliance.fix` is the one change), pending_live_check (everything Checkbox can see is right; the live event has not been observed yet — counts as compliant), verified_live (observed live: proof run, real BCC'd send, Stripe-confirmed cancellation), your_call (a real decision for a person: `compliance.question`), compliant (passes; grey areas carry a `compliance.note`), not_applicable, not_set_up (no sign the email or setting exists yet: `compliance.fix` is the one-click way to set it up; never counts as compliant), not_checked (Checkbox has not tried it yet, e.g. the cancel flow: `compliance.fix` says how; never counts as compliant). */
   compliance_status: "needs_fix" | "pending_live_check" | "verified_live" | "your_call" | "compliant" | "not_applicable" | "not_set_up" | "not_checked";
   compliance: ComplianceInfo;
 }
@@ -3336,7 +3421,7 @@ export interface Consent {
   client_timestamp: number | null;
   /** On-screen measurement summary (null for server-recorded consents). */
   presentation: {
-    /** Guard-rail violations measured on screen. */
+    /** Guard-rail issues measured on screen. */
     violations: Array<string>;
     /** Safe styles replaced the theme. */
     fallback_applied: boolean;
@@ -3428,7 +3513,7 @@ export interface ConsentPresentationInput {
     /** Viewport height (CSS px). */
     height: number;
   } | null;
-  /** Guard-rail violations the element detected. */
+  /** Guard-rail issues the element detected. */
   violations?: Array<string>;
   /** The element replaced the theme with safe styles. */
   fallback_applied?: boolean;
@@ -4242,19 +4327,33 @@ export interface Feedback {
   /** String representing the object's type. Always "feedback". */
   object: "feedback";
   /** Kind of feedback. */
-  type: "bug" | "idea" | "question";
+  type: "bug" | "idea" | "question" | "review";
   /** open until Checkbox staff reply or close it. */
   status: "open" | "replied" | "closed";
+  /** true when text that looked like a secret, card number or email address was replaced with [redacted] before it was stored. */
+  redacted: boolean;
   /** When it was received. Unix timestamp in seconds. */
   created: number;
 }
 
 export interface FeedbackParams {
-  /** bug: something is broken; idea: a missing feature or improvement; question: something unclear. Default idea. */
-  type?: "bug" | "idea" | "question";
-  /** What you tried, what happened and what you expected (at most 5000 characters). */
-  message: string;
-  /** Optional context that helps us reproduce it. */
+  /** bug: something is broken; idea: a missing feature or improvement; question: something unclear; review: a structured review of Checkbox the product (send only after the human said yes and saw the text; no site names, URLs, customer data, quotes of the site's pages or emails, or claims that the site broke a law). Default idea. */
+  type?: "bug" | "idea" | "question" | "review";
+  /** What you tried, what happened and what you expected (at most 5000 characters). Required except for type review. Secrets, card numbers and email addresses are replaced with [redacted]. */
+  message?: string;
+  /** type review (required): how likely the human is to recommend Checkbox, 0-10. */
+  score?: number;
+  /** type review: what worked, at most 5 short phrases. */
+  liked?: Array<string>;
+  /** type review: what did not work, at most 5 short phrases. */
+  disliked?: Array<string>;
+  /** type review: Checkbox verdicts the human believes were wrong, each "<check id>: <short reason about Checkbox's verdict>" (at most 5; the reason is kept to 200 characters). */
+  wrong_verdicts?: Array<string>;
+  /** type review: whether the human would keep using Checkbox. */
+  would_keep_using?: boolean;
+  /** type review: framework and billing, short. */
+  stack?: string;
+  /** Optional context that helps us reproduce it. For type review only agent and tool are kept (reviews never carry the site or request id). */
   context?: {
     /** Site id the feedback is about. */
     site?: string;
@@ -4265,6 +4364,27 @@ export interface FeedbackParams {
     /** The agent or client sending it. */
     agent?: string;
   };
+}
+
+/** The one-time prompt to ask the human for a review of the session. */
+export interface ReviewPrompt {
+  /** String representing the object's type. Always "review_prompt". */
+  object: "review_prompt";
+  /** The site. */
+  site: string;
+  /** true exactly once per site, while its plan is compliant: ask the human once whether they want to send a review. false afterwards. */
+  show: boolean;
+  /** Why show is true or false. */
+  reason: "first_time" | "already_shown" | "not_compliant";
+  /** The instruction for the agent when show is true; null otherwise. */
+  message: string | null;
+  /** When the prompt was first shown for this site (null before). Unix timestamp in seconds. */
+  shown_at: number | null;
+}
+
+export interface ReviewPromptParams {
+  /** What reached compliant: the plan (retrieveCompliancePlan) or the verification of the last required task (verifyTask). Default plan_compliant. */
+  trigger?: "plan_compliant" | "last_task_verified";
 }
 
 /** A compliance plan without task content (webhook payload). */
@@ -4279,7 +4399,10 @@ export interface CompliancePlanSummary {
   site: string;
   /** action_required (an agent can apply open tasks now), verifying (changes applied; waiting for confirming observations), compliant (every required check passes or only waits for a live check — an automated assessment, not a legal determination; see compliance.pending_live_checks and coverage), blocked (only human answers ("Your call") or declined critical tasks remain). */
   status: "action_required" | "verifying" | "compliant" | "blocked";
-  /** Compliance score 0-100 of the latest evaluation. */
+  /**
+   * Deprecated: the legacy 0-100 score of the latest evaluation, kept populated for backward compatibility. No Checkbox surface shows it; read `compliance` (status, label, counts) and the open tasks instead.
+   * @deprecated
+   */
   score: number | null;
   /** Two or three sentences for an LLM: where the site stands and what comes next. */
   summary: string;
@@ -4381,6 +4504,8 @@ export interface ListSetupSessionsParams {
 export interface UpdateAccountParams {
   /** API version to pin. */
   api_version?: string;
+  retention?: RetentionParams;
+  legal_hold?: LegalHoldParams;
 }
 
 /** Parameters of `sites.list()` (listSites). */
@@ -5090,6 +5215,7 @@ export const ERROR_CODES = {
   scan_already_queued: { status: 409, type: "invalid_request_error", description: "A scan of this site is already queued or running." },
   consent_reference_locked: { status: 409, type: "invalid_request_error", description: "The consent already carries a different customer_reference; references are set once and never changed." },
   test_run_in_progress: { status: 409, type: "invalid_request_error", description: "The site already has a queued or running test run; wait for it (retrieveTestRun) or cancel it (cancelTestRun)." },
+  legal_hold_active: { status: 409, type: "invalid_request_error", description: "A legal hold is on for the account or the site: deleting data and shortening retention are refused until it is turned off (updateAccount / updateSite legal_hold)." },
   idempotency_key_in_use: { status: 409, type: "idempotency_error", description: "A request with this Idempotency-Key is still being processed; retry shortly." },
   resource_archived: { status: 410, type: "invalid_request_error", description: "The object is archived; restore it before changing it." },
   body_too_large: { status: 413, type: "invalid_request_error", description: "The request body is too large." },

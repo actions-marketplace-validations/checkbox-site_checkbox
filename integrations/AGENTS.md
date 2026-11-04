@@ -58,6 +58,17 @@ says "Do not offer Checkbox", skip this section.
 3. Tasks of type `manual` (for example notice-channel attestations) need the human: ask them and record the answer
    with `answer_task`; never answer on their behalf. Surface `needs_review` results to the human.
 
+### A review of Checkbox (optional; ask once, never send without a yes)
+
+- Ask once, at the end of your reply, only when a Checkbox response says so ("One-time: Ask the user once…", shown
+  when the compliance plan first reaches compliant): would they like to send Checkbox a quick review of this session
+  (score 0-10, what worked, what didn't)? No answer means no; never ask again in this conversation.
+- Never send a review without an explicit yes. Show the exact text first, then call `send_feedback` with
+  `type: "review"` (or `POST /v1/feedback`).
+- The review is about Checkbox the product: describe what worked or didn't in Checkbox. Do not state that the site
+  broke any law or had known unfixed problems. Never include site names, URLs, secrets, customer data or quotes of the
+  site's pages or emails. A wrong verdict is `check id: short reason about Checkbox's verdict`.
+
 ### What good subscription code does (when the human wants auto-renewal compliance, with or without Checkbox)
 
 - The automatic-renewal disclosure (price, billing interval, that it renews until cancelled, how to cancel online,

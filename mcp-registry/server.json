@@ -4,7 +4,7 @@
   "title": "Checkbox",
   "description": "Auto-renewal law compliance (ROSCA, CA, NY, other states) for subscription checkout and emails",
   "websiteUrl": "https://checkbox.site/docs/mcp",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "remotes": [
     {
       "type": "streamable-http",
@@ -12,7 +12,7 @@
       "headers": [
         {
           "name": "Authorization",
-          "description": "Optional. Clients that implement MCP OAuth sign in without it (browser approval). Otherwise Bearer <Checkbox API key> (ck_test_… or ck_live_…).",
+          "description": "Optional. Clients that implement MCP OAuth sign in without it (browser approval). Otherwise Bearer <Checkbox API key> (ck_test_\u2026 or ck_live_\u2026).",
           "isRequired": false,
           "isSecret": true
         }
@@ -25,5 +25,28 @@
       "llms_txt": "https://checkbox.site/llms.txt",
       "openapi": "https://app.checkbox.site/v1/openapi.json"
     }
+  },
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "@checkbox-site/mcp",
+      "version": "0.1.1",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "CHECKBOX_API_KEY",
+          "description": "Checkbox API key (ck_test_\u2026 or ck_live_\u2026). Free at https://app.checkbox.site/sign-up",
+          "isRequired": true,
+          "isSecret": true
+        }
+      ]
+    }
+  ],
+  "repository": {
+    "url": "https://github.com/checkbox-site/checkbox",
+    "source": "github",
+    "subfolder": "mcp"
   }
 }

@@ -36,7 +36,7 @@
     },
     {
       "name": "Evaluations",
-      "description": "Compliance verdicts: score 0-100 and compliance status, with the blocking checks."
+      "description": "Compliance verdicts: the compliance status (label and counts), with the blocking checks."
     },
     {
       "name": "Findings",
@@ -1225,7 +1225,8 @@
             "properties": {
               "score": {
                 "type": "number",
-                "description": "0-100.",
+                "description": "Deprecated: the legacy 0-100 score, kept populated for backward compatibility. No Checkbox surface shows it; read `label` / `status` and `todo`.",
+                "deprecated": true,
                 "example": 72
               },
               "evaluated": {
@@ -1235,12 +1236,14 @@
               },
               "failing": {
                 "type": "integer",
-                "description": "Open failing findings.",
+                "description": "Deprecated: open failing findings (per check). Read `label` (counted in tasks) and `todo` instead.",
+                "deprecated": true,
                 "example": 3
               },
               "needs_review": {
                 "type": "integer",
-                "description": "Open needs-review findings.",
+                "description": "Deprecated: open needs-review findings (per check). Read `label` (counted in tasks) and `todo` instead.",
+                "deprecated": true,
                 "example": 2
               },
               "label": {
@@ -1298,8 +1301,65 @@
                     "title"
                   ]
                 },
-                "description": "Most urgent open findings (details: retrieveFinding; ordered tasks: `checkbox plan --json`).",
+                "description": "Deprecated: open findings (evidence). The to-do list is `todo` (the compliance plan's ordered open tasks).",
+                "deprecated": true,
                 "example": []
+              },
+              "todo": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "task": {
+                      "type": "string",
+                      "description": "Plan task id (task_…); its findings are the evidence.",
+                      "example": "task_abc"
+                    },
+                    "key": {
+                      "type": "string",
+                      "description": "Task key.",
+                      "example": "signup_disclosure"
+                    },
+                    "title": {
+                      "type": "string",
+                      "description": "Task title, the same as in the plan.",
+                      "example": "Show the renewal terms right above the purchase button"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "needs_fix",
+                        "not_set_up",
+                        "your_call",
+                        "not_checked"
+                      ],
+                      "description": "The status the site roll-up counts the task under.",
+                      "example": "needs_fix"
+                    },
+                    "label": {
+                      "type": "string",
+                      "description": "Needs a fix, Not set up yet, Your call or Not checked yet.",
+                      "example": "Needs a fix"
+                    }
+                  },
+                  "required": [
+                    "task",
+                    "key",
+                    "title",
+                    "status",
+                    "label"
+                  ]
+                },
+                "description": "The to-do list: the compliance plan's ordered open required tasks (same titles, order and counts as the dashboard, MCP get_site_status and the summary email).",
+                "example": [
+                  {
+                    "task": "task_abc",
+                    "key": "signup_disclosure",
+                    "title": "Show the renewal terms right above the purchase button",
+                    "status": "needs_fix",
+                    "label": "Needs a fix"
+                  }
+                ]
               }
             },
             "required": [
@@ -1319,7 +1379,16 @@
               "needs_review": 2,
               "label": "1 fix needed · 1 to set up",
               "status": "needs_fix",
-              "top_findings": []
+              "top_findings": [],
+              "todo": [
+                {
+                  "task": "task_abc",
+                  "key": "signup_disclosure",
+                  "title": "Show the renewal terms right above the purchase button",
+                  "status": "needs_fix",
+                  "label": "Needs a fix"
+                }
+              ]
             }
           },
           "steps": {
@@ -1737,7 +1806,16 @@
                   "needs_review": 2,
                   "label": "1 fix needed · 1 to set up",
                   "status": "needs_fix",
-                  "top_findings": []
+                  "top_findings": [],
+                  "todo": [
+                    {
+                      "task": "task_abc",
+                      "key": "signup_disclosure",
+                      "title": "Show the renewal terms right above the purchase button",
+                      "status": "needs_fix",
+                      "label": "Needs a fix"
+                    }
+                  ]
                 },
                 "steps": [],
                 "next_action": {
@@ -1910,6 +1988,71 @@
           "setup_session"
         ],
         "description": "Result of verifySetupSession, with the updated session."
+      },
+      "Retention": {
+        "type": "object",
+        "properties": {
+          "good_practice_years": {
+            "type": "integer",
+            "description": "Years good-practice records are kept (consent receipts, disclosures as shown, passing scans, certificates, compliant emails, confirmed cancellations, evidence-chain entries). Default 7.",
+            "example": 7
+          },
+          "problem_history_days": {
+            "type": "integer",
+            "description": "Days after a problem is resolved before its history is deleted (resolved findings, captures of the failing page, fix history); only aggregate counts stay. Open problems are never deleted. Default 30.",
+            "example": 30
+          }
+        },
+        "required": [
+          "good_practice_years",
+          "problem_history_days"
+        ],
+        "description": "Account default retention (sites without their own setting use it)."
+      },
+      "LegalHold": {
+        "type": "object",
+        "properties": {
+          "active": {
+            "type": "boolean",
+            "description": "A legal hold suspends every automatic deletion and refuses deletions and retention shortening.",
+            "example": false
+          },
+          "scope": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "site",
+              "account"
+            ],
+            "description": "What the active hold was set on (an account hold covers every site).",
+            "example": null
+          },
+          "set": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "When the hold was turned on. Unix timestamp in seconds.",
+            "example": null
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Note recorded with the hold.",
+            "example": null
+          }
+        },
+        "required": [
+          "active",
+          "scope",
+          "set",
+          "reason"
+        ],
+        "description": "Account-wide legal hold: while active, nothing of this mode's data is deleted."
       },
       "Account": {
         "type": "object",
@@ -2121,6 +2264,12 @@
               "plan": "free"
             }
           },
+          "retention": {
+            "$ref": "#/components/schemas/Retention"
+          },
+          "legal_hold": {
+            "$ref": "#/components/schemas/LegalHold"
+          },
           "created": {
             "type": "integer",
             "description": "When the account was created. Unix timestamp in seconds.",
@@ -2161,10 +2310,58 @@
           "key",
           "publishable_key",
           "billing",
+          "retention",
+          "legal_hold",
           "created",
           "next_action"
         ],
         "description": "The Checkbox account behind the API key."
+      },
+      "RetentionParams": {
+        "type": "object",
+        "properties": {
+          "good_practice_years": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1,
+            "maximum": 10,
+            "description": "Years (1-10). On a site, null returns to the account default.",
+            "example": 7
+          },
+          "problem_history_days": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 7,
+            "maximum": 730,
+            "description": "Days (7-730). On a site, null returns to the account default.",
+            "example": 30
+          }
+        },
+        "description": "Default retention for every site without its own setting. Problem history also shows how fast you fixed things; keep it longer if you want that record."
+      },
+      "LegalHoldParams": {
+        "type": "object",
+        "properties": {
+          "active": {
+            "type": "boolean",
+            "description": "true turns the hold on, false turns it off.",
+            "example": true
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 500,
+            "description": "Note stored with the hold (who asked, matter).",
+            "example": "Litigation hold requested by counsel"
+          }
+        },
+        "required": [
+          "active"
+        ],
+        "description": "Account-wide legal hold: suspends every deletion of the account's records until turned off."
       },
       "SiteFacts": {
         "type": "object",
@@ -2294,6 +2491,27 @@
         ],
         "description": "Scheduled monitoring."
       },
+      "SiteRetention": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Retention"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "inherited": {
+                "type": "boolean",
+                "description": "Both values come from the account default (no site override).",
+                "example": true
+              }
+            },
+            "required": [
+              "inherited"
+            ]
+          }
+        ],
+        "description": "The retention in effect for the site."
+      },
       "PendingLiveCheck": {
         "type": "object",
         "properties": {
@@ -2380,7 +2598,7 @@
               "not_set_up",
               "not_checked"
             ],
-            "description": "User-facing status. needs_fix (a clear violation: `compliance.fix` is the one change), pending_live_check (everything Checkbox can see is right; the live event has not been observed yet — counts as compliant), verified_live (observed live: proof run, real BCC'd send, Stripe-confirmed cancellation), your_call (a real decision for a person: `compliance.question`), compliant (passes; grey areas carry a `compliance.note`), not_applicable, not_set_up (no sign the email or setting exists yet: `compliance.fix` is the one-click way to set it up; never counts as compliant), not_checked (Checkbox has not tried it yet, e.g. the cancel flow: `compliance.fix` says how; never counts as compliant).",
+            "description": "User-facing status. needs_fix (a requirement is clearly not met: `compliance.fix` is the one change), pending_live_check (everything Checkbox can see is right; the live event has not been observed yet — counts as compliant), verified_live (observed live: proof run, real BCC'd send, Stripe-confirmed cancellation), your_call (a real decision for a person: `compliance.question`), compliant (passes; grey areas carry a `compliance.note`), not_applicable, not_set_up (no sign the email or setting exists yet: `compliance.fix` is the one-click way to set it up; never counts as compliant), not_checked (Checkbox has not tried it yet, e.g. the cancel flow: `compliance.fix` says how; never counts as compliant).",
             "example": "pending_live_check"
           },
           "label": {
@@ -2415,7 +2633,7 @@
                     "not_set_up",
                     "not_checked"
                   ],
-                  "description": "User-facing status. needs_fix (a clear violation: `compliance.fix` is the one change), pending_live_check (everything Checkbox can see is right; the live event has not been observed yet — counts as compliant), verified_live (observed live: proof run, real BCC'd send, Stripe-confirmed cancellation), your_call (a real decision for a person: `compliance.question`), compliant (passes; grey areas carry a `compliance.note`), not_applicable, not_set_up (no sign the email or setting exists yet: `compliance.fix` is the one-click way to set it up; never counts as compliant), not_checked (Checkbox has not tried it yet, e.g. the cancel flow: `compliance.fix` says how; never counts as compliant).",
+                  "description": "User-facing status. needs_fix (a requirement is clearly not met: `compliance.fix` is the one change), pending_live_check (everything Checkbox can see is right; the live event has not been observed yet — counts as compliant), verified_live (observed live: proof run, real BCC'd send, Stripe-confirmed cancellation), your_call (a real decision for a person: `compliance.question`), compliant (passes; grey areas carry a `compliance.note`), not_applicable, not_set_up (no sign the email or setting exists yet: `compliance.fix` is the one-click way to set it up; never counts as compliant), not_checked (Checkbox has not tried it yet, e.g. the cancel flow: `compliance.fix` says how; never counts as compliant).",
                   "example": "pending_live_check"
                 }
               },
@@ -2612,7 +2830,8 @@
             "type": "number",
             "minimum": 0,
             "maximum": 100,
-            "description": "Compliance score 0-100 (one decimal place).",
+            "description": "Deprecated: the legacy 0-100 score (one decimal place), kept populated for backward compatibility. No Checkbox surface shows it; read `compliance` (status, label, counts) and the compliance plan instead.",
+            "deprecated": true,
             "example": 82
           },
           "evaluated": {
@@ -2843,7 +3062,8 @@
             ],
             "minimum": 0,
             "maximum": 100,
-            "description": "Score of that evaluation (0-100, one decimal place).",
+            "description": "Deprecated: the legacy 0-100 score of that evaluation, kept for backward compatibility. Read the evaluation's `compliance` status instead.",
+            "deprecated": true,
             "example": 82
           },
           "started": {
@@ -3420,6 +3640,25 @@
             "description": "Which requirement tiers Checkbox shows (minimum: required only; balanced: + recommended suggestions; maximum: + extras). Only required items affect compliance.",
             "example": "balanced"
           },
+          "retention": {
+            "$ref": "#/components/schemas/SiteRetention"
+          },
+          "legal_hold": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LegalHold"
+              },
+              {
+                "description": "Legal hold status."
+              }
+            ],
+            "example": {
+              "active": false,
+              "scope": null,
+              "set": null,
+              "reason": null
+            }
+          },
           "compliance": {
             "$ref": "#/components/schemas/SiteCompliance"
           },
@@ -3455,6 +3694,8 @@
           "checkout",
           "monitoring",
           "protection_level",
+          "retention",
+          "legal_hold",
           "compliance",
           "install",
           "archived",
@@ -3533,6 +3774,16 @@
                   "verify_domains": []
                 },
                 "protection_level": "balanced",
+                "retention": {
+                  "good_practice_years": 7,
+                  "problem_history_days": 30
+                },
+                "legal_hold": {
+                  "active": false,
+                  "scope": null,
+                  "set": null,
+                  "reason": null
+                },
                 "compliance": {
                   "score": 82,
                   "evaluated": 1793318400,
@@ -4430,6 +4681,34 @@
               "account_url": "https://shop.example/account",
               "terms_url": "https://shop.example/terms"
             }
+          },
+          "retention": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RetentionParams"
+              },
+              {
+                "description": "Retention for this site (admin key; null values return to the account default). Problem history also shows how fast you fixed things; keep it longer if you want that record."
+              }
+            ],
+            "example": {
+              "good_practice_years": 7,
+              "problem_history_days": 30
+            }
+          },
+          "legal_hold": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LegalHoldParams"
+              },
+              {
+                "description": "Legal hold on this site only (admin key): suspends every deletion of its records until turned off."
+              }
+            ],
+            "example": {
+              "active": true,
+              "reason": "Litigation hold requested by counsel"
+            }
           }
         }
       },
@@ -4736,7 +5015,7 @@
               "not_set_up",
               "not_checked"
             ],
-            "description": "User-facing status. needs_fix (a clear violation: `compliance.fix` is the one change), pending_live_check (everything Checkbox can see is right; the live event has not been observed yet — counts as compliant), verified_live (observed live: proof run, real BCC'd send, Stripe-confirmed cancellation), your_call (a real decision for a person: `compliance.question`), compliant (passes; grey areas carry a `compliance.note`), not_applicable, not_set_up (no sign the email or setting exists yet: `compliance.fix` is the one-click way to set it up; never counts as compliant), not_checked (Checkbox has not tried it yet, e.g. the cancel flow: `compliance.fix` says how; never counts as compliant).",
+            "description": "User-facing status. needs_fix (a requirement is clearly not met: `compliance.fix` is the one change), pending_live_check (everything Checkbox can see is right; the live event has not been observed yet — counts as compliant), verified_live (observed live: proof run, real BCC'd send, Stripe-confirmed cancellation), your_call (a real decision for a person: `compliance.question`), compliant (passes; grey areas carry a `compliance.note`), not_applicable, not_set_up (no sign the email or setting exists yet: `compliance.fix` is the one-click way to set it up; never counts as compliant), not_checked (Checkbox has not tried it yet, e.g. the cancel flow: `compliance.fix` says how; never counts as compliant).",
             "example": "pending_live_check"
           }
         },
@@ -4785,7 +5064,8 @@
             "type": "number",
             "minimum": 0,
             "maximum": 100,
-            "description": "Compliance score 0-100 (severity-weighted, one decimal place, e.g. 82.5).",
+            "description": "Deprecated: the legacy severity-weighted 0-100 score (one decimal place), kept populated for backward compatibility. No Checkbox surface shows it; read `compliance` (status, label, counts) and the compliance plan instead.",
+            "deprecated": true,
             "example": 82
           },
           "rules_version": {
@@ -5365,7 +5645,7 @@
               "not_set_up",
               "not_checked"
             ],
-            "description": "User-facing status. needs_fix (a clear violation: `compliance.fix` is the one change), pending_live_check (everything Checkbox can see is right; the live event has not been observed yet — counts as compliant), verified_live (observed live: proof run, real BCC'd send, Stripe-confirmed cancellation), your_call (a real decision for a person: `compliance.question`), compliant (passes; grey areas carry a `compliance.note`), not_applicable, not_set_up (no sign the email or setting exists yet: `compliance.fix` is the one-click way to set it up; never counts as compliant), not_checked (Checkbox has not tried it yet, e.g. the cancel flow: `compliance.fix` says how; never counts as compliant).",
+            "description": "User-facing status. needs_fix (a requirement is clearly not met: `compliance.fix` is the one change), pending_live_check (everything Checkbox can see is right; the live event has not been observed yet — counts as compliant), verified_live (observed live: proof run, real BCC'd send, Stripe-confirmed cancellation), your_call (a real decision for a person: `compliance.question`), compliant (passes; grey areas carry a `compliance.note`), not_applicable, not_set_up (no sign the email or setting exists yet: `compliance.fix` is the one-click way to set it up; never counts as compliant), not_checked (Checkbox has not tried it yet, e.g. the cancel flow: `compliance.fix` says how; never counts as compliant).",
             "example": "pending_live_check"
           },
           "label": {
@@ -5385,7 +5665,7 @@
               "recommended",
               "extra"
             ],
-            "description": "required (legal floor: the only tier that can make a site not compliant), recommended (lowers lawsuit risk, conversion-neutral), extra (maximum protection).",
+            "description": "required (legal floor: the only tier that can make a site not compliant), recommended (clearer records beyond the legal floor, conversion-neutral), extra (maximum protection).",
             "example": "required"
           },
           "fix": {
@@ -5687,7 +5967,7 @@
               "not_set_up",
               "not_checked"
             ],
-            "description": "User-facing status. needs_fix (a clear violation: `compliance.fix` is the one change), pending_live_check (everything Checkbox can see is right; the live event has not been observed yet — counts as compliant), verified_live (observed live: proof run, real BCC'd send, Stripe-confirmed cancellation), your_call (a real decision for a person: `compliance.question`), compliant (passes; grey areas carry a `compliance.note`), not_applicable, not_set_up (no sign the email or setting exists yet: `compliance.fix` is the one-click way to set it up; never counts as compliant), not_checked (Checkbox has not tried it yet, e.g. the cancel flow: `compliance.fix` says how; never counts as compliant).",
+            "description": "User-facing status. needs_fix (a requirement is clearly not met: `compliance.fix` is the one change), pending_live_check (everything Checkbox can see is right; the live event has not been observed yet — counts as compliant), verified_live (observed live: proof run, real BCC'd send, Stripe-confirmed cancellation), your_call (a real decision for a person: `compliance.question`), compliant (passes; grey areas carry a `compliance.note`), not_applicable, not_set_up (no sign the email or setting exists yet: `compliance.fix` is the one-click way to set it up; never counts as compliant), not_checked (Checkbox has not tried it yet, e.g. the cancel flow: `compliance.fix` says how; never counts as compliant).",
             "example": "pending_live_check"
           },
           "compliance": {
@@ -6128,7 +6408,7 @@
               "recommended",
               "extra"
             ],
-            "description": "required (the legal floor: the only tier that can keep the site from being compliant), recommended (lowers lawsuit risk, conversion-neutral; shown at protection level balanced and maximum, never blocks), extra (maximum protection only). Always present on API responses.",
+            "description": "required (the legal floor: the only tier that can keep the site from being compliant), recommended (clearer records beyond the legal floor, conversion-neutral; shown at protection level balanced and maximum, never blocks), extra (maximum protection only). Always present on API responses.",
             "example": "required"
           },
           "compliance_status": {
@@ -6143,7 +6423,7 @@
               "not_set_up",
               "not_checked"
             ],
-            "description": "User-facing status. needs_fix (a clear violation: `compliance.fix` is the one change), pending_live_check (everything Checkbox can see is right; the live event has not been observed yet — counts as compliant), verified_live (observed live: proof run, real BCC'd send, Stripe-confirmed cancellation), your_call (a real decision for a person: `compliance.question`), compliant (passes; grey areas carry a `compliance.note`), not_applicable, not_set_up (no sign the email or setting exists yet: `compliance.fix` is the one-click way to set it up; never counts as compliant), not_checked (Checkbox has not tried it yet, e.g. the cancel flow: `compliance.fix` says how; never counts as compliant).",
+            "description": "User-facing status. needs_fix (a requirement is clearly not met: `compliance.fix` is the one change), pending_live_check (everything Checkbox can see is right; the live event has not been observed yet — counts as compliant), verified_live (observed live: proof run, real BCC'd send, Stripe-confirmed cancellation), your_call (a real decision for a person: `compliance.question`), compliant (passes; grey areas carry a `compliance.note`), not_applicable, not_set_up (no sign the email or setting exists yet: `compliance.fix` is the one-click way to set it up; never counts as compliant), not_checked (Checkbox has not tried it yet, e.g. the cancel flow: `compliance.fix` says how; never counts as compliant).",
             "example": "pending_live_check"
           },
           "order": {
@@ -6781,7 +7061,8 @@
               "integer",
               "null"
             ],
-            "description": "Compliance score 0-100 of the latest evaluation.",
+            "description": "Deprecated: the legacy 0-100 score of the latest evaluation, kept populated for backward compatibility. No Checkbox surface shows it; read `compliance` (status, label, counts) and the open tasks instead.",
+            "deprecated": true,
             "example": 62
           },
           "evaluation": {
@@ -7505,7 +7786,7 @@
             "properties": {
               "source": {
                 "type": "string",
-                "description": "static_fetch, html, stripe_params, email or policy_fetch.",
+                "description": "static_fetch, html, stripe_params, email, policy_fetch, or billing_sync (Stripe was re-read before judging; its verdict is always needs_review and only carries the note: the re-evaluation decides).",
                 "example": "static_fetch"
               },
               "verdict": {
@@ -10617,7 +10898,7 @@
               "not_set_up",
               "not_checked"
             ],
-            "description": "User-facing status. needs_fix (a clear violation: `compliance.fix` is the one change), pending_live_check (everything Checkbox can see is right; the live event has not been observed yet — counts as compliant), verified_live (observed live: proof run, real BCC'd send, Stripe-confirmed cancellation), your_call (a real decision for a person: `compliance.question`), compliant (passes; grey areas carry a `compliance.note`), not_applicable, not_set_up (no sign the email or setting exists yet: `compliance.fix` is the one-click way to set it up; never counts as compliant), not_checked (Checkbox has not tried it yet, e.g. the cancel flow: `compliance.fix` says how; never counts as compliant).",
+            "description": "User-facing status. needs_fix (a requirement is clearly not met: `compliance.fix` is the one change), pending_live_check (everything Checkbox can see is right; the live event has not been observed yet — counts as compliant), verified_live (observed live: proof run, real BCC'd send, Stripe-confirmed cancellation), your_call (a real decision for a person: `compliance.question`), compliant (passes; grey areas carry a `compliance.note`), not_applicable, not_set_up (no sign the email or setting exists yet: `compliance.fix` is the one-click way to set it up; never counts as compliant), not_checked (Checkbox has not tried it yet, e.g. the cancel flow: `compliance.fix` says how; never counts as compliant).",
             "example": "pending_live_check"
           },
           "compliance": {
@@ -15381,12 +15662,12 @@
           "version": {
             "type": "string",
             "description": "Semver of the bundle.",
-            "example": "1.4.0"
+            "example": "1.4.2"
           },
           "url": {
             "type": "string",
             "description": "Immutable URL of this version.",
-            "example": "https://app.checkbox.site/v1/elements/1.4.0/elements.js"
+            "example": "https://app.checkbox.site/v1/elements/1.4.2/elements.js"
           },
           "integrity": {
             "type": "string",
@@ -15428,8 +15709,8 @@
             "description": "Every released version, newest first.",
             "example": [
               {
-                "version": "1.4.0",
-                "url": "https://app.checkbox.site/v1/elements/1.4.0/elements.js",
+                "version": "1.4.2",
+                "url": "https://app.checkbox.site/v1/elements/1.4.2/elements.js",
                 "integrity": "sha384-…",
                 "size": 33000
               }
@@ -15912,7 +16193,7 @@
               "null"
             ],
             "description": "elements.js version.",
-            "example": "1.4.0"
+            "example": "1.4.2"
           },
           "client_timestamp": {
             "type": [
@@ -15933,7 +16214,7 @@
                 "items": {
                   "type": "string"
                 },
-                "description": "Guard-rail violations measured on screen.",
+                "description": "Guard-rail issues measured on screen.",
                 "example": []
               },
               "fallback_applied": {
@@ -16309,7 +16590,7 @@
               "maxLength": 40
             },
             "maxItems": 20,
-            "description": "Guard-rail violations the element detected.",
+            "description": "Guard-rail issues the element detected.",
             "example": []
           },
           "fallback_applied": {
@@ -16429,7 +16710,7 @@
             "type": "string",
             "maxLength": 20,
             "description": "elements.js version that rendered the disclosure.",
-            "example": "1.4.0"
+            "example": "1.4.2"
           },
           "presentation": {
             "$ref": "#/components/schemas/ConsentPresentationInput"
@@ -16554,7 +16835,7 @@
                 "customer_reference": "cs_test_a1b2c3",
                 "client_reference": null,
                 "source": "elements",
-                "element_version": "1.4.0",
+                "element_version": "1.4.2",
                 "client_timestamp": null,
                 "presentation": {
                   "violations": [],
@@ -19894,7 +20175,8 @@
             "enum": [
               "bug",
               "idea",
-              "question"
+              "question",
+              "review"
             ],
             "description": "Kind of feedback.",
             "example": "bug"
@@ -19909,6 +20191,11 @@
             "description": "open until Checkbox staff reply or close it.",
             "example": "open"
           },
+          "redacted": {
+            "type": "boolean",
+            "description": "true when text that looked like a secret, card number or email address was replaced with [redacted] before it was stored.",
+            "example": false
+          },
           "created": {
             "type": "integer",
             "description": "When it was received. Unix timestamp in seconds.",
@@ -19920,6 +20207,7 @@
           "object",
           "type",
           "status",
+          "redacted",
           "created"
         ],
         "description": "Feedback sent to the Checkbox team."
@@ -19932,17 +20220,72 @@
             "enum": [
               "bug",
               "idea",
-              "question"
+              "question",
+              "review"
             ],
-            "description": "bug: something is broken; idea: a missing feature or improvement; question: something unclear. Default idea.",
+            "description": "bug: something is broken; idea: a missing feature or improvement; question: something unclear; review: a structured review of Checkbox the product (send only after the human said yes and saw the text; no site names, URLs, customer data, quotes of the site's pages or emails, or claims that the site broke a law). Default idea.",
             "example": "bug"
           },
           "message": {
             "type": "string",
-            "minLength": 1,
             "maxLength": 5000,
-            "description": "What you tried, what happened and what you expected (at most 5000 characters).",
+            "description": "What you tried, what happened and what you expected (at most 5000 characters). Required except for type review. Secrets, card numbers and email addresses are replaced with [redacted].",
             "example": "verify_task returned needs_review for signup.consent.affirmative although the checkbox is unchecked by default."
+          },
+          "score": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10,
+            "description": "type review (required): how likely the human is to recommend Checkbox, 0-10.",
+            "example": 8
+          },
+          "liked": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 300
+            },
+            "maxItems": 5,
+            "description": "type review: what worked, at most 5 short phrases.",
+            "example": [
+              "Exact Stripe params to paste",
+              "verify_task loop"
+            ]
+          },
+          "disliked": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 300
+            },
+            "maxItems": 5,
+            "description": "type review: what did not work, at most 5 short phrases.",
+            "example": [
+              "Live-mode activation was confusing"
+            ]
+          },
+          "wrong_verdicts": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 300
+            },
+            "maxItems": 5,
+            "description": "type review: Checkbox verdicts the human believes were wrong, each \"<check id>: <short reason about Checkbox's verdict>\" (at most 5; the reason is kept to 200 characters).",
+            "example": [
+              "signup.consent.affirmative: flagged although the box is unchecked by default"
+            ]
+          },
+          "would_keep_using": {
+            "type": "boolean",
+            "description": "type review: whether the human would keep using Checkbox.",
+            "example": true
+          },
+          "stack": {
+            "type": "string",
+            "maxLength": 100,
+            "description": "type review: framework and billing, short.",
+            "example": "Next.js + Stripe Checkout"
           },
           "context": {
             "type": "object",
@@ -19972,7 +20315,7 @@
                 "example": "claude-code"
               }
             },
-            "description": "Optional context that helps us reproduce it.",
+            "description": "Optional context that helps us reproduce it. For type review only agent and tool are kept (reviews never carry the site or request id).",
             "example": {
               "site": "site_3f9a…",
               "request_id": "req_8c1e…",
@@ -19981,9 +20324,86 @@
             }
           }
         },
+        "example": {
+          "type": "bug",
+          "message": "verify_task returned needs_review for signup.consent.affirmative although the checkbox is unchecked by default.",
+          "context": {
+            "tool": "verify_task",
+            "agent": "claude-code"
+          }
+        }
+      },
+      "ReviewPrompt": {
+        "type": "object",
+        "properties": {
+          "object": {
+            "type": "string",
+            "enum": [
+              "review_prompt"
+            ],
+            "description": "String representing the object's type. Always \"review_prompt\".",
+            "example": "review_prompt"
+          },
+          "site": {
+            "type": "string",
+            "description": "The site.",
+            "example": "site_3f9a1c2e7b4d4e0f9a8b7c6d5e4f3a2b"
+          },
+          "show": {
+            "type": "boolean",
+            "description": "true exactly once per site, while its plan is compliant: ask the human once whether they want to send a review. false afterwards.",
+            "example": true
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "first_time",
+              "already_shown",
+              "not_compliant"
+            ],
+            "description": "Why show is true or false.",
+            "example": "first_time"
+          },
+          "message": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The instruction for the agent when show is true; null otherwise.",
+            "example": "Ask the user once whether they want to send Checkbox a quick review of this session…"
+          },
+          "shown_at": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "When the prompt was first shown for this site (null before). Unix timestamp in seconds.",
+            "example": 1793318400
+          }
+        },
         "required": [
-          "message"
-        ]
+          "object",
+          "site",
+          "show",
+          "reason",
+          "message",
+          "shown_at"
+        ],
+        "description": "The one-time prompt to ask the human for a review of the session."
+      },
+      "ReviewPromptParams": {
+        "type": "object",
+        "properties": {
+          "trigger": {
+            "type": "string",
+            "enum": [
+              "plan_compliant",
+              "last_task_verified"
+            ],
+            "description": "What reached compliant: the plan (retrieveCompliancePlan) or the verification of the last required task (verifyTask). Default plan_compliant.",
+            "example": "plan_compliant"
+          }
+        }
       },
       "CompliancePlanSummary": {
         "type": "object",
@@ -20027,7 +20447,8 @@
               "integer",
               "null"
             ],
-            "description": "Compliance score 0-100 of the latest evaluation.",
+            "description": "Deprecated: the legacy 0-100 score of the latest evaluation, kept populated for backward compatibility. No Checkbox surface shows it; read `compliance` (status, label, counts) and the open tasks instead.",
+            "deprecated": true,
             "example": 62
           },
           "summary": {
@@ -21090,7 +21511,7 @@
       "post": {
         "operationId": "updateAccount",
         "summary": "Update the account",
-        "description": "Pins the account to an API version (requests without a Checkbox-Version header use it). Known versions: 2026-10-30.",
+        "description": "Pins the account to an API version (requests without a Checkbox-Version header use it; known versions: 2026-10-30), sets the default retention, and turns the account-wide legal hold on or off. Retention and legal hold apply to the key's mode (test mode has its own).",
         "tags": [
           "Account"
         ],
@@ -21139,6 +21560,12 @@
                     "type": "string",
                     "description": "API version to pin.",
                     "example": "2026-10-30"
+                  },
+                  "retention": {
+                    "$ref": "#/components/schemas/RetentionParams"
+                  },
+                  "legal_hold": {
+                    "$ref": "#/components/schemas/LegalHoldParams"
                   }
                 }
               }
@@ -21377,7 +21804,7 @@
       "get": {
         "operationId": "retrieveSite",
         "summary": "Retrieve a site",
-        "description": "Returns a site with its latest compliance verdict (score, status) and install details.",
+        "description": "Returns a site with its latest compliance status (label and counts) and install details.",
         "tags": [
           "Sites"
         ],
@@ -22636,7 +23063,7 @@
       "get": {
         "operationId": "listEvaluations",
         "summary": "List evaluations",
-        "description": "Verdicts newest first (score history), optionally for one site.",
+        "description": "Verdicts newest first (status history), optionally for one site.",
         "tags": [
           "Evaluations"
         ],
@@ -22817,7 +23244,7 @@
       "get": {
         "operationId": "retrieveLatestEvaluation",
         "summary": "Get the current verdict of a site",
-        "description": "The latest evaluation of the site: is it compliant (score and status), and what blocks it. 404 resource_missing with next_action createScan when the site was never evaluated.",
+        "description": "The latest evaluation of the site: its compliance status and what blocks it. 404 resource_missing with next_action createScan when the site was never evaluated.",
         "tags": [
           "Evaluations"
         ],
@@ -26566,7 +26993,7 @@
             "schema": {
               "type": "string",
               "description": "Semver, e.g. 1.0.0.",
-              "example": "1.4.0"
+              "example": "1.4.2"
             },
             "required": true,
             "name": "version",
@@ -30346,7 +30773,7 @@
       "post": {
         "operationId": "createFeedback",
         "summary": "Send feedback",
-        "description": "Report a problem or a missing feature in Checkbox. Include what you tried, what happened and what you expected, and the site / request id when there is one. The Checkbox team reads every message. Rate limited to 20 per key per hour.",
+        "description": "Report a problem or a missing feature in Checkbox. Include what you tried, what happened and what you expected, and the site / request id when there is one. With type review, send a structured review of Checkbox the product (score 0-10, liked, disliked, wrong_verdicts, would_keep_using, stack) — only after the human said yes and saw the text. A review describes what worked or did not in Checkbox: it never states that the site broke a law or had unfixed problems, and carries no site names, URLs, customer data or quotes of the site's pages or emails (URLs are removed and no site is attached). Never include secrets or customer data: anything that looks like a secret, card number or email address is replaced with [redacted]. The Checkbox team reads every message. Rate limited to 20 per key per hour.",
         "tags": [
           "Feedback"
         ],
@@ -30400,6 +30827,89 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Feedback"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Error. See error.code (stable) and error.next_action.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "Error. See error.code (stable) and error.next_action.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sites/{site}/review_prompt": {
+      "post": {
+        "operationId": "claimReviewPrompt",
+        "summary": "Claim the one-time review prompt for a site",
+        "description": "The MCP tools call this when a site's compliance plan reaches compliant (including \"Compliant · N live checks pending\"). show is true exactly once per site: the agent then asks the human once whether they want to send a quick review of Checkbox (createFeedback with type review), and sends it only on a yes, after showing the text. Never send a review without the human's yes.",
+        "tags": [
+          "Feedback"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "basicAuth": []
+          }
+        ],
+        "x-checkbox-scope": "compliance_plans:read",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Unique identifier of the site (site_…).",
+              "example": "site_3f9a1c2e7b4d4e0f9a8b7c6d5e4f3a2b"
+            },
+            "required": true,
+            "name": "site",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "API version (date). Defaults to the version your account is pinned to. Known: 2026-10-30.",
+              "example": "2026-10-30"
+            },
+            "required": false,
+            "name": "Checkbox-Version",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewPromptParams"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewPrompt"
                 }
               }
             }
@@ -31399,6 +31909,16 @@
                               "verify_domains": []
                             },
                             "protection_level": "balanced",
+                            "retention": {
+                              "good_practice_years": 7,
+                              "problem_history_days": 30
+                            },
+                            "legal_hold": {
+                              "active": false,
+                              "scope": null,
+                              "set": null,
+                              "reason": null
+                            },
                             "compliance": {
                               "score": 82,
                               "evaluated": 1793318400,
@@ -32553,7 +33073,7 @@
                             "customer_reference": "cs_test_a1b2c3",
                             "client_reference": null,
                             "source": "elements",
-                            "element_version": "1.4.0",
+                            "element_version": "1.4.2",
                             "client_timestamp": null,
                             "presentation": {
                               "violations": [],
@@ -32697,6 +33217,16 @@
                               "verify_domains": []
                             },
                             "protection_level": "balanced",
+                            "retention": {
+                              "good_practice_years": 7,
+                              "problem_history_days": 30
+                            },
+                            "legal_hold": {
+                              "active": false,
+                              "scope": null,
+                              "set": null,
+                              "reason": null
+                            },
                             "compliance": {
                               "score": 82,
                               "evaluated": 1793318400,
@@ -32987,6 +33517,11 @@
       "status": 409,
       "type": "invalid_request_error",
       "description": "The site already has a queued or running test run; wait for it (retrieveTestRun) or cancel it (cancelTestRun)."
+    },
+    "legal_hold_active": {
+      "status": 409,
+      "type": "invalid_request_error",
+      "description": "A legal hold is on for the account or the site: deleting data and shortening retention are refused until it is turned off (updateAccount / updateSite legal_hold)."
     },
     "idempotency_key_in_use": {
       "status": 409,

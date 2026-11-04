@@ -3,6 +3,7 @@
 // test/live isolation and validation are exactly the API's.
 import { z, type ZodRawShape } from 'zod';
 import type { ToolAnnotations } from '@modelcontextprotocol/sdk/types.js';
+import { planTodo, todoLine, type TodoTaskLike } from './todo.ts';
 import { CheckboxApiError, type CheckboxApi, type NextAction } from './api.ts';
 import { nextActionOf, untrusted, type ToolOutput } from './format.ts';
 import { keyAllows, type KeyContext, type ToolScope } from './permissions.ts';
@@ -399,8 +400,27 @@ async function setupOverOAuth(
     headline: `Setup session ${session.id} started${session.business?.site_url ? ` for ${untrusted(session.business.site_url, 100)}` : ''}${session.site ? ` (test-mode site ${session.site})` : ''}.`,
     notes,
     ...(next ? { next } : {}),
-    data: { ...session, ...(fresh ?? {}), ...(firstCheck ? { first_check: firstCheck } : {}) },
+    data: withoutLegacyScore({ ...session, ...(fresh ?? {}), ...(firstCheck ? { first_check: firstCheck } : {}) }),
   };
+}
+
+/**
+ * Pilot round 9 (nextjs): setup_checkbox still showed `insurable: false` and `score: 26.8` next to the status label.
+ * The API keeps both (deprecated) for backward compatibility; agents see only the one status.
+ */
+export function withoutLegacyScore<T>(data: T): T {
+  if (!data || typeof data !== 'object') return data;
+  const d = data as Record<string, unknown>;
+  const strip = (c: unknown) => {
+    if (!c || typeof c !== 'object') return c;
+    const { score: _score, insurable: _insurable, ...rest } = c as Record<string, unknown>;
+    return rest;
+  };
+  const out: Record<string, unknown> = { ...d };
+  if (d.compliance) out.compliance = strip(d.compliance);
+  if (d.session && typeof d.session === 'object') out.session = withoutLegacyScore(d.session);
+  if (d.first_check && typeof d.first_check === 'object') out.first_check = withoutLegacyScore(d.first_check);
+  return out as T;
 }
 
 /**
@@ -525,7 +545,7 @@ const setupCheckbox: ToolDef = {
     return {
       headline: `Setup session ${session.id} started${session.business?.site_url ? ` for ${untrusted(session.business.site_url, 100)}` : ''}${session.site ? ` (test-mode site ${session.site})` : ''}.`,
       notes,
-      data: session,
+      data: withoutLegacyScore(session),
     };
   },
 };
@@ -549,14 +569,14 @@ const getSetupStatus: ToolDef = {
     if (args.verify) {
       if (!keyAllows(key, 'setup_sessions:write')) throw new ToolError('verify=true needs a key with setup_sessions write access; call again without verify.');
       const res = await api.request<{ session?: { id: string; next_action?: NextAction } } & Record<string, unknown>>('POST', `/v1/setup_sessions/${enc(id)}/verify`, { body: {} });
-      return { headline: `Re-checked setup session ${id}.`, data: res, next: nextActionOf(res) ?? nextActionOf(res.session) };
+      return { headline: `Re-checked setup session ${id}.`, data: withoutLegacyScore(res), next: nextActionOf(res) ?? nextActionOf(res.session) };
     }
     const session = await api.request<{ id: string; status: string; steps?: Array<{ key?: string; status?: string; title?: string }> }>('GET', `/v1/setup_sessions/${enc(id)}`);
     const open = (session.steps ?? []).filter((s) => s.status && !['done', 'skipped', 'not_applicable'].includes(s.status));
     return {
       headline: `Setup session ${session.id}: ${session.status}; ${open.length} checklist step(s) open.`,
       notes: open.slice(0, 8).map((s) => `${s.status}: ${s.title ?? s.key}`),
-      data: session,
+      data: withoutLegacyScore(session),
     };
   },
 };
@@ -583,7 +603,7 @@ const updateSetup: ToolDef = {
     const id = await resolveSetupSession(api, args.setup_session);
     const body = pick(args, [...Object.keys(setupFactsShape), 'snippet_installed_in', 'env_written', 'live_site', 'refetch_policies']);
     const session = await api.request<{ id: string }>('POST', `/v1/setup_sessions/${enc(id)}`, { body });
-    return { headline: `Updated setup session ${session.id}.`, data: session };
+    return { headline: `Updated setup session ${session.id}.`, data: withoutLegacyScore(session) };
   },
 };
 
@@ -601,7 +621,7 @@ const completeSetup: ToolDef = {
     return {
       headline: `Setup ${session.id} completed; summary email: ${session.owner_email ?? 'not sent'}.`,
       notes: session.review_url ? [`Human review page: ${session.review_url}`] : [],
-      data: session,
+      data: withoutLegacyScore(session),
     };
   },
 };
@@ -648,6 +668,19 @@ export function slimPlan(plan: PlanLite): PlanLite {
   return { ...plan, tasks: tasks as PlanLite['tasks'] };
 }
 
+/**
+ * One-time review hint: when a site's plan is compliant, the API hands out the prompt once per site
+ * (claimReviewPrompt). Never fails the tool: older servers or a missing scope simply mean no hint.
+ */
+async function reviewHint(api: CheckboxApi, site: string, trigger: 'plan_compliant' | 'last_task_verified'): Promise<string[]> {
+  try {
+    const p = await api.request<{ show?: boolean; message?: string | null }>('POST', `/v1/sites/${enc(site)}/review_prompt`, { body: { trigger } });
+    return p.show && p.message ? [`One-time: ${p.message}`] : [];
+  } catch {
+    return [];
+  }
+}
+
 const getCompliancePlan: ToolDef = {
   name: 'get_compliance_plan',
   title: 'Get the compliance plan (ordered tasks)',
@@ -667,17 +700,24 @@ const getCompliancePlan: ToolDef = {
     const open = (plan.tasks ?? []).filter((t) => !['done', 'wont_fix'].includes(t.status));
     const required = open.filter((t) => (t.tier ?? 'required') === 'required');
     const optional = open.filter((t) => (t.tier ?? 'required') !== 'required');
+    // One to-do list: the same ordered open tasks (titles, order, counts) as the dashboard, report, emails and CLI.
+    const todo = planTodo((plan.tasks ?? []) as unknown as TodoTaskLike[]);
+    const rest = required.filter((t) => !todo.some((x) => x.id === t.id));
+    const { score: _score, insurable: _insurable, ...shown } = plan as PlanLite & { insurable?: unknown };
     return {
-      headline: `Plan for ${site}: ${plan.compliance?.label ?? statusLine(plan.status)} (plan ${plan.status}), score ${plan.score ?? 'n/a'}. ${plan.summary ?? ''}`,
+      headline: `Plan for ${site}: ${plan.compliance?.label ?? statusLine(plan.status)} (plan ${plan.status}). ${plan.summary ?? ''}`,
       notes: [
-        ...required.map((t) => `#${t.order ?? '?'} ${t.id} [${t.status}${t.priority ? `, ${t.priority}` : ''}${t.change?.type ? `, ${t.change.type}` : ''}] ${t.title}`),
+        ...(todo.length ? [`To do (${todo.length}, in order):`] : []),
+        ...todo.map((t, i) => `${i + 1}. ${t.id} ${todoLine(t)}`),
+        ...rest.map((t) => `${t.id} [${t.status}${t.priority ? `, ${t.priority}` : ''}${t.change?.type ? `, ${t.change.type}` : ''}] ${t.title}`),
         ...(optional.length ? [`Optional suggestions (${plan.protection_level ?? 'balanced'} protection; never block compliant): ${optional.map((t) => t.title).join('; ')}`] : []),
         ...(plan.optional_improvements ? ['Optional (never blocking, not part of compliance): compliant conversion suggestions for this site with `suggest_improvements`.'] : []),
         'Each task below is a summary; call get_task with its id for the full change (diff, copy or params) before applying it.',
+        ...(plan.status === 'compliant' ? await reviewHint(api, site, 'plan_compliant') : []),
       ],
       // Normal-round pilot (sveltekit): the full plan (53K characters) was cut mid-JSON by the client. The plan here is a
       // compact summary of every task; get_task returns one task in full.
-      data: slimPlan(plan),
+      data: slimPlan(shown),
     };
   },
 };
@@ -727,14 +767,15 @@ const verifyTask: ToolDef = {
   annotations: { ...write(true, true), title: 'Verify task' },
   async run(args, { api }) {
     const body = pick(args, ['html', 'stripe_checkout_session', 'email', 'recheck']);
-    const v = await api.request<{ id: string; status: string; diff?: unknown[]; plan_status?: string | null }>('POST', `/v1/tasks/${enc(String(args.task))}/verify`, {
+    const v = await api.request<{ id: string; site?: string; status: string; diff?: unknown[]; plan_status?: string | null }>('POST', `/v1/tasks/${enc(String(args.task))}/verify`, {
       query: { wait: (args.wait as number | undefined) ?? 25 },
       body,
     });
+    const hint = v.plan_status === 'compliant' && v.site ? await reviewHint(api, v.site, 'last_task_verified') : [];
     return {
       headline: `Verification ${v.id} of ${String(args.task)}: ${statusLine(v.status)}${v.plan_status ? `; plan is now ${v.plan_status}` : ''}.`,
-      notes:
-        v.status === 'failed'
+      notes: [
+        ...(v.status === 'failed'
           ? ['The change did not satisfy the check: read diff (expected vs observed), fix the code, and call verify_task again.']
           : v.status === 'not_checked'
             ? ['Not checked yet: Checkbox is missing evidence (see next_action), not a code problem. Do not change the code for this; provide what next_action asks for.']
@@ -742,7 +783,9 @@ const verifyTask: ToolDef = {
               ? ['Live check pending: the email content passes; Checkbox has not seen it sent for a real event yet. Nothing to change in the code: it completes on the first real send (or a proof run).']
               : v.status === 'pending'
               ? ['Waiting for a confirming observation; call get_verification later (or continue with other tasks).']
-              : [],
+              : []),
+        ...hint,
+      ],
       data: v,
     };
   },
@@ -957,7 +1000,7 @@ const checkStripeCheckoutSession: ToolDef = {
   description: [
     'Before shipping Stripe Checkout code: pass EXACTLY the object your code passes to stripe.checkout.sessions.create (mode "subscription"). Checkbox evaluates it against automatic-renewal laws and returns correction.corrected_params — the full params with the fix applied, ready to paste — plus an RFC 6902 JSON patch and before/after verification per check.',
     'When line_items reference a Price id (price_…), also pass merchant { price or amount, interval, trial_days, merchant_name, cancel_url } because the params alone do not state them.',
-    'Note: on Stripe-hosted pages "clear and conspicuous" stays needs_review (Stripe styles custom_text itself); the response explains this.',
+    'Note: Stripe styles custom_text itself, so "clear and conspicuous" stays needs_review here; the plan shows it as a note, never a fix.',
   ].join('\n'),
   input: {
     params: z.record(z.string(), z.unknown()).describe('The Checkout Session params object, e.g. {"mode":"subscription","line_items":[{"price":"price_123","quantity":1}],"success_url":"https://acme.example/welcome"}.'),
@@ -1220,7 +1263,7 @@ const suggestImprovements: ToolDef = {
 const listSites: ToolDef = {
   name: 'list_sites',
   title: 'List sites',
-  description: 'The account\'s sites in the current mode (test keys see only test-mode sites), newest first, each with its compliance score, status and open findings. Use it to find a site id.',
+  description: 'The account\'s sites in the current mode (test keys see only test-mode sites), newest first, each with its compliance status label. Use it to find a site id.',
   input: { limit: listLimit, starting_after: startingAfter, archived: z.boolean().optional().describe('true lists only archived sites.') },
   scopes: ['sites:read'],
   annotations: { ...ro, title: 'List sites' },
@@ -1230,7 +1273,7 @@ const listSites: ToolDef = {
     });
     return {
       headline: `${list.data.length}${list.has_more ? '+' : ''} site(s) in ${key.mode === 'unknown' ? 'this' : key.mode} mode.`,
-      notes: list.data.map((s) => `${s.id} ${untrusted(s.url, 100)} — score ${s.compliance?.score ?? 'n/a'}${s.compliance?.label ? `, ${s.compliance.label}` : ''}, open findings ${s.compliance?.open_findings ?? 0}`),
+      notes: list.data.map((s) => `${s.id} ${untrusted(s.url, 100)} — ${s.compliance?.label ?? 'Not checked yet'}`),
       data: list,
       next: list.data.length ? null : { type: 'setup', message: 'No sites yet: call setup_checkbox with the site URL.', operation_id: 'createSetupSession' },
     };
@@ -1314,51 +1357,61 @@ const getSiteStatus: ToolDef = {
   name: 'get_site_status',
   title: 'Get a site\'s compliance status',
   description:
-    'Where a site stands: compliance score (0-100) and status, what blocks it (critical/high checks failing or unverified), the top open failing findings, latest scan, and whether the snippet is installed. Use it for "am I compliant?". For what to change, use get_compliance_plan.',
+    'Where a site stands: one status (Compliant, Needs a fix, Not set up yet, Not checked yet, Your call) and the to-do list: the compliance plan\'s ordered open tasks, as on the dashboard. Use it for "am I compliant?"; get_task gives each change.',
   input: { site: siteId.optional() },
   scopes: ['sites:read'],
   annotations: { ...ro, title: 'Site status' },
   async run(args, { api }) {
     const id = await resolveSite(api, args.site);
-    const [site, evaluation, findings] = await Promise.all([
+    const [site, evaluation, plan] = await Promise.all([
       api.request<SiteLite & Record<string, unknown>>('GET', `/v1/sites/${enc(id)}`),
-      optional(api.request<{ score: number; blockers?: Array<{ check_id: string; title?: string; status?: string }>; summary?: unknown; evaluated?: number; id: string }>('GET', `/v1/sites/${enc(id)}/evaluation`)),
-      optional(api.request<ListResponse<{ id: string; check_id: string; title: string; severity: string; status: string }>>('GET', '/v1/findings', { query: { site: id, status: 'fail', state: 'open', limit: 5 } })),
+      optional(api.request<{ blockers?: Array<{ check_id: string; title?: string; status?: string }>; summary?: unknown; evaluated?: number; id: string }>('GET', `/v1/sites/${enc(id)}/evaluation`)),
+      optional(api.request<PlanLite>('GET', `/v1/sites/${enc(id)}/plan`)),
     ]);
     // Round-4 pilot (nextjs): "nothing left to do" while 13 critical/high checks were needs_review. Count them too.
     const review = await optional(api.request<ListResponse<{ id: string; check_id: string; title: string; severity: string; status: string }>>('GET', '/v1/findings', { query: { site: id, status: 'needs_review', state: 'open', limit: 100 } }));
-    const evaluated = 'score' in evaluation;
-    const top = 'data' in findings ? findings.data : [];
+    const evaluated = 'id' in evaluation;
     const toReview = 'data' in review ? review.data : [];
     const seriousReview = toReview.filter((f) => f.severity === 'critical' || f.severity === 'high');
-    const notes = [
-      ...(evaluated && evaluation.blockers?.length ? [`Blocking checks: ${evaluation.blockers.map((b) => b.check_id).join(', ')}`] : []),
-      ...top.map((f) => `${f.severity.toUpperCase()} ${f.id} ${f.check_id}: ${f.title}`),
-      ...(toReview.length ? [`${toReview.length} check(s) need review (${seriousReview.length} critical/high): ${toReview.slice(0, 6).map((f) => f.check_id).join(', ')}${toReview.length > 6 ? ', …' : ''}`] : []),
-    ];
-    const { checks: _omit, ...evalLite } = (evaluated ? evaluation : {}) as Record<string, unknown>;
+    const blocking = evaluated ? (evaluation.blockers ?? []).map((b) => b.check_id) : [];
+    // One to-do list: the plan's ordered open tasks, never a list built from findings.
+    const todo = 'tasks' in plan && Array.isArray(plan.tasks) ? planTodo(plan.tasks as unknown as TodoTaskLike[]) : [];
+    const { checks: _omit, score: _score, insurable: _insurable, ...evalLite } = (evaluated ? evaluation : {}) as Record<string, unknown>;
     // Status labels: the roll-up decides the headline; pending live checks count as compliant and say how they complete.
     const roll = site.compliance?.rollup;
     const pendingLive = roll?.pending_live_checks ?? [];
     const rollStatus = site.compliance?.status;
     const label = site.compliance?.label;
-    if (evaluated && label) {
-      notes.unshift(...pendingLive.slice(0, 6).map((p) => `LIVE CHECK PENDING ${p.check_id}: ${p.what} — ${p.completes}`));
-    }
+    const notes = [
+      ...(todo.length ? [`To do (${todo.length}, from the compliance plan, in order):`, ...todo.map((t, i) => `${i + 1}. ${t.id} ${todoLine(t)}`)] : []),
+      ...(evaluated && label ? pendingLive.slice(0, 6).map((p) => `LIVE CHECK PENDING ${p.check_id}: ${p.what} — ${p.completes}`) : []),
+    ];
+    const { score: _siteScore, open_findings: _open, needs_review: _nr, ...complianceLite } = (site.compliance ?? {}) as Record<string, unknown>;
     return {
-      headline: evaluated
-        ? label
-          ? `${site.url}: ${label} (score ${evaluation.score}).`
-          : `${site.url}: score ${evaluation.score}, ${site.compliance?.open_findings ?? top.length} open failing finding(s), ${toReview.length} to review.`
-        : `${site.url}: not evaluated yet.`,
+      headline: evaluated ? `${site.url}: ${label ?? 'Not checked yet'}.` : `${site.url}: Not checked yet.`,
       notes,
-      data: { site, evaluation: evaluated ? evalLite : null, top_findings: top, needs_review: { count: toReview.length, critical_or_high: seriousReview.length } },
+      data: { site: site.compliance ? { ...site, compliance: complianceLite } : site, evaluation: evaluated ? evalLite : null, todo },
       next: evaluated
-        ? rollStatus === 'needs_fix' || (!rollStatus && top.length)
-          ? { type: 'fix', message: 'Call get_compliance_plan for the ordered changes that fix these.', operation_id: 'retrieveCompliancePlan' }
-          : rollStatus === 'your_call' || (!rollStatus && toReview.length)
-            ? { type: 'review', message: 'Some items need a decision from the human: call get_compliance_plan for the questions (each has a recommended answer).', operation_id: 'retrieveCompliancePlan' }
-            : { type: 'none', message: pendingLive.length ? `Compliant. ${pendingLive.length} live check(s) pending; each completes on its own or with the step listed (run a proof / BCC real sends).` : 'Compliant: nothing left to do.' }
+        ? todo.length && (rollStatus === 'needs_fix' || todo.some((t) => t.status === 'needs_fix' || t.status === 'not_set_up'))
+          ? { type: 'fix', message: `Start with the first task (${todo[0]!.id}: ${todo[0]!.title}); get_compliance_plan / get_task give the exact change.`, operation_id: 'retrieveCompliancePlan' }
+          : rollStatus === 'needs_fix'
+            ? { type: 'fix', message: 'Call get_compliance_plan for the ordered changes.', operation_id: 'retrieveCompliancePlan' }
+            : rollStatus === 'your_call' || todo.some((t) => t.status === 'your_call')
+              ? { type: 'review', message: 'Some items need a decision from the human: call get_compliance_plan for the questions (each has a recommended answer).', operation_id: 'retrieveCompliancePlan' }
+              : blocking.length || pendingLive.length || seriousReview.length || todo.length
+                ? // Normal round 4 (nextjs): "nothing left to do — Compliant" next to 2 blocking checks. Never call a site
+                  // compliant while a blocking check, a pending live check or an open plan task remains.
+                  {
+                    type: 'complete_live_checks',
+                    message: `Nothing needs a code change now, but the site is not shown as passing yet: ${[
+                      todo.length ? `${todo.length} task(s) on the plan (${todo.slice(0, 3).map((t) => t.title).join('; ')})` : '',
+                      blocking.length ? `blocking check(s) ${blocking.slice(0, 4).join(', ')}` : '',
+                      pendingLive.length ? `${pendingLive.length} live check(s) pending` : '',
+                      seriousReview.length && !todo.length ? `${seriousReview.length} check(s) to review` : '',
+                    ].filter(Boolean).join(', ')}. Call get_compliance_plan for how each one completes (a proof run, BCC real sends, a test account).`,
+                    operation_id: 'retrieveCompliancePlan',
+                  }
+                : { type: 'none', message: 'Every check that applies has passed; nothing left to do. Keep monitoring on.' }
         : { type: 'run_first_check', message: 'Call verify_site (or run_scan) for the first verdict.', operation_id: 'verifySite' },
     };
   },
@@ -1446,7 +1499,7 @@ const runScan: ToolDef = {
 const getScan: ToolDef = {
   name: 'get_scan',
   title: 'Get a scan',
-  description: 'A scan\'s status (queued → running → completed | failed), warnings, and once completed the evaluation it produced with its score.',
+  description: 'A scan\'s status (queued → running → completed | failed), warnings, and once completed the evaluation it produced (the site status and to-do list update from it).',
   input: { scan: z.string().max(100).describe('Scan id (scan_…).') },
   scopes: ['scans:read'],
   annotations: { ...ro, title: 'Scan' },
@@ -1454,7 +1507,7 @@ const getScan: ToolDef = {
     const scan = await api.request<{ id: string; status: string; score?: number | null; error?: string | null }>('GET', `/v1/scans/${enc(String(args.scan))}`);
     const done = scan.status === 'completed';
     return {
-      headline: `Scan ${scan.id}: ${statusLine(scan.status)}${done ? `, score ${scan.score ?? 'n/a'}` : ''}${scan.error ? ` — error: ${untrusted(scan.error, 160)}` : ''}.`,
+      headline: `Scan ${scan.id}: ${statusLine(scan.status)}${done ? '; the site status and to-do list are updated (get_site_status)' : ''}${scan.error ? ` — error: ${untrusted(scan.error, 160)}` : ''}.`,
       data: scan,
       next: done
         ? { type: 'review', message: 'Call get_compliance_plan for what to change.', operation_id: 'retrieveCompliancePlan' }
@@ -1469,24 +1522,34 @@ const sendFeedback: ToolDef = {
   name: 'send_feedback',
   title: 'Send feedback to the Checkbox team',
   description:
-    'Report a problem or a missing feature in Checkbox. Include what you tried and what you expected (and the site / request id or tool name when there is one). Use type "bug" for something broken, "idea" for a missing feature, "question" for something unclear. The Checkbox team reads every message.',
+    'Bug, idea or question: what you tried, happened, expected. type review: only after the human said yes and saw the text; about Checkbox, not the site: no site names, URLs, quotes, secrets, customer data or claims the site broke a law. score 0-10 (would recommend); ≤5 phrases in liked, disliked, wrong_verdicts ("check.id: why wrong"); stack e.g. "Next.js + Stripe".',
   input: {
-    type: z.enum(['bug', 'idea', 'question']).optional().describe('bug, idea or question (default idea).'),
-    message: z.string().min(1).max(5000).describe('What you tried, what happened, what you expected.'),
-    site: z.string().max(200).optional().describe('Site id it is about (optional).'),
-    request_id: z.string().max(200).optional().describe('Request-Id of the API call it is about (optional).'),
-    tool: z.string().max(200).optional().describe('The tool or command involved (optional).'),
+    type: z.enum(['bug', 'idea', 'question', 'review']).optional(),
+    message: z.string().optional(),
+    score: z.number().int().min(0).max(10).optional(),
+    liked: z.array(z.string()).optional(),
+    disliked: z.array(z.string()).optional(),
+    wrong_verdicts: z.array(z.string()).optional(),
+    would_keep_using: z.boolean().optional(),
+    stack: z.string().optional(),
+    site: z.string().optional(),
+    request_id: z.string().optional(),
+    tool: z.string().optional(),
   },
   scopes: ['account:read'],
   annotations: { ...write(false, false), title: 'Send feedback' },
   async run(args, ctx) {
     const context: Record<string, string> = {};
-    for (const k of ['site', 'request_id', 'tool'] as const) if (typeof args[k] === 'string' && args[k]) context[k] = String(args[k]);
+    // Reviews are about Checkbox, not the merchant's site: no site or request id is attached to them.
+    for (const k of args.type === 'review' ? (['tool'] as const) : (['site', 'request_id', 'tool'] as const)) if (typeof args[k] === 'string' && args[k]) context[k] = String(args[k]);
     const agent = ctx.key.appName ?? ctx.clientName;
     if (agent) context.agent = String(agent).slice(0, 100);
-    const fb = await ctx.api.request<{ id: string; status: string }>('POST', '/v1/feedback', { body: { ...(args.type ? { type: args.type } : {}), message: args.message, ...(Object.keys(context).length ? { context } : {}) } });
+    if (args.type !== 'review' && !(typeof args.message === 'string' && args.message.trim())) throw new ToolError('Write a message (what you tried, what happened, what you expected).');
+    if (args.type === 'review' && typeof args.score !== 'number') throw new ToolError('A review needs score (0-10). Ask the human; never guess it.');
+    const body = { ...pick(args, ['type', 'message', 'score', 'liked', 'disliked', 'wrong_verdicts', 'would_keep_using', 'stack']), ...(Object.keys(context).length ? { context } : {}) };
+    const fb = await ctx.api.request<{ id: string; status: string; redacted?: boolean }>('POST', '/v1/feedback', { body });
     return {
-      headline: `Feedback ${fb.id} sent to the Checkbox team (${fb.status}).`,
+      headline: `${args.type === 'review' ? 'Review' : 'Feedback'} ${fb.id} sent to the Checkbox team (${fb.status}).${fb.redacted ? ' Some text looked like a secret, card number or email address and was replaced with [redacted].' : ''}`,
       data: fb,
       next: { type: 'none', message: 'Nothing else to do; the team replies by email to the account owner when needed.' },
     };
@@ -1555,7 +1618,7 @@ function reactSnippet(d: DisclosureLite): string {
 const elementsInstallNotes = [
   'Put script_tag in <head>; put element_html inside the sign-up form directly ABOVE the pay button. It keeps the button disabled until the shopper ticks the (unchecked, required) box.',
   'Your server receives checkbox_consent_id (cons_…) with the form: store it with the subscription (e.g. Stripe metadata.checkbox_consent).',
-  'Do not restyle it below body size or hide it; guard rails restore compliant styles and report violations.',
+  'Do not restyle it below body size or hide it; guard rails restore compliant styles and report what they found.',
 ];
 
 const elementsTermsShape = {
@@ -1940,9 +2003,9 @@ export const TOOL_OPERATIONS: Record<string, string[]> = {
   update_setup: ['updateSetupSession'],
   update_site: ['updateSite'],
   complete_setup: ['completeSetupSession'],
-  get_compliance_plan: ['retrieveCompliancePlan'],
+  get_compliance_plan: ['retrieveCompliancePlan', 'claimReviewPrompt'],
   get_task: ['retrieveTask'],
-  verify_task: ['verifyTask'],
+  verify_task: ['verifyTask', 'claimReviewPrompt'],
   answer_task: ['answerTask'],
   verify_site: ['verifySite'],
   get_verification: ['retrieveVerification'],
