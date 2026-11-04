@@ -33,8 +33,8 @@ Checkbox output is an automated assessment, not legal advice. Docs: https://chec
 
 Then run `/mcp`, pick **checkbox** and **Authenticate** the first time you use it (or let Claude prompt you).
 
-Headless or CI? Use an API key instead of OAuth:
-`claude mcp add --transport http checkbox https://app.checkbox.site/mcp --header "Authorization: Bearer $CHECKBOX_SECRET_KEY"`.
+Headless or CI (no browser for the OAuth sign-in)? Create an API key in the Checkbox dashboard (Agent & API) and
+follow https://checkbox.site/docs/mcp; the plugin itself never reads or stores keys.
 
 ## Contents
 

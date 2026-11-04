@@ -4,8 +4,7 @@ Only after the user said yes. Pick the first path that works in the current clie
 
 ## Contents
 - MCP tools already available
-- HTTP device login (any agent that can run commands)
-- Adding the MCP server for next time (per client)
+- Adding the MCP server (per client)
 - Chat-only clients (claude.ai, Claude Desktop)
 - After connecting
 
@@ -31,47 +30,10 @@ tells you:
 Leave out what you do not know rather than guessing. On a local project use the dev URL (`http://localhost:3000`):
 `localhost` sites need no domain verification in test mode. Show the human any link the result asks them to open.
 
-## HTTP device login
+## Adding the MCP server
 
-Works immediately, without restarting the client:
-
-```bash
-curl -sS https://app.checkbox.site/v1/device/authorize \
-  -H "Content-Type: application/json" \
-  -d '{"client":{"name":"agent","agent":"Claude Code"},"site_url":"http://localhost:3000"}'
-```
-
-1. Show the human `verification_uri_complete` (and `user_code`) and ask them to open it and click **Approve**.
-   That page also creates a free account. This is the only human step.
-2. Poll every `interval` seconds until it stops answering `authorization_pending` (back off on `slow_down`). Do not
-   print the response: it contains the secret key. Write it straight to the env file the project loads instead
-   (`.env.local` for Next.js and Vite, `.env` for dotenv/Express; check it is git-ignored first):
-
-   ```bash
-   curl -sS https://app.checkbox.site/v1/device/token \
-     -H "Content-Type: application/json" -d '{"device_code":"<device_code>"}' > .checkbox-token.json
-   jq -r '.error.code // empty' .checkbox-token.json   # authorization_pending, slow_down, expired_token, access_denied
-   ```
-
-   Once there is no `error.code`, read `next_action`, append the keys and delete the file:
-
-   ```bash
-   jq '{next_action, site, setup_session}' .checkbox-token.json
-   jq -r '"CHECKBOX_SECRET_KEY=" + .secret_key, "CHECKBOX_PUBLISHABLE_KEY=" + .publishable_key' \
-     .checkbox-token.json >> .env.local && rm .checkbox-token.json
-   ```
-
-   On `expired_token` or `access_denied`, delete the file, stop and tell the human; do not retry silently.
-3. Use the framework's public prefix for the publishable key where needed (such as
-   `NEXT_PUBLIC_CHECKBOX_PUBLISHABLE_KEY`). Never echo the secret key back to the user.
-4. Follow the `next_action` you read in step 2.
-
-API calls then authenticate with `Authorization: Bearer $CHECKBOX_SECRET_KEY`.
-
-## Adding the MCP server for next time
-
-Offer this; do not do it without asking. The server signs in with OAuth (a browser window, one **Approve**), so no
-key is copied.
+Ask first; do not do it without a yes. The server signs in with OAuth (a browser window, one **Approve**), so no
+key is copied, stored or shown. Never read or write API keys in the project's files.
 
 | Client | How |
 |---|---|
@@ -91,6 +53,8 @@ SKILL.md section 5 and review code they paste.
 
 ## After connecting
 
-- Register the site and get the first plan: `setup_checkbox` does both; over HTTP follow `next_action`.
+- Register the site and get the first plan: `setup_checkbox` does both; then follow `next_action`.
+- If the project's own code needs a key (SDK, CI), the human creates it in the dashboard (Agent & API) and adds it to
+  their own secrets; you do not handle it.
 - Preflight before committing: [preflight.md](preflight.md).
 - Work the compliance plan: [agent-loop.md](agent-loop.md).

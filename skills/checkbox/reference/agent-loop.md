@@ -35,6 +35,6 @@ Manual tasks (`change.type: "manual"`) carry a `question`. Ask the human; record
 
 ## Synthetic test subscription (Stripe test mode)
 
-`POST /v1/sites/{site}/test_credentials { "type": "stripe_test", "secret_key": "rk_test_…" }` (a restricted TEST key;
-live keys are refused), then `POST /v1/sites/{site}/test_runs {}` and poll `GET /v1/test_runs/{run}` every 15-30 s.
+The human adds a restricted Stripe TEST key for the site in the Checkbox dashboard (Site settings, Stripe test key;
+live keys are refused; never ask for it in chat), then `POST /v1/sites/{site}/test_runs {}` and poll `GET /v1/test_runs/{run}` every 15-30 s.
 Each step reports what was observed, check results and a fix. Nothing is charged.

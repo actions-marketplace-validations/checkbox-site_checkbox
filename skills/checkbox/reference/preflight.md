@@ -1,6 +1,7 @@
 # Preflight checks (stateless)
 
-`POST https://app.checkbox.site/v1/checks/<kind>` with `Authorization: Bearer $CHECKBOX_SECRET_KEY` (test keys work).
+Use the MCP tools (`check_disclosure`, `check_stripe_checkout_session`, `check_email`, `check_page_html`,
+`get_notice_schedule`); the project's own code can call `POST https://app.checkbox.site/v1/checks/<kind>` with its key.
 Nothing is stored. Same input + same `as_of` date = same verdicts. CLI: `checkbox check <sub> … --json`
 (`--offline` runs the same rules engine locally for every kind except `notice_schedule`).
 

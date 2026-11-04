@@ -157,6 +157,41 @@ function withItems(data: unknown, path: string[], items: unknown[]): unknown {
   return root;
 }
 
+/** A list this short is never paged down to fewer items: its items' nested lists are shortened instead. */
+const SMALL_LIST = 5;
+
+/**
+ * Every item of `arr` kept; in each item, its largest nested list (top level or one level down) is cut to the first `k`
+ * entries, with `_truncated` saying how many it had. `k` is the largest that fits. Null when even k = 0 does not fit.
+ */
+function fitNestedLists(data: unknown, arr: { path: string[]; items: unknown[] }, max: number): { json: string; page: string } | null {
+  const nested = arr.items.map((item) => (item && typeof item === 'object' && !Array.isArray(item) ? largestArray(item) : null));
+  const longest = Math.max(0, ...nested.map((n) => n?.items.length ?? 0));
+  if (!longest) return null;
+  const render = (k: number) => {
+    const items = arr.items.map((item, i) => {
+      const n = nested[i];
+      if (!n || n.items.length <= k) return item;
+      const cut = withItems(item, n.path, n.items.slice(0, k)) as Record<string, unknown>;
+      return { ...cut, _truncated: { list: n.path.join('.'), returned: k, total: n.items.length } };
+    });
+    return JSON.stringify(withItems(data, arr.path, items), null, 2);
+  };
+  if (render(0).length > max) return null;
+  let lo = 0;
+  let hi = longest;
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2);
+    if (render(mid).length <= max) lo = mid;
+    else hi = mid - 1;
+  }
+  const lists = [...new Set(nested.filter((n): n is NonNullable<typeof n> => !!n && n.items.length > lo).map((n) => n.path.join('.')))];
+  return {
+    json: render(lo),
+    page: `Output shortened: all ${arr.items.length} items of "${arr.path.join('.')}" shown, each with at most ${lo} entries of its "${lists.join('", "')}" list (see _truncated in each item). The JSON is complete and valid; retrieve one item by id to see more of it, or narrow the request.`,
+  };
+}
+
 /**
  * Round-3 pilot (nextjs, sveltekit): output was cut at 60 KB in the middle of the JSON, which agents then failed to
  * parse. Output is always valid JSON: an oversized list is paged (the first items that fit, plus `_page` naming the
@@ -178,6 +213,13 @@ export function fitJson(data: unknown, max = MAX_JSON_CHARS): { json: string; pa
       const mid = Math.ceil((lo + hi) / 2);
       if (render(mid).length <= max) lo = mid;
       else hi = mid - 1;
+    }
+    // MCP connector test: list_law_updates (limit 3) printed "0 of 2 items shown": each law update carried hundreds of
+    // changed requirements, so not even one item fitted. When paging would drop items of a short list (or all of them),
+    // every item is shown instead, with its own longest nested list cut to what fits.
+    if (lo < arr.items.length && (lo === 0 || arr.items.length <= SMALL_LIST)) {
+      const inner = fitNestedLists(data, arr, max);
+      if (inner) return inner;
     }
     const json = render(lo);
     if (json.length <= max) {
