@@ -65,6 +65,22 @@ export interface SetupNextAction {
   command?: string;
   /** Documentation or dashboard URL for the step. */
   url?: string;
+  /** verify_domain with a started challenge: the DNS TXT record to add. */
+  dns?: {
+    /** Record type. */
+    type: "TXT";
+    /** Full record name. */
+    name: string;
+    /** Record value. */
+    value: string;
+  };
+  /** verify_domain with a started challenge: the file to serve instead of the DNS record. */
+  well_known?: {
+    /** Where to serve the file. */
+    url: string;
+    /** The file content. */
+    content: string;
+  };
 }
 
 /** A pending device login (RFC 8628 style). */
@@ -264,14 +280,32 @@ export interface SetupSession {
     kind: string;
     /** URL fetched. */
     url: string;
-    /** Fetch result. */
-    status: "fetched" | "failed";
+    /** Fetch result. preview: read before the site's domain was verified (unverified preview): nothing was stored as evidence and only the Terms checks ran, in memory; it is fetched and stored once the domain is verified. */
+    status: "fetched" | "failed" | "preview";
     /** When it was fetched. Unix timestamp in seconds. */
     fetched: number;
     /** Why the fetch failed. */
     error: string | null;
     /** Evidence record of the stored page (ev_…). */
     evidence: string | null;
+    /** Not read (or only previewed) because the site's domain is not verified yet. */
+    held: boolean;
+    /** Unverified preview result (status preview), else null. */
+    preview: {
+      /** Always true: read before the domain was verified; nothing stored. */
+      unverified: true;
+      /** Terms checks on this page (none for a privacy policy). */
+      checks: Array<{
+        /** Check id. */
+        check_id: string;
+        /** Verdict on this page alone. */
+        status: "pass" | "fail" | "needs_review";
+        /** The check, in one line. */
+        summary: string;
+        /** One-sentence fix. */
+        fix?: string;
+      }>;
+    } | null;
   }>;
   /** Stripe test mode for lifecycle test runs. */
   stripe: {
@@ -465,6 +499,8 @@ export interface SetupVerification {
     snippet_detected: boolean | null;
     /** Why the site could not be loaded. */
     error: string | null;
+    /** Read as an unverified preview (domain not verified yet): one plain GET of the homepage for links and the snippet, nothing stored as evidence. */
+    preview: boolean;
   };
   /** Policies fetched now. */
   policies: Array<{
@@ -474,6 +510,8 @@ export interface SetupVerification {
     ok: boolean;
     /** Error. */
     error: string | null;
+    /** Read as an unverified preview (domain not verified yet): nothing stored. */
+    preview: boolean;
   }>;
   /** Synthetic-shopper scan. */
   scan: {

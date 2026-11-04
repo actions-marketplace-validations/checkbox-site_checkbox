@@ -354,7 +354,7 @@ async function pollDeviceToken(api: CheckboxApi, deviceCode: string, maxWaitMs: 
 /** What the first checks did: ran, or held because the site's domain is not verified yet (scan gate). */
 function firstCheckNote(next: NextAction | undefined): string {
   if (next?.type === 'verify_domain') {
-    return 'Site registered, but Checkbox has not scanned or fetched anything from it: it only visits websites their owners have verified. Follow Next to verify the domain (ask the human to publish the DNS TXT record or file), then call get_setup_status with verify=true. Meanwhile check pages by sending their HTML (check_page_html / verify_task with html).';
+    return 'Site registered, but Checkbox has not scanned it: it only visits websites their owners have verified. Until then it only reads the site\'s own public homepage and Terms / privacy pages once as an unverified preview (nothing stored as evidence; see the policies step). Follow Next to verify the domain (ask the human to publish the DNS TXT record or file), then call get_setup_status with verify=true. Meanwhile check pages by sending their HTML (check_page_html / verify_task with html).';
   }
   return 'First checks ran (site, Terms and policies fetched, first evaluation); follow Next.';
 }
@@ -571,11 +571,12 @@ const getSetupStatus: ToolDef = {
       const res = await api.request<{ session?: { id: string; next_action?: NextAction } } & Record<string, unknown>>('POST', `/v1/setup_sessions/${enc(id)}/verify`, { body: {} });
       return { headline: `Re-checked setup session ${id}.`, data: withoutLegacyScore(res), next: nextActionOf(res) ?? nextActionOf(res.session) };
     }
-    const session = await api.request<{ id: string; status: string; steps?: Array<{ key?: string; status?: string; title?: string }> }>('GET', `/v1/setup_sessions/${enc(id)}`);
+    const session = await api.request<{ id: string; status: string; steps?: Array<{ key?: string; status?: string; title?: string; summary?: string }> }>('GET', `/v1/setup_sessions/${enc(id)}`);
     const open = (session.steps ?? []).filter((s) => s.status && !['done', 'skipped', 'not_applicable'].includes(s.status));
     return {
       headline: `Setup session ${session.id}: ${session.status}; ${open.length} checklist step(s) open.`,
-      notes: open.slice(0, 8).map((s) => `${s.status}: ${s.title ?? s.key}`),
+      // The policies step says what an unverified preview read (or that the pages wait for domain verification).
+      notes: open.slice(0, 8).map((s) => `${s.status}: ${s.title ?? s.key}${s.key === 'policies' && s.summary ? ` (${s.summary.slice(0, 240)})` : ''}`),
       data: withoutLegacyScore(session),
     };
   },

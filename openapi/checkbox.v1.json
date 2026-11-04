@@ -277,6 +277,64 @@
             "type": "string",
             "description": "Documentation or dashboard URL for the step.",
             "example": "https://dashboard.stripe.com/test/apikeys/create"
+          },
+          "dns": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "TXT"
+                ],
+                "description": "Record type.",
+                "example": "TXT"
+              },
+              "name": {
+                "type": "string",
+                "description": "Full record name.",
+                "example": "_checkbox-verify.acme.com"
+              },
+              "value": {
+                "type": "string",
+                "description": "Record value.",
+                "example": "checkbox-verify=3f9a1c2e"
+              }
+            },
+            "required": [
+              "type",
+              "name",
+              "value"
+            ],
+            "description": "verify_domain with a started challenge: the DNS TXT record to add.",
+            "example": {
+              "type": "TXT",
+              "name": "_checkbox-verify.acme.com",
+              "value": "checkbox-verify=3f9a1c2e"
+            }
+          },
+          "well_known": {
+            "type": "object",
+            "properties": {
+              "url": {
+                "type": "string",
+                "description": "Where to serve the file.",
+                "example": "https://acme.com/.well-known/checkbox-verify.txt"
+              },
+              "content": {
+                "type": "string",
+                "description": "The file content.",
+                "example": "3f9a1c2e"
+              }
+            },
+            "required": [
+              "url",
+              "content"
+            ],
+            "description": "verify_domain with a started challenge: the file to serve instead of the DNS record.",
+            "example": {
+              "url": "https://acme.com/.well-known/checkbox-verify.txt",
+              "content": "3f9a1c2e"
+            }
           }
         },
         "required": [
@@ -677,7 +735,16 @@
               "mcp_tool": "update_setup",
               "endpoint": "POST /v1/sites/{site}/test_credentials",
               "command": "checkbox init --verify --json",
-              "url": "https://dashboard.stripe.com/test/apikeys/create"
+              "url": "https://dashboard.stripe.com/test/apikeys/create",
+              "dns": {
+                "type": "TXT",
+                "name": "_checkbox-verify.acme.com",
+                "value": "checkbox-verify=3f9a1c2e"
+              },
+              "well_known": {
+                "url": "https://acme.com/.well-known/checkbox-verify.txt",
+                "content": "3f9a1c2e"
+              }
             }
           }
         },
@@ -1020,9 +1087,10 @@
                   "type": "string",
                   "enum": [
                     "fetched",
-                    "failed"
+                    "failed",
+                    "preview"
                   ],
-                  "description": "Fetch result.",
+                  "description": "Fetch result. preview: read before the site's domain was verified (unverified preview): nothing was stored as evidence and only the Terms checks ran, in memory; it is fetched and stored once the domain is verified.",
                   "example": "fetched"
                 },
                 "fetched": {
@@ -1045,6 +1113,80 @@
                   ],
                   "description": "Evidence record of the stored page (ev_…).",
                   "example": "ev_3f9a1c2e7b4d4e0f9a8b7c6d5e4f3a2b"
+                },
+                "held": {
+                  "type": "boolean",
+                  "description": "Not read (or only previewed) because the site's domain is not verified yet.",
+                  "example": false
+                },
+                "preview": {
+                  "type": [
+                    "object",
+                    "null"
+                  ],
+                  "properties": {
+                    "unverified": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ],
+                      "description": "Always true: read before the domain was verified; nothing stored.",
+                      "example": true
+                    },
+                    "checks": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "check_id": {
+                            "type": "string",
+                            "description": "Check id.",
+                            "example": "terms.cancellation_policy_consistent"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "pass",
+                              "fail",
+                              "needs_review"
+                            ],
+                            "description": "Verdict on this page alone.",
+                            "example": "fail"
+                          },
+                          "summary": {
+                            "type": "string",
+                            "description": "The check, in one line.",
+                            "example": "Cancellation policy consistent with the law"
+                          },
+                          "fix": {
+                            "type": "string",
+                            "description": "One-sentence fix.",
+                            "example": "Let subscribers cancel online."
+                          }
+                        },
+                        "required": [
+                          "check_id",
+                          "status",
+                          "summary"
+                        ]
+                      },
+                      "description": "Terms checks on this page (none for a privacy policy).",
+                      "example": [
+                        {
+                          "check_id": "terms.cancellation_policy_consistent",
+                          "status": "fail",
+                          "summary": "Cancellation policy consistent with the law",
+                          "fix": "Let subscribers cancel online."
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "unverified",
+                    "checks"
+                  ],
+                  "description": "Unverified preview result (status preview), else null.",
+                  "example": null
                 }
               },
               "required": [
@@ -1053,7 +1195,9 @@
                 "status",
                 "fetched",
                 "error",
-                "evidence"
+                "evidence",
+                "held",
+                "preview"
               ]
             },
             "description": "Policy documents Checkbox fetched (checked by terms.* checks).",
@@ -1825,7 +1969,16 @@
                   "mcp_tool": "update_setup",
                   "endpoint": "POST /v1/sites/{site}/test_credentials",
                   "command": "checkbox init --verify --json",
-                  "url": "https://dashboard.stripe.com/test/apikeys/create"
+                  "url": "https://dashboard.stripe.com/test/apikeys/create",
+                  "dns": {
+                    "type": "TXT",
+                    "name": "_checkbox-verify.acme.com",
+                    "value": "checkbox-verify=3f9a1c2e"
+                  },
+                  "well_known": {
+                    "url": "https://acme.com/.well-known/checkbox-verify.txt",
+                    "content": "3f9a1c2e"
+                  }
                 },
                 "owner_notified": false,
                 "owner_email": "sent",
@@ -1886,18 +2039,25 @@
                 ],
                 "description": "Why the site could not be loaded.",
                 "example": null
+              },
+              "preview": {
+                "type": "boolean",
+                "description": "Read as an unverified preview (domain not verified yet): one plain GET of the homepage for links and the snippet, nothing stored as evidence.",
+                "example": false
               }
             },
             "required": [
               "ok",
               "snippet_detected",
-              "error"
+              "error",
+              "preview"
             ],
             "description": "What Checkbox saw on the site.",
             "example": {
               "ok": true,
               "snippet_detected": true,
-              "error": null
+              "error": null,
+              "preview": false
             }
           },
           "policies": {
@@ -1922,12 +2082,18 @@
                   ],
                   "description": "Error.",
                   "example": null
+                },
+                "preview": {
+                  "type": "boolean",
+                  "description": "Read as an unverified preview (domain not verified yet): nothing stored.",
+                  "example": false
                 }
               },
               "required": [
                 "kind",
                 "ok",
-                "error"
+                "error",
+                "preview"
               ]
             },
             "description": "Policies fetched now.",

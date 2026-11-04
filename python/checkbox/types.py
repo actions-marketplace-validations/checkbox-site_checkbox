@@ -64,6 +64,34 @@ Error = TypedDict(
 )
 
 
+#: verify_domain with a started challenge: the DNS TXT record to add.
+SetupNextActionDns = TypedDict(
+    "SetupNextActionDns",
+    {
+        #: Record type.
+        "type": Literal["TXT"],
+        #: Full record name.
+        "name": str,
+        #: Record value.
+        "value": str,
+    },
+    total=False,
+)
+
+
+#: verify_domain with a started challenge: the file to serve instead of the DNS record.
+SetupNextActionWellKnown = TypedDict(
+    "SetupNextActionWellKnown",
+    {
+        #: Where to serve the file.
+        "url": str,
+        #: The file content.
+        "content": str,
+    },
+    total=False,
+)
+
+
 #: The single next thing the agent should do.
 SetupNextAction = TypedDict(
     "SetupNextAction",
@@ -82,6 +110,10 @@ SetupNextAction = TypedDict(
         "command": str,
         #: Documentation or dashboard URL for the step. (optional)
         "url": str,
+        #: verify_domain with a started challenge: the DNS TXT record to add. (optional)
+        "dns": "SetupNextActionDns",
+        #: verify_domain with a started challenge: the file to serve instead of the DNS record. (optional)
+        "well_known": "SetupNextActionWellKnown",
     },
     total=False,
 )
@@ -319,6 +351,35 @@ SetupSessionInstall = TypedDict(
 )
 
 
+SetupSessionPoliciesItemPreviewChecksItem = TypedDict(
+    "SetupSessionPoliciesItemPreviewChecksItem",
+    {
+        #: Check id.
+        "check_id": str,
+        #: Verdict on this page alone.
+        "status": Literal["pass", "fail", "needs_review"],
+        #: The check, in one line.
+        "summary": str,
+        #: One-sentence fix. (optional)
+        "fix": str,
+    },
+    total=False,
+)
+
+
+#: Unverified preview result (status preview), else null.
+SetupSessionPoliciesItemPreview = TypedDict(
+    "SetupSessionPoliciesItemPreview",
+    {
+        #: Always true: read before the domain was verified; nothing stored.
+        "unverified": Literal[True],
+        #: Terms checks on this page (none for a privacy policy).
+        "checks": List["SetupSessionPoliciesItemPreviewChecksItem"],
+    },
+    total=False,
+)
+
+
 SetupSessionPoliciesItem = TypedDict(
     "SetupSessionPoliciesItem",
     {
@@ -326,14 +387,18 @@ SetupSessionPoliciesItem = TypedDict(
         "kind": str,
         #: URL fetched.
         "url": str,
-        #: Fetch result.
-        "status": Literal["fetched", "failed"],
+        #: Fetch result. preview: read before the site's domain was verified (unverified preview): nothing was stored as evidence and only the Terms checks ran, in memory; it is fetched and stored once the domain is verified.
+        "status": Literal["fetched", "failed", "preview"],
         #: When it was fetched. Unix timestamp in seconds.
         "fetched": int,
         #: Why the fetch failed.
         "error": Optional[str],
         #: Evidence record of the stored page (ev_…).
         "evidence": Optional[str],
+        #: Not read (or only previewed) because the site's domain is not verified yet.
+        "held": bool,
+        #: Unverified preview result (status preview), else null.
+        "preview": Optional["SetupSessionPoliciesItemPreview"],
     },
     total=False,
 )
@@ -631,6 +696,8 @@ SetupVerificationHomepage = TypedDict(
         "snippet_detected": Optional[bool],
         #: Why the site could not be loaded.
         "error": Optional[str],
+        #: Read as an unverified preview (domain not verified yet): one plain GET of the homepage for links and the snippet, nothing stored as evidence.
+        "preview": bool,
     },
     total=False,
 )
@@ -645,6 +712,8 @@ SetupVerificationPoliciesItem = TypedDict(
         "ok": bool,
         #: Error.
         "error": Optional[str],
+        #: Read as an unverified preview (domain not verified yet): nothing stored.
+        "preview": bool,
     },
     total=False,
 )
