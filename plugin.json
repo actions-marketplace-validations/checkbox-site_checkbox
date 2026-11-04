@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "checkbox",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "description": "Automatic-renewal law checks for subscription code: when you build a subscription, free trial, Stripe Checkout, pricing page or cancel flow, check it against ROSCA, California, New York and other state laws and get exact fixes. Remote MCP server with OAuth.",
   "author": {
     "name": "Checkbox",

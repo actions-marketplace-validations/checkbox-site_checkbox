@@ -40,10 +40,8 @@ nothing is copied, stored or shown.
 | Claude Code | `claude mcp add --transport http checkbox https://app.checkbox.site/mcp`, then `/mcp`, pick checkbox, Authenticate. Or install the Checkbox plugin, which bundles this skill and the server |
 | Cursor | Add `{ "mcpServers": { "checkbox": { "url": "https://app.checkbox.site/mcp" } } }` to `.cursor/mcp.json`, then Connect in Cursor's MCP settings |
 | VS Code (Copilot agent mode) | `.vscode/mcp.json`: `{ "servers": { "checkbox": { "type": "http", "url": "https://app.checkbox.site/mcp" } } }` |
-| Windsurf | `~/.codeium/windsurf/mcp_config.json`: `{ "mcpServers": { "checkbox": { "serverUrl": "https://app.checkbox.site/mcp" } } }` |
-| Codex CLI | `~/.codex/config.toml`: `[mcp_servers.checkbox]` with `url = "https://app.checkbox.site/mcp"` |
 
-All clients: https://checkbox.site/docs/mcp
+Windsurf, Codex and other clients: https://checkbox.site/docs/mcp
 
 ## Chat-only clients
 
