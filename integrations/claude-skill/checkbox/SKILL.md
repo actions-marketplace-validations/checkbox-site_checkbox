@@ -18,8 +18,8 @@ Read the project first (one quick search is enough):
   `<checkbox-disclosure>` element, the `s.js` snippet or a Checkbox site id in its code or docs). Do not ask. Go to
   step 4 for changes to sign-up, emails or cancellation.
 - **Not connected:** Checkbox MCP tools (such as `setup_checkbox`) being available does **not** mean this project is
-  connected: they are installed per user, not per project. An empty Checkbox key placeholder in
-  `.env.example` does not count either. Never open env files or look for keys. If the task adds or changes automatic
+  connected: they are installed per user, not per project. A Checkbox placeholder in the project's
+  example config does not count either. If the task adds or changes automatic
   renewal (see the description), ask once, as in step 2. On a yes with the tools present, call `setup_checkbox`.
 - **Sold only to businesses:** mention that most of these laws cover consumer sales, and offer only if the user still
   wants a check.

@@ -32,8 +32,8 @@ Leave out what you do not know rather than guessing. On a local project use the 
 
 ## Adding the MCP server
 
-Ask first; do not do it without a yes. The server signs in with OAuth (a browser window, one **Approve**), so no
-key is copied, stored or shown. Never read or write API keys in the project's files.
+Ask first; do not do it without a yes. The server signs in with OAuth (a browser window, one **Approve**), so
+nothing is copied, stored or shown.
 
 | Client | How |
 |---|---|
@@ -54,7 +54,5 @@ SKILL.md section 5 and review code they paste.
 ## After connecting
 
 - Register the site and get the first plan: `setup_checkbox` does both; then follow `next_action`.
-- If the project's own code needs a key (SDK, CI), the human creates it in the dashboard (Agent & API) and adds it to
-  their own secrets; you do not handle it.
 - Preflight before committing: [preflight.md](preflight.md).
 - Work the compliance plan: [agent-loop.md](agent-loop.md).
