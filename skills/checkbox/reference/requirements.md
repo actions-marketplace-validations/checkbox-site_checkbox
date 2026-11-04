@@ -13,9 +13,9 @@ current list with the laws behind each: https://checkbox.site/docs/concepts/chec
 | Billing settings | The billing platform lets customers cancel online and sends trial reminders | `config.*` |
 | Policies | Terms of service consistent with the renewal and cancellation terms; refund promises not contradicted | `terms.*` |
 
-Statuses: `pass`, `fail`, `needs_review` (not enough evidence, or a human must judge), `not_applicable`. A check never
+Each check's status is passing, `fail`, `needs_review` (not enough evidence, or a human must judge) or `not_applicable`. A check never
 passes for lack of data. Severity: `critical`, `high`, `medium`, `low` (the strictest applicable requirement).
 
-Jurisdictions: `US-FED` always applies; states use `US-CA`, `US-NY`, … (pass `jurisdictions` to limit a check;
+Jurisdictions: `US-FED` always applies; states use `US-CA`, `US-NY`, … (set `jurisdictions` to limit a check;
 default all). New York's notice-channel and price-increase consent requirements cannot be observed: they become
 `manual` tasks for the human to attest.

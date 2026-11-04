@@ -1,7 +1,7 @@
 {
   "name": "checkbox",
   "displayName": "Checkbox",
-  "version": "1.2.2",
+  "version": "1.2.3",
   "description": "Automatic-renewal law checks for subscription code. When you build a subscription, free trial, Stripe Checkout in subscription mode, pricing page or cancel flow, Claude offers once to check it against ROSCA, California, New York and other state laws. The Checkbox MCP server is added to all projects, but nothing is sent until you say yes; then it signs in with OAuth (no key to paste), preflights checkout params, disclosures and renewal emails, and works the compliance plan.",
   "author": {
     "name": "Checkbox",
