@@ -92,6 +92,19 @@ SetupNextActionWellKnown = TypedDict(
 )
 
 
+#: verify_domain with a started challenge: or this meta tag on the homepage. The live snippet (install.script_tag) works too: Checkbox verifies the domain when it sees it.
+SetupNextActionMetaTag = TypedDict(
+    "SetupNextActionMetaTag",
+    {
+        #: The page Checkbox reads (the homepage of the domain).
+        "url": str,
+        #: The tag to put in its <head>.
+        "html": str,
+    },
+    total=False,
+)
+
+
 #: The single next thing the agent should do.
 SetupNextAction = TypedDict(
     "SetupNextAction",
@@ -114,6 +127,8 @@ SetupNextAction = TypedDict(
         "dns": "SetupNextActionDns",
         #: verify_domain with a started challenge: the file to serve instead of the DNS record. (optional)
         "well_known": "SetupNextActionWellKnown",
+        #: verify_domain with a started challenge: or this meta tag on the homepage. The live snippet (install.script_tag) works too: Checkbox verifies the domain when it sees it. (optional)
+        "meta_tag": "SetupNextActionMetaTag",
     },
     total=False,
 )
@@ -264,6 +279,94 @@ SetupPlan = TypedDict(
     },
     total=False,
 )
+
+
+UnverifiedScanValuePagesItem = TypedDict(
+    "UnverifiedScanValuePagesItem",
+    {
+        #: Page URL.
+        "url": str,
+        #: home, pricing, terms, privacy, refund, cancellation, account or checkout.
+        "kind": str,
+        #: captured; skipped (robots.txt, not on the site's own domain, page limit, action link); failed.
+        "status": Literal["captured", "skipped", "failed"],
+        #: Why it was skipped or failed. (optional)
+        "reason": str,
+    },
+    total=False,
+)
+
+
+UnverifiedScanValueFindingsItem = TypedDict(
+    "UnverifiedScanValueFindingsItem",
+    {
+        #: Check id.
+        "check_id": str,
+        #: Verdict on the loaded pages alone.
+        "status": Literal["pass", "fail", "needs_review"],
+        #: critical, high, medium or low.
+        "severity": str,
+        #: The check, in one line.
+        "title": str,
+    },
+    total=False,
+)
+
+
+#: Counts.
+UnverifiedScanValueCounts = TypedDict(
+    "UnverifiedScanValueCounts",
+    {
+        #: Pages captured.
+        "pages_captured": int,
+        #: Pages skipped.
+        "pages_skipped": int,
+        #: Failing checks.
+        "failing": int,
+        #: Checks to review.
+        "needs_review": int,
+        #: Passing checks.
+        "passing": int,
+    },
+    total=False,
+)
+
+
+#: While the domain is not verified: the newest read-only scan of the site's own public pages (labeled "unverified scan": no checkout submitted, not evidence, replaced by the full scan after verification). Null otherwise.
+UnverifiedScanValue = TypedDict(
+    "UnverifiedScanValue",
+    {
+        #: Read-only scan id (uscan_…).
+        "id": str,
+        #: Object type.
+        "object": Literal["unverified_scan"],
+        #: Always true: read before the domain was verified. Not evidence; no certificate, receipt or monitoring comes from it.
+        "unverified": Literal[True],
+        #: The label every surface shows with these results.
+        "label": Literal["unverified scan"],
+        #: queued, running, completed, failed, or skipped (e.g. the domain got verified first, so the full scan replaces it).
+        "status": Literal["queued", "running", "completed", "failed", "skipped"],
+        #: When it was queued. Unix timestamp in seconds.
+        "created": int,
+        #: When it finished. Unix timestamp in seconds.
+        "finished": Optional[int],
+        #: Every page considered (at most 20 loaded).
+        "pages": List["UnverifiedScanValuePagesItem"],
+        #: Checks on the loaded pages, in memory (not findings of the site).
+        "findings": List["UnverifiedScanValueFindingsItem"],
+        #: Counts.
+        "counts": "UnverifiedScanValueCounts",
+        #: Why it failed or was skipped.
+        "error": Optional[str],
+        #: What an unverified scan is (show it with the results).
+        "note": str,
+    },
+    total=False,
+)
+
+
+#: While the domain is not verified: the newest read-only scan of the site's own public pages (labeled "unverified scan": no checkout submitted, not evidence, replaced by the full scan after verification). Null otherwise.
+UnverifiedScan = Optional["UnverifiedScanValue"]
 
 
 #: One step of the setup checklist.
@@ -568,6 +671,7 @@ SetupSession = TypedDict(
         "test_run": Optional["SetupSessionTestRun"],
         #: Latest verdict of the test-mode site.
         "compliance": Optional["SetupSessionCompliance"],
+        "unverified_scan": "UnverifiedScan",
         #: The setup checklist, in order.
         "steps": List["SetupStep"],
         "next_action": "SetupNextAction",
@@ -734,6 +838,32 @@ SetupVerificationScan = TypedDict(
 )
 
 
+#: The site's domain got verified during this call (e.g. the snippet is live on the homepage).
+SetupVerificationDomainVerified = TypedDict(
+    "SetupVerificationDomainVerified",
+    {
+        #: The domain.
+        "domain": str,
+        #: snippet, meta_tag, dns_txt or well_known.
+        "method": str,
+    },
+    total=False,
+)
+
+
+#: While the domain is not verified: the read-only scan of the site's own public pages (no checkout submitted).
+SetupVerificationUnverifiedScan = TypedDict(
+    "SetupVerificationUnverifiedScan",
+    {
+        #: Whether a read-only (unverified) scan was queued now.
+        "queued": bool,
+        #: Why not (limits: one per site per 24 h, three unverified sites per account in 30 days).
+        "reason": Optional[str],
+    },
+    total=False,
+)
+
+
 #: Result of verifySetupSession, with the updated session.
 SetupVerification = TypedDict(
     "SetupVerification",
@@ -748,6 +878,10 @@ SetupVerification = TypedDict(
         "scan": "SetupVerificationScan",
         #: Whether compliance was re-evaluated now.
         "evaluated": bool,
+        #: The site's domain got verified during this call (e.g. the snippet is live on the homepage).
+        "domain_verified": Optional["SetupVerificationDomainVerified"],
+        #: While the domain is not verified: the read-only scan of the site's own public pages (no checkout submitted).
+        "unverified_scan": Optional["SetupVerificationUnverifiedScan"],
         "setup_session": "SetupSession",
     },
     total=False,
@@ -1195,6 +1329,19 @@ DomainVerificationFile = TypedDict(
 )
 
 
+#: Or add this meta tag to the homepage (option 3). Option 4: install the site's Checkbox snippet (install.script_tag) on the homepage; Checkbox verifies the domain when it sees it live.
+DomainVerificationMetaTag = TypedDict(
+    "DomainVerificationMetaTag",
+    {
+        #: The page Checkbox reads (the site's homepage, redirects only within the domain).
+        "url": str,
+        #: Put this tag in the <head> of that page.
+        "html": str,
+    },
+    total=False,
+)
+
+
 #: What to do next; null when verified.
 DomainVerificationNextAction = TypedDict(
     "DomainVerificationNextAction",
@@ -1226,10 +1373,10 @@ DomainVerification = TypedDict(
         "site": str,
         #: Domain of the site URL.
         "domain": Optional[str],
-        #: not_started until createDomainVerification; verified once the TXT record or file was found.
+        #: not_started until createDomainVerification; verified once the TXT record, the file, the live snippet or the meta tag was found.
         "status": Literal["not_started", "pending", "verified"],
-        #: How control was proven.
-        "method": Optional[Literal["dns_txt", "well_known"]],
+        #: How control was proven: dns_txt, well_known, snippet (the site's Checkbox snippet live on https://<domain>/) or meta_tag (<meta name="checkbox-verify"> on https://<domain>/).
+        "method": Optional[Literal["dns_txt", "well_known", "snippet", "meta_tag"]],
         #: When it was verified. Unix timestamp in seconds.
         "verified_at": Optional[int],
         #: Last check. Unix timestamp in seconds.
@@ -1240,6 +1387,8 @@ DomainVerification = TypedDict(
         "dns_record": Optional["DomainVerificationDnsRecord"],
         #: Or serve this file (option 2).
         "file": Optional["DomainVerificationFile"],
+        #: Or add this meta tag to the homepage (option 3). Option 4: install the site's Checkbox snippet (install.script_tag) on the homepage; Checkbox verifies the domain when it sees it live.
+        "meta_tag": Optional["DomainVerificationMetaTag"],
         #: Configured scan URLs outside the verified domain (certificates cover only the domain).
         "scan_target_problems": List[str],
         #: Whether live mode is activated for the account.
@@ -1329,6 +1478,7 @@ Site = TypedDict(
         "created": int,
         #: (optional)
         "latest_scan": "Scan",
+        "unverified_scan": "UnverifiedScan",
         #: (optional)
         "domain_verification": "DomainVerification",
     },
@@ -2394,6 +2544,8 @@ CompliancePlan = TypedDict(
         "disclaimer": str,
         #: When the plan was computed. Unix timestamp in seconds.
         "generated": int,
+        #: (optional)
+        "unverified_scan": "UnverifiedScan",
         #: Optional improvements beyond compliance. Never tasks, never blocking, never counted toward compliance. (optional)
         "optional_improvements": "CompliancePlanOptionalImprovements",
     },
@@ -7310,6 +7462,19 @@ RetrieveDomainVerificationResponseFile = TypedDict(
 )
 
 
+#: Or add this meta tag to the homepage (option 3). Option 4: install the site's Checkbox snippet (install.script_tag) on the homepage; Checkbox verifies the domain when it sees it live.
+RetrieveDomainVerificationResponseMetaTag = TypedDict(
+    "RetrieveDomainVerificationResponseMetaTag",
+    {
+        #: The page Checkbox reads (the site's homepage, redirects only within the domain).
+        "url": str,
+        #: Put this tag in the <head> of that page.
+        "html": str,
+    },
+    total=False,
+)
+
+
 #: What to do next; null when verified.
 RetrieveDomainVerificationResponseNextAction = TypedDict(
     "RetrieveDomainVerificationResponseNextAction",
@@ -7341,10 +7506,10 @@ RetrieveDomainVerificationResponse = TypedDict(
         "site": str,
         #: Domain of the site URL.
         "domain": Optional[str],
-        #: not_started until createDomainVerification; verified once the TXT record or file was found.
+        #: not_started until createDomainVerification; verified once the TXT record, the file, the live snippet or the meta tag was found.
         "status": Literal["not_started", "pending", "verified"],
-        #: How control was proven.
-        "method": Optional[Literal["dns_txt", "well_known"]],
+        #: How control was proven: dns_txt, well_known, snippet (the site's Checkbox snippet live on https://<domain>/) or meta_tag (<meta name="checkbox-verify"> on https://<domain>/).
+        "method": Optional[Literal["dns_txt", "well_known", "snippet", "meta_tag"]],
         #: When it was verified. Unix timestamp in seconds.
         "verified_at": Optional[int],
         #: Last check. Unix timestamp in seconds.
@@ -7355,6 +7520,8 @@ RetrieveDomainVerificationResponse = TypedDict(
         "dns_record": Optional["RetrieveDomainVerificationResponseDnsRecord"],
         #: Or serve this file (option 2).
         "file": Optional["RetrieveDomainVerificationResponseFile"],
+        #: Or add this meta tag to the homepage (option 3). Option 4: install the site's Checkbox snippet (install.script_tag) on the homepage; Checkbox verifies the domain when it sees it live.
+        "meta_tag": Optional["RetrieveDomainVerificationResponseMetaTag"],
         #: Configured scan URLs outside the verified domain (certificates cover only the domain).
         "scan_target_problems": List[str],
         #: Whether live mode is activated for the account.
@@ -7394,6 +7561,19 @@ CreateDomainVerificationResponseFile = TypedDict(
 )
 
 
+#: Or add this meta tag to the homepage (option 3). Option 4: install the site's Checkbox snippet (install.script_tag) on the homepage; Checkbox verifies the domain when it sees it live.
+CreateDomainVerificationResponseMetaTag = TypedDict(
+    "CreateDomainVerificationResponseMetaTag",
+    {
+        #: The page Checkbox reads (the site's homepage, redirects only within the domain).
+        "url": str,
+        #: Put this tag in the <head> of that page.
+        "html": str,
+    },
+    total=False,
+)
+
+
 #: What to do next; null when verified.
 CreateDomainVerificationResponseNextAction = TypedDict(
     "CreateDomainVerificationResponseNextAction",
@@ -7425,10 +7605,10 @@ CreateDomainVerificationResponse = TypedDict(
         "site": str,
         #: Domain of the site URL.
         "domain": Optional[str],
-        #: not_started until createDomainVerification; verified once the TXT record or file was found.
+        #: not_started until createDomainVerification; verified once the TXT record, the file, the live snippet or the meta tag was found.
         "status": Literal["not_started", "pending", "verified"],
-        #: How control was proven.
-        "method": Optional[Literal["dns_txt", "well_known"]],
+        #: How control was proven: dns_txt, well_known, snippet (the site's Checkbox snippet live on https://<domain>/) or meta_tag (<meta name="checkbox-verify"> on https://<domain>/).
+        "method": Optional[Literal["dns_txt", "well_known", "snippet", "meta_tag"]],
         #: When it was verified. Unix timestamp in seconds.
         "verified_at": Optional[int],
         #: Last check. Unix timestamp in seconds.
@@ -7439,6 +7619,8 @@ CreateDomainVerificationResponse = TypedDict(
         "dns_record": Optional["CreateDomainVerificationResponseDnsRecord"],
         #: Or serve this file (option 2).
         "file": Optional["CreateDomainVerificationResponseFile"],
+        #: Or add this meta tag to the homepage (option 3). Option 4: install the site's Checkbox snippet (install.script_tag) on the homepage; Checkbox verifies the domain when it sees it live.
+        "meta_tag": Optional["CreateDomainVerificationResponseMetaTag"],
         #: Configured scan URLs outside the verified domain (certificates cover only the domain).
         "scan_target_problems": List[str],
         #: Whether live mode is activated for the account.
@@ -7478,6 +7660,19 @@ CheckDomainVerificationResponseFile = TypedDict(
 )
 
 
+#: Or add this meta tag to the homepage (option 3). Option 4: install the site's Checkbox snippet (install.script_tag) on the homepage; Checkbox verifies the domain when it sees it live.
+CheckDomainVerificationResponseMetaTag = TypedDict(
+    "CheckDomainVerificationResponseMetaTag",
+    {
+        #: The page Checkbox reads (the site's homepage, redirects only within the domain).
+        "url": str,
+        #: Put this tag in the <head> of that page.
+        "html": str,
+    },
+    total=False,
+)
+
+
 #: What to do next; null when verified.
 CheckDomainVerificationResponseNextAction = TypedDict(
     "CheckDomainVerificationResponseNextAction",
@@ -7509,10 +7704,10 @@ CheckDomainVerificationResponse = TypedDict(
         "site": str,
         #: Domain of the site URL.
         "domain": Optional[str],
-        #: not_started until createDomainVerification; verified once the TXT record or file was found.
+        #: not_started until createDomainVerification; verified once the TXT record, the file, the live snippet or the meta tag was found.
         "status": Literal["not_started", "pending", "verified"],
-        #: How control was proven.
-        "method": Optional[Literal["dns_txt", "well_known"]],
+        #: How control was proven: dns_txt, well_known, snippet (the site's Checkbox snippet live on https://<domain>/) or meta_tag (<meta name="checkbox-verify"> on https://<domain>/).
+        "method": Optional[Literal["dns_txt", "well_known", "snippet", "meta_tag"]],
         #: When it was verified. Unix timestamp in seconds.
         "verified_at": Optional[int],
         #: Last check. Unix timestamp in seconds.
@@ -7523,6 +7718,8 @@ CheckDomainVerificationResponse = TypedDict(
         "dns_record": Optional["CheckDomainVerificationResponseDnsRecord"],
         #: Or serve this file (option 2).
         "file": Optional["CheckDomainVerificationResponseFile"],
+        #: Or add this meta tag to the homepage (option 3). Option 4: install the site's Checkbox snippet (install.script_tag) on the homepage; Checkbox verifies the domain when it sees it live.
+        "meta_tag": Optional["CheckDomainVerificationResponseMetaTag"],
         #: Configured scan URLs outside the verified domain (certificates cover only the domain).
         "scan_target_problems": List[str],
         #: Whether live mode is activated for the account.

@@ -352,11 +352,25 @@ async function pollDeviceToken(api: CheckboxApi, deviceCode: string, maxWaitMs: 
 }
 
 /** What the first checks did: ran, or held because the site's domain is not verified yet (scan gate). */
-function firstCheckNote(next: NextAction | undefined): string {
+function firstCheckNote(next: NextAction | undefined, verify?: { unverified_scan?: { queued?: boolean; reason?: string | null } | null } | null): string {
   if (next?.type === 'verify_domain') {
-    return 'Site registered, but Checkbox has not scanned it: it only visits websites their owners have verified. Until then it only reads the site\'s own public homepage and Terms / privacy pages once as an unverified preview (nothing stored as evidence; see the policies step). Follow Next to verify the domain (ask the human to publish the DNS TXT record or file), then call get_setup_status with verify=true. Meanwhile check pages by sending their HTML (check_page_html / verify_task with html).';
+    const ro = verify?.unverified_scan?.queued
+      ? ' First read-only scan queued (unverified: no checkout is submitted until you verify the domain); its results are labeled "unverified scan" and are not evidence.'
+      : '';
+    return `Site registered, but Checkbox has not scanned it fully: it only submits checkouts on websites their owners have verified. Until then it reads the site's own public homepage and Terms / privacy pages as an unverified preview (nothing stored as evidence; see the policies step).${ro} Follow Next to verify the domain (ask the human to publish the DNS TXT record or file, or add the meta tag; or install the snippet: Checkbox verifies the domain when it sees it live), then call get_setup_status with verify=true. Meanwhile check pages by sending their HTML (check_page_html / verify_task with html).`;
   }
   return 'First checks ran (site, Terms and policies fetched, first evaluation); follow Next.';
+}
+
+/** One line for a read-only (unverified) scan: always labeled, never evidence. */
+export function unverifiedScanNote(u: unknown): string | null {
+  if (!u || typeof u !== 'object') return null;
+  const x = u as { status?: string; counts?: { pages_captured?: number; failing?: number; needs_review?: number; passing?: number }; findings?: Array<{ check_id?: string; status?: string; title?: string }>; error?: string | null };
+  const c = x.counts ?? {};
+  if (x.status === 'queued' || x.status === 'running') return 'UNVERIFIED SCAN queued: a read-only look at the site\'s own public pages (no checkout is submitted until the domain is verified).';
+  if (x.status !== 'completed') return `UNVERIFIED SCAN ${x.status ?? 'unknown'}${x.error ? `: ${untrusted(x.error, 160)}` : ''}.`;
+  const failing = (x.findings ?? []).filter((f) => f.status === 'fail').slice(0, 5).map((f) => f.check_id).filter(Boolean);
+  return `UNVERIFIED SCAN (read-only, not evidence, no checkout submitted): ${c.pages_captured ?? 0} page(s) read; ${c.failing ?? 0} failing, ${c.needs_review ?? 0} to review, ${c.passing ?? 0} passing${failing.length ? ` (failing: ${failing.join(', ')})` : ''}. Verify the domain for the full scan, which replaces it.`;
 }
 
 /**
@@ -381,15 +395,16 @@ async function setupOverOAuth(
   let fresh: Record<string, unknown> | undefined;
   if (session.business?.site_url) {
     try {
-      const v = await api.request<{ scan?: unknown; evaluated?: boolean; setup_session?: { next_action?: NextAction; steps?: Array<{ key: string; status: string }> } }>(
+      const v = await api.request<{ scan?: unknown; evaluated?: boolean; unverified_scan?: { queued?: boolean; reason?: string | null } | null; domain_verified?: { domain: string; method: string } | null; setup_session?: { next_action?: NextAction; steps?: Array<{ key: string; status: string }> } }>(
         'POST',
         `/v1/setup_sessions/${enc(session.id)}/verify`,
         { body: {} },
       );
       if (v.setup_session && typeof v.setup_session === 'object') fresh = v.setup_session as Record<string, unknown>;
       next = v.setup_session?.next_action;
-      firstCheck = { evaluated: v.evaluated ?? false, scan: v.scan ?? null, steps: v.setup_session?.steps?.map((st) => `${st.key}: ${st.status}`) ?? [] };
-      notes.push(firstCheckNote(next));
+      firstCheck = { evaluated: v.evaluated ?? false, scan: v.scan ?? null, unverified_scan: v.unverified_scan ?? null, steps: v.setup_session?.steps?.map((st) => `${st.key}: ${st.status}`) ?? [] };
+      if (v.domain_verified) notes.push(`Domain verified: ${v.domain_verified.method === 'snippet' ? `the Checkbox snippet is live on ${v.domain_verified.domain}` : `${v.domain_verified.domain} (${v.domain_verified.method})`}.`);
+      notes.push(firstCheckNote(next, v));
     } catch (err) {
       notes.push(`First checks did not run yet (${err instanceof Error ? err.message.slice(0, 160) : 'error'}); call get_setup_status with verify=true.`);
     }
@@ -568,15 +583,22 @@ const getSetupStatus: ToolDef = {
     const id = await resolveSetupSession(api, args.setup_session);
     if (args.verify) {
       if (!keyAllows(key, 'setup_sessions:write')) throw new ToolError('verify=true needs a key with setup_sessions write access; call again without verify.');
-      const res = await api.request<{ session?: { id: string; next_action?: NextAction } } & Record<string, unknown>>('POST', `/v1/setup_sessions/${enc(id)}/verify`, { body: {} });
-      return { headline: `Re-checked setup session ${id}.`, data: withoutLegacyScore(res), next: nextActionOf(res) ?? nextActionOf(res.session) };
+      const res = await api.request<{ session?: { id: string; next_action?: NextAction }; domain_verified?: { domain: string; method: string } | null; unverified_scan?: { queued?: boolean; reason?: string | null } | null; setup_session?: { unverified_scan?: unknown } } & Record<string, unknown>>('POST', `/v1/setup_sessions/${enc(id)}/verify`, { body: {} });
+      const notes: string[] = [];
+      if (res.domain_verified) notes.push(`Domain verified: ${res.domain_verified.method === 'snippet' ? `the Checkbox snippet is live on ${res.domain_verified.domain}` : `${res.domain_verified.domain} (${res.domain_verified.method})`}.`);
+      if (res.unverified_scan?.queued) notes.push('First read-only scan queued (unverified: no checkout is submitted until you verify the domain).');
+      else if (res.unverified_scan?.reason) notes.push(`No new read-only scan: ${untrusted(res.unverified_scan.reason, 200)}.`);
+      const ro = unverifiedScanNote(res.setup_session?.unverified_scan);
+      if (ro && !res.unverified_scan?.queued) notes.push(ro);
+      return { headline: `Re-checked setup session ${id}.`, ...(notes.length ? { notes } : {}), data: withoutLegacyScore(res), next: nextActionOf(res) ?? nextActionOf(res.session) };
     }
-    const session = await api.request<{ id: string; status: string; steps?: Array<{ key?: string; status?: string; title?: string; summary?: string }> }>('GET', `/v1/setup_sessions/${enc(id)}`);
+    const session = await api.request<{ id: string; status: string; unverified_scan?: unknown; steps?: Array<{ key?: string; status?: string; title?: string; summary?: string }> }>('GET', `/v1/setup_sessions/${enc(id)}`);
     const open = (session.steps ?? []).filter((s) => s.status && !['done', 'skipped', 'not_applicable'].includes(s.status));
+    const ro = unverifiedScanNote(session.unverified_scan);
     return {
       headline: `Setup session ${session.id}: ${session.status}; ${open.length} checklist step(s) open.`,
       // The policies step says what an unverified preview read (or that the pages wait for domain verification).
-      notes: open.slice(0, 8).map((s) => `${s.status}: ${s.title ?? s.key}${s.key === 'policies' && s.summary ? ` (${s.summary.slice(0, 240)})` : ''}`),
+      notes: [...open.slice(0, 8).map((s) => `${s.status}: ${s.title ?? s.key}${s.key === 'policies' && s.summary ? ` (${s.summary.slice(0, 240)})` : ''}`), ...(ro ? [ro] : [])],
       data: withoutLegacyScore(session),
     };
   },
@@ -1383,9 +1405,11 @@ const getSiteStatus: ToolDef = {
     const pendingLive = roll?.pending_live_checks ?? [];
     const rollStatus = site.compliance?.status;
     const label = site.compliance?.label;
+    const ro = unverifiedScanNote((site as { unverified_scan?: unknown }).unverified_scan);
     const notes = [
       ...(todo.length ? [`To do (${todo.length}, from the compliance plan, in order):`, ...todo.map((t, i) => `${i + 1}. ${t.id} ${todoLine(t)}`)] : []),
       ...(evaluated && label ? pendingLive.slice(0, 6).map((p) => `LIVE CHECK PENDING ${p.check_id}: ${p.what} — ${p.completes}`) : []),
+      ...(ro ? [ro] : []),
     ];
     const { score: _siteScore, open_findings: _open, needs_review: _nr, ...complianceLite } = (site.compliance ?? {}) as Record<string, unknown>;
     return {

@@ -335,6 +335,30 @@
               "url": "https://acme.com/.well-known/checkbox-verify.txt",
               "content": "3f9a1c2e"
             }
+          },
+          "meta_tag": {
+            "type": "object",
+            "properties": {
+              "url": {
+                "type": "string",
+                "description": "The page Checkbox reads (the homepage of the domain).",
+                "example": "https://acme.com/"
+              },
+              "html": {
+                "type": "string",
+                "description": "The tag to put in its <head>.",
+                "example": "<meta name=\"checkbox-verify\" content=\"3f9a1c2e\">"
+              }
+            },
+            "required": [
+              "url",
+              "html"
+            ],
+            "description": "verify_domain with a started challenge: or this meta tag on the homepage. The live snippet (install.script_tag) works too: Checkbox verifies the domain when it sees it.",
+            "example": {
+              "url": "https://acme.com/",
+              "html": "<meta name=\"checkbox-verify\" content=\"3f9a1c2e\">"
+            }
           }
         },
         "required": [
@@ -674,6 +698,222 @@
         },
         "description": "A subscription plan as the merchant sells it."
       },
+      "UnverifiedScan": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Read-only scan id (uscan_…).",
+            "example": "uscan_3f9a1c2e7b4d4e0f9a8b7c6d5e4f3a2b"
+          },
+          "object": {
+            "type": "string",
+            "enum": [
+              "unverified_scan"
+            ],
+            "description": "Object type.",
+            "example": "unverified_scan"
+          },
+          "unverified": {
+            "type": "boolean",
+            "enum": [
+              true
+            ],
+            "description": "Always true: read before the domain was verified. Not evidence; no certificate, receipt or monitoring comes from it.",
+            "example": true
+          },
+          "label": {
+            "type": "string",
+            "enum": [
+              "unverified scan"
+            ],
+            "description": "The label every surface shows with these results.",
+            "example": "unverified scan"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "running",
+              "completed",
+              "failed",
+              "skipped"
+            ],
+            "description": "queued, running, completed, failed, or skipped (e.g. the domain got verified first, so the full scan replaces it).",
+            "example": "completed"
+          },
+          "created": {
+            "type": "integer",
+            "description": "When it was queued. Unix timestamp in seconds.",
+            "example": 1793318400
+          },
+          "finished": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "When it finished. Unix timestamp in seconds.",
+            "example": 1793318400
+          },
+          "pages": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "description": "Page URL.",
+                  "example": "https://acme.com/pricing"
+                },
+                "kind": {
+                  "type": "string",
+                  "description": "home, pricing, terms, privacy, refund, cancellation, account or checkout.",
+                  "example": "pricing"
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "captured",
+                    "skipped",
+                    "failed"
+                  ],
+                  "description": "captured; skipped (robots.txt, not on the site's own domain, page limit, action link); failed.",
+                  "example": "captured"
+                },
+                "reason": {
+                  "type": "string",
+                  "description": "Why it was skipped or failed.",
+                  "example": "robots.txt disallows it"
+                }
+              },
+              "required": [
+                "url",
+                "kind",
+                "status"
+              ]
+            },
+            "description": "Every page considered (at most 20 loaded).",
+            "example": []
+          },
+          "findings": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "check_id": {
+                  "type": "string",
+                  "description": "Check id.",
+                  "example": "disclosure.auto_renewal_terms"
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "pass",
+                    "fail",
+                    "needs_review"
+                  ],
+                  "description": "Verdict on the loaded pages alone.",
+                  "example": "fail"
+                },
+                "severity": {
+                  "type": "string",
+                  "description": "critical, high, medium or low.",
+                  "example": "high"
+                },
+                "title": {
+                  "type": "string",
+                  "description": "The check, in one line.",
+                  "example": "Automatic renewal terms shown before purchase"
+                }
+              },
+              "required": [
+                "check_id",
+                "status",
+                "severity",
+                "title"
+              ]
+            },
+            "description": "Checks on the loaded pages, in memory (not findings of the site).",
+            "example": []
+          },
+          "counts": {
+            "type": "object",
+            "properties": {
+              "pages_captured": {
+                "type": "integer",
+                "description": "Pages captured.",
+                "example": 6
+              },
+              "pages_skipped": {
+                "type": "integer",
+                "description": "Pages skipped.",
+                "example": 1
+              },
+              "failing": {
+                "type": "integer",
+                "description": "Failing checks.",
+                "example": 2
+              },
+              "needs_review": {
+                "type": "integer",
+                "description": "Checks to review.",
+                "example": 1
+              },
+              "passing": {
+                "type": "integer",
+                "description": "Passing checks.",
+                "example": 9
+              }
+            },
+            "required": [
+              "pages_captured",
+              "pages_skipped",
+              "failing",
+              "needs_review",
+              "passing"
+            ],
+            "description": "Counts.",
+            "example": {
+              "pages_captured": 6,
+              "pages_skipped": 1,
+              "failing": 2,
+              "needs_review": 1,
+              "passing": 9
+            }
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why it failed or was skipped.",
+            "example": null
+          },
+          "note": {
+            "type": "string",
+            "description": "What an unverified scan is (show it with the results).",
+            "example": "Unverified scan: Checkbox only loaded public pages of this site…"
+          }
+        },
+        "required": [
+          "id",
+          "object",
+          "unverified",
+          "label",
+          "status",
+          "created",
+          "finished",
+          "pages",
+          "findings",
+          "counts",
+          "error",
+          "note"
+        ],
+        "description": "While the domain is not verified: the newest read-only scan of the site's own public pages (labeled \"unverified scan\": no checkout submitted, not evidence, replaced by the full scan after verification). Null otherwise."
+      },
       "SetupStep": {
         "type": "object",
         "properties": {
@@ -744,6 +984,10 @@
               "well_known": {
                 "url": "https://acme.com/.well-known/checkbox-verify.txt",
                 "content": "3f9a1c2e"
+              },
+              "meta_tag": {
+                "url": "https://acme.com/",
+                "html": "<meta name=\"checkbox-verify\" content=\"3f9a1c2e\">"
               }
             }
           }
@@ -1535,6 +1779,9 @@
               ]
             }
           },
+          "unverified_scan": {
+            "$ref": "#/components/schemas/UnverifiedScan"
+          },
           "steps": {
             "type": "array",
             "items": {
@@ -1588,6 +1835,7 @@
           "stripe",
           "test_run",
           "compliance",
+          "unverified_scan",
           "steps",
           "next_action",
           "owner_notified",
@@ -1961,6 +2209,26 @@
                     }
                   ]
                 },
+                "unverified_scan": {
+                  "id": "uscan_3f9a1c2e7b4d4e0f9a8b7c6d5e4f3a2b",
+                  "object": "unverified_scan",
+                  "unverified": true,
+                  "label": "unverified scan",
+                  "status": "completed",
+                  "created": 1793318400,
+                  "finished": 1793318400,
+                  "pages": [],
+                  "findings": [],
+                  "counts": {
+                    "pages_captured": 6,
+                    "pages_skipped": 1,
+                    "failing": 2,
+                    "needs_review": 1,
+                    "passing": 9
+                  },
+                  "error": null,
+                  "note": "Unverified scan: Checkbox only loaded public pages of this site…"
+                },
                 "steps": [],
                 "next_action": {
                   "type": "install_snippet",
@@ -1978,6 +2246,10 @@
                   "well_known": {
                     "url": "https://acme.com/.well-known/checkbox-verify.txt",
                     "content": "3f9a1c2e"
+                  },
+                  "meta_tag": {
+                    "url": "https://acme.com/",
+                    "html": "<meta name=\"checkbox-verify\" content=\"3f9a1c2e\">"
                   }
                 },
                 "owner_notified": false,
@@ -2141,6 +2413,57 @@
             "description": "Whether compliance was re-evaluated now.",
             "example": true
           },
+          "domain_verified": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "domain": {
+                "type": "string",
+                "description": "The domain.",
+                "example": "acme.com"
+              },
+              "method": {
+                "type": "string",
+                "description": "snippet, meta_tag, dns_txt or well_known.",
+                "example": "snippet"
+              }
+            },
+            "required": [
+              "domain",
+              "method"
+            ],
+            "description": "The site's domain got verified during this call (e.g. the snippet is live on the homepage).",
+            "example": null
+          },
+          "unverified_scan": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "queued": {
+                "type": "boolean",
+                "description": "Whether a read-only (unverified) scan was queued now.",
+                "example": true
+              },
+              "reason": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Why not (limits: one per site per 24 h, three unverified sites per account in 30 days).",
+                "example": null
+              }
+            },
+            "required": [
+              "queued",
+              "reason"
+            ],
+            "description": "While the domain is not verified: the read-only scan of the site's own public pages (no checkout submitted).",
+            "example": null
+          },
           "setup_session": {
             "$ref": "#/components/schemas/SetupSession"
           }
@@ -2151,6 +2474,8 @@
           "policies",
           "scan",
           "evaluated",
+          "domain_verified",
+          "unverified_scan",
           "setup_session"
         ],
         "description": "Result of verifySetupSession, with the updated session."
@@ -3308,7 +3633,7 @@
               "pending",
               "verified"
             ],
-            "description": "not_started until createDomainVerification; verified once the TXT record or file was found.",
+            "description": "not_started until createDomainVerification; verified once the TXT record, the file, the live snippet or the meta tag was found.",
             "example": "pending"
           },
           "method": {
@@ -3318,9 +3643,11 @@
             ],
             "enum": [
               "dns_txt",
-              "well_known"
+              "well_known",
+              "snippet",
+              "meta_tag"
             ],
-            "description": "How control was proven.",
+            "description": "How control was proven: dns_txt, well_known, snippet (the site's Checkbox snippet live on https://<domain>/) or meta_tag (<meta name=\"checkbox-verify\"> on https://<domain>/).",
             "example": null
           },
           "verified_at": {
@@ -3411,6 +3738,33 @@
               "contents": "Xy…"
             }
           },
+          "meta_tag": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "url": {
+                "type": "string",
+                "description": "The page Checkbox reads (the site's homepage, redirects only within the domain).",
+                "example": "https://acme.example/"
+              },
+              "html": {
+                "type": "string",
+                "description": "Put this tag in the <head> of that page.",
+                "example": "<meta name=\"checkbox-verify\" content=\"Xy…\">"
+              }
+            },
+            "required": [
+              "url",
+              "html"
+            ],
+            "description": "Or add this meta tag to the homepage (option 3). Option 4: install the site's Checkbox snippet (install.script_tag) on the homepage; Checkbox verifies the domain when it sees it live.",
+            "example": {
+              "url": "https://acme.example/",
+              "html": "<meta name=\"checkbox-verify\" content=\"Xy…\">"
+            }
+          },
           "scan_target_problems": {
             "type": "array",
             "items": {
@@ -3482,6 +3836,7 @@
           "last_error",
           "dns_record",
           "file",
+          "meta_tag",
           "scan_target_problems",
           "account_activated",
           "next_action"
@@ -3844,6 +4199,36 @@
           "latest_scan": {
             "$ref": "#/components/schemas/Scan"
           },
+          "unverified_scan": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UnverifiedScan"
+              },
+              {
+                "description": "While the domain is not verified: the newest read-only scan of the site's own public pages, labeled \"unverified scan\" (no checkout submitted; not evidence; no certificate or monitoring). Null otherwise."
+              }
+            ],
+            "example": {
+              "id": "uscan_3f9a1c2e7b4d4e0f9a8b7c6d5e4f3a2b",
+              "object": "unverified_scan",
+              "unverified": true,
+              "label": "unverified scan",
+              "status": "completed",
+              "created": 1793318400,
+              "finished": 1793318400,
+              "pages": [],
+              "findings": [],
+              "counts": {
+                "pages_captured": 6,
+                "pages_skipped": 1,
+                "failing": 2,
+                "needs_review": 1,
+                "passing": 9
+              },
+              "error": null,
+              "note": "Unverified scan: Checkbox only loaded public pages of this site…"
+            }
+          },
           "domain_verification": {
             "$ref": "#/components/schemas/DomainVerification"
           }
@@ -3865,7 +4250,8 @@
           "compliance",
           "install",
           "archived",
-          "created"
+          "created",
+          "unverified_scan"
         ],
         "description": "A subscription business Checkbox monitors."
       },
@@ -4026,6 +4412,26 @@
                   "finished": 1793318400,
                   "created": 1793318400
                 },
+                "unverified_scan": {
+                  "id": "uscan_3f9a1c2e7b4d4e0f9a8b7c6d5e4f3a2b",
+                  "object": "unverified_scan",
+                  "unverified": true,
+                  "label": "unverified scan",
+                  "status": "completed",
+                  "created": 1793318400,
+                  "finished": 1793318400,
+                  "pages": [],
+                  "findings": [],
+                  "counts": {
+                    "pages_captured": 6,
+                    "pages_skipped": 1,
+                    "failing": 2,
+                    "needs_review": 1,
+                    "passing": 9
+                  },
+                  "error": null,
+                  "note": "Unverified scan: Checkbox only loaded public pages of this site…"
+                },
                 "domain_verification": {
                   "id": "dv_3f9a1c2e7b4d4e0f9a8b7c6d5e4f3a2b",
                   "object": "domain_verification",
@@ -4044,6 +4450,10 @@
                   "file": {
                     "url": "https://acme.example/.well-known/checkbox-verify.txt",
                     "contents": "Xy…"
+                  },
+                  "meta_tag": {
+                    "url": "https://acme.example/",
+                    "html": "<meta name=\"checkbox-verify\" content=\"Xy…\">"
                   },
                   "scan_target_problems": [],
                   "account_activated": false,
@@ -7685,6 +8095,36 @@
             "type": "integer",
             "description": "When the plan was computed. Unix timestamp in seconds.",
             "example": 1793318400
+          },
+          "unverified_scan": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UnverifiedScan"
+              },
+              {
+                "description": "While the site's domain is not verified (first task verify_domain): the newest read-only scan of its own public pages, labeled \"unverified scan\". Its checks are not findings of the plan and are not evidence; the full scan replaces it once the domain is verified."
+              }
+            ],
+            "example": {
+              "id": "uscan_3f9a1c2e7b4d4e0f9a8b7c6d5e4f3a2b",
+              "object": "unverified_scan",
+              "unverified": true,
+              "label": "unverified scan",
+              "status": "completed",
+              "created": 1793318400,
+              "finished": 1793318400,
+              "pages": [],
+              "findings": [],
+              "counts": {
+                "pages_captured": 6,
+                "pages_skipped": 1,
+                "failing": 2,
+                "needs_review": 1,
+                "passing": 9
+              },
+              "error": null,
+              "note": "Unverified scan: Checkbox only loaded public pages of this site…"
+            }
           },
           "optional_improvements": {
             "type": "object",
@@ -21446,7 +21886,7 @@
       "post": {
         "operationId": "verifySetupSession",
         "summary": "Re-check the site now",
-        "description": "Loads the site (is the snippet live? which policy links does it have?), re-fetches the Terms and policies, re-evaluates compliance and queues the first synthetic-shopper scan. Call it after every change the agent made (and after deploying). Returns what was seen plus the updated session.",
+        "description": "Loads the site (is the snippet live? which policy links does it have?), re-fetches the Terms and policies, re-evaluates compliance and queues the first synthetic-shopper scan. While the domain is not verified: a live snippet (or the checkbox-verify meta tag) on the homepage verifies it now; otherwise a read-only scan of the site's own public pages is queued (unverified: no checkout is submitted). Call it after every change the agent made (and after deploying). Returns what was seen plus the updated session.",
         "tags": [
           "Agent setup"
         ],
@@ -22597,7 +23037,7 @@
       "post": {
         "operationId": "checkDomainVerification",
         "summary": "Check domain verification now",
-        "description": "Looks for the DNS TXT record and the /.well-known file now. On success in live mode, the account is activated and held monitoring starts.",
+        "description": "Looks for the DNS TXT record, the /.well-known file, and the site's Checkbox snippet or the checkbox-verify meta tag on https://<domain>/ now. On success in live mode, the account is activated and held monitoring starts.",
         "tags": [
           "Sites"
         ],
@@ -32161,6 +32601,26 @@
                               "finished": 1793318400,
                               "created": 1793318400
                             },
+                            "unverified_scan": {
+                              "id": "uscan_3f9a1c2e7b4d4e0f9a8b7c6d5e4f3a2b",
+                              "object": "unverified_scan",
+                              "unverified": true,
+                              "label": "unverified scan",
+                              "status": "completed",
+                              "created": 1793318400,
+                              "finished": 1793318400,
+                              "pages": [],
+                              "findings": [],
+                              "counts": {
+                                "pages_captured": 6,
+                                "pages_skipped": 1,
+                                "failing": 2,
+                                "needs_review": 1,
+                                "passing": 9
+                              },
+                              "error": null,
+                              "note": "Unverified scan: Checkbox only loaded public pages of this site…"
+                            },
                             "domain_verification": {
                               "id": "dv_3f9a1c2e7b4d4e0f9a8b7c6d5e4f3a2b",
                               "object": "domain_verification",
@@ -32179,6 +32639,10 @@
                               "file": {
                                 "url": "https://acme.example/.well-known/checkbox-verify.txt",
                                 "contents": "Xy…"
+                              },
+                              "meta_tag": {
+                                "url": "https://acme.example/",
+                                "html": "<meta name=\"checkbox-verify\" content=\"Xy…\">"
                               },
                               "scan_target_problems": [],
                               "account_activated": false,
@@ -33469,6 +33933,26 @@
                               "finished": 1793318400,
                               "created": 1793318400
                             },
+                            "unverified_scan": {
+                              "id": "uscan_3f9a1c2e7b4d4e0f9a8b7c6d5e4f3a2b",
+                              "object": "unverified_scan",
+                              "unverified": true,
+                              "label": "unverified scan",
+                              "status": "completed",
+                              "created": 1793318400,
+                              "finished": 1793318400,
+                              "pages": [],
+                              "findings": [],
+                              "counts": {
+                                "pages_captured": 6,
+                                "pages_skipped": 1,
+                                "failing": 2,
+                                "needs_review": 1,
+                                "passing": 9
+                              },
+                              "error": null,
+                              "note": "Unverified scan: Checkbox only loaded public pages of this site…"
+                            },
                             "domain_verification": {
                               "id": "dv_3f9a1c2e7b4d4e0f9a8b7c6d5e4f3a2b",
                               "object": "domain_verification",
@@ -33487,6 +33971,10 @@
                               "file": {
                                 "url": "https://acme.example/.well-known/checkbox-verify.txt",
                                 "contents": "Xy…"
+                              },
+                              "meta_tag": {
+                                "url": "https://acme.example/",
+                                "html": "<meta name=\"checkbox-verify\" content=\"Xy…\">"
                               },
                               "scan_target_problems": [],
                               "account_activated": false,

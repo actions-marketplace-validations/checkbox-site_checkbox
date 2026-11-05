@@ -81,6 +81,13 @@ export interface SetupNextAction {
     /** The file content. */
     content: string;
   };
+  /** verify_domain with a started challenge: or this meta tag on the homepage. The live snippet (install.script_tag) works too: Checkbox verifies the domain when it sees it. */
+  meta_tag?: {
+    /** The page Checkbox reads (the homepage of the domain). */
+    url: string;
+    /** The tag to put in its <head>. */
+    html: string;
+  };
 }
 
 /** A pending device login (RFC 8628 style). */
@@ -187,6 +194,63 @@ export interface SetupPlan {
   /** Free-trial days (0 = none). */
   trial_days?: number;
 }
+
+/** While the domain is not verified: the newest read-only scan of the site's own public pages (labeled "unverified scan": no checkout submitted, not evidence, replaced by the full scan after verification). Null otherwise. */
+export type UnverifiedScan = {
+  /** Read-only scan id (uscan_…). */
+  id: string;
+  /** Object type. */
+  object: "unverified_scan";
+  /** Always true: read before the domain was verified. Not evidence; no certificate, receipt or monitoring comes from it. */
+  unverified: true;
+  /** The label every surface shows with these results. */
+  label: "unverified scan";
+  /** queued, running, completed, failed, or skipped (e.g. the domain got verified first, so the full scan replaces it). */
+  status: "queued" | "running" | "completed" | "failed" | "skipped";
+  /** When it was queued. Unix timestamp in seconds. */
+  created: number;
+  /** When it finished. Unix timestamp in seconds. */
+  finished: number | null;
+  /** Every page considered (at most 20 loaded). */
+  pages: Array<{
+    /** Page URL. */
+    url: string;
+    /** home, pricing, terms, privacy, refund, cancellation, account or checkout. */
+    kind: string;
+    /** captured; skipped (robots.txt, not on the site's own domain, page limit, action link); failed. */
+    status: "captured" | "skipped" | "failed";
+    /** Why it was skipped or failed. */
+    reason?: string;
+  }>;
+  /** Checks on the loaded pages, in memory (not findings of the site). */
+  findings: Array<{
+    /** Check id. */
+    check_id: string;
+    /** Verdict on the loaded pages alone. */
+    status: "pass" | "fail" | "needs_review";
+    /** critical, high, medium or low. */
+    severity: string;
+    /** The check, in one line. */
+    title: string;
+  }>;
+  /** Counts. */
+  counts: {
+    /** Pages captured. */
+    pages_captured: number;
+    /** Pages skipped. */
+    pages_skipped: number;
+    /** Failing checks. */
+    failing: number;
+    /** Checks to review. */
+    needs_review: number;
+    /** Passing checks. */
+    passing: number;
+  };
+  /** Why it failed or was skipped. */
+  error: string | null;
+  /** What an unverified scan is (show it with the results). */
+  note: string;
+} | null;
 
 /** One step of the setup checklist. */
 export interface SetupStep {
@@ -396,6 +460,7 @@ export interface SetupSession {
       label: string;
     }>;
   } | null;
+  unverified_scan: UnverifiedScan;
   /** The setup checklist, in order. */
   steps: Array<SetupStep>;
   next_action: SetupNextAction;
@@ -524,6 +589,20 @@ export interface SetupVerification {
   };
   /** Whether compliance was re-evaluated now. */
   evaluated: boolean;
+  /** The site's domain got verified during this call (e.g. the snippet is live on the homepage). */
+  domain_verified: {
+    /** The domain. */
+    domain: string;
+    /** snippet, meta_tag, dns_txt or well_known. */
+    method: string;
+  } | null;
+  /** While the domain is not verified: the read-only scan of the site's own public pages (no checkout submitted). */
+  unverified_scan: {
+    /** Whether a read-only (unverified) scan was queued now. */
+    queued: boolean;
+    /** Why not (limits: one per site per 24 h, three unverified sites per account in 30 days). */
+    reason: string | null;
+  } | null;
   setup_session: SetupSession;
 }
 
@@ -816,10 +895,10 @@ export interface DomainVerification {
   site: string;
   /** Domain of the site URL. */
   domain: string | null;
-  /** not_started until createDomainVerification; verified once the TXT record or file was found. */
+  /** not_started until createDomainVerification; verified once the TXT record, the file, the live snippet or the meta tag was found. */
   status: "not_started" | "pending" | "verified";
-  /** How control was proven. */
-  method: "dns_txt" | "well_known" | null;
+  /** How control was proven: dns_txt, well_known, snippet (the site's Checkbox snippet live on https://<domain>/) or meta_tag (<meta name="checkbox-verify"> on https://<domain>/). */
+  method: "dns_txt" | "well_known" | "snippet" | "meta_tag" | null;
   /** When it was verified. Unix timestamp in seconds. */
   verified_at: number | null;
   /** Last check. Unix timestamp in seconds. */
@@ -841,6 +920,13 @@ export interface DomainVerification {
     url: string;
     /** Exact file contents. */
     contents: string;
+  } | null;
+  /** Or add this meta tag to the homepage (option 3). Option 4: install the site's Checkbox snippet (install.script_tag) on the homepage; Checkbox verifies the domain when it sees it live. */
+  meta_tag: {
+    /** The page Checkbox reads (the site's homepage, redirects only within the domain). */
+    url: string;
+    /** Put this tag in the <head> of that page. */
+    html: string;
   } | null;
   /** Configured scan URLs outside the verified domain (certificates cover only the domain). */
   scan_target_problems: Array<string>;
@@ -920,6 +1006,7 @@ export interface Site {
   /** When the site was created. Unix timestamp in seconds. */
   created: number;
   latest_scan?: Scan;
+  unverified_scan: UnverifiedScan;
   domain_verification?: DomainVerification;
 }
 
@@ -1640,6 +1727,7 @@ export interface CompliancePlan {
   disclaimer: string;
   /** When the plan was computed. Unix timestamp in seconds. */
   generated: number;
+  unverified_scan?: UnverifiedScan;
   /** Optional improvements beyond compliance. Never tasks, never blocking, never counted toward compliance. */
   optional_improvements?: {
     /** Compliant conversion suggestions for this site. */

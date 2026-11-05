@@ -1906,7 +1906,7 @@ class SetupSessionsResource(Resource):
     def verify(self, setup_session: str, /, *, request_options: Optional[RequestOptions] = None) -> "types.SetupVerification":
         """Re-check the site now.
 
-        Loads the site (is the snippet live? which policy links does it have?), re-fetches the Terms and policies, re-evaluates compliance and queues the first synthetic-shopper scan. Call it after every change the agent made (and after deploying). Returns what was seen plus the updated session.
+        Loads the site (is the snippet live? which policy links does it have?), re-fetches the Terms and policies, re-evaluates compliance and queues the first synthetic-shopper scan. While the domain is not verified: a live snippet (or the checkbox-verify meta tag) on the homepage verifies it now; otherwise a read-only scan of the site's own public pages is queued (unverified: no checkout is submitted). Call it after every change the agent made (and after deploying). Returns what was seen plus the updated session.
 
         ``POST /v1/setup_sessions/{setup_session}/verify`` (operation ``verifySetupSession``, scope ``setup_sessions:write``).
         """
@@ -2060,7 +2060,7 @@ class DomainVerificationsResource(Resource):
     def check(self, site: str, /, *, request_options: Optional[RequestOptions] = None) -> "types.CheckDomainVerificationResponse":
         """Check domain verification now.
 
-        Looks for the DNS TXT record and the /.well-known file now. On success in live mode, the account is activated and held monitoring starts.
+        Looks for the DNS TXT record, the /.well-known file, and the site's Checkbox snippet or the checkbox-verify meta tag on https://<domain>/ now. On success in live mode, the account is activated and held monitoring starts.
 
         ``POST /v1/sites/{site}/domain_verification/check`` (operation ``checkDomainVerification``, scope ``sites:write``).
         """
