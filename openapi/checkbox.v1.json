@@ -1611,12 +1611,6 @@
               "null"
             ],
             "properties": {
-              "score": {
-                "type": "number",
-                "description": "Deprecated: the legacy 0-100 score, kept populated for backward compatibility. No Checkbox surface shows it; read `label` / `status` and `todo`.",
-                "deprecated": true,
-                "example": 72
-              },
               "evaluated": {
                 "type": "integer",
                 "description": "When it was evaluated. Unix timestamp in seconds.",
@@ -1751,7 +1745,6 @@
               }
             },
             "required": [
-              "score",
               "evaluated",
               "failing",
               "needs_review",
@@ -1761,7 +1754,6 @@
             ],
             "description": "Latest verdict of the test-mode site.",
             "example": {
-              "score": 72,
               "evaluated": 1793318400,
               "failing": 3,
               "needs_review": 2,
@@ -2192,7 +2184,6 @@
                   "created": 1793318400
                 },
                 "compliance": {
-                  "score": 72,
                   "evaluated": 1793318400,
                   "failing": 3,
                   "needs_review": 2,
@@ -14318,8 +14309,11 @@
                 "example": "static_html"
               },
               "url": {
-                "type": "string",
-                "description": "Page URL used.",
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Page URL used (null when only html was sent: the page is modelled from your input).",
                 "example": "https://acme.example/checkout"
               },
               "purchase_buttons": {

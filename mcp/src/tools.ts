@@ -73,6 +73,16 @@ const jurisdictions = z
   .union([z.literal('all'), z.array(z.string().max(10)).max(60)])
   .describe('Where the business sells: "all" (default) or state codes like ["US-CA","US-NY"] ("CA" works too). Federal law is always included.');
 const asOf = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).describe('Evaluate the law as of this date, YYYY-MM-DD (default today).');
+/**
+ * Audit P2: notice kinds have two names for the trial email (trial_reminder in checks / verify, trial_ending in Notices).
+ * Every MCP tool accepts both (and charge_notice where the API checks it) and sends the API the name it expects.
+ */
+const EMAIL_KINDS = ['acknowledgment', 'trial_reminder', 'trial_ending', 'renewal_reminder', 'price_change', 'annual_terms', 'charge_notice', 'cancellation_confirmation'] as const;
+const emailKind = z.enum(EMAIL_KINDS);
+/** The checks / verify API name (trial_reminder). */
+export const checkKind = (k: unknown) => (k === 'trial_ending' ? 'trial_reminder' : k);
+/** The Notices API name (trial_ending). */
+export const noticeKind = (k: unknown) => (k === 'trial_reminder' ? 'trial_ending' : k);
 const intervalStr = z.string().max(20).describe('Billing interval: "day", "week", "month" or "year".');
 
 const planTermsShape = {
@@ -198,9 +208,11 @@ async function resolveSite(api: CheckboxApi, site: unknown): Promise<string> {
       operation_id: 'createSetupSession',
     });
   }
-  throw new ToolError(`The account has ${list.data.length}${list.has_more ? '+' : ''} sites; pass "site". Sites: ${list.data.map((s) => `${s.id} (${s.url})`).join(', ')}.`, undefined, {
-    sites: list.data.map((s) => ({ id: s.id, url: s.url })),
-  });
+  throw new ToolError(
+    `The account has ${list.data.length}${list.has_more ? '+' : ''} sites; pass "site". Sites: ${list.data.map((s) => `${s.id} (${s.name ? `${untrusted(s.name, 60)}, ` : ''}${untrusted(s.url, 100)})`).join(', ')}.`,
+    { type: 'pass_site', message: `Call the same tool again with "site" set to one of the ids above${list.has_more ? ' (list_sites shows the rest)' : ''}.` },
+    { sites: list.data.map((s) => ({ id: s.id, name: s.name ?? null, url: s.url })) },
+  );
 }
 
 /** The setup session to act on: the given id or the newest. */
@@ -270,10 +282,54 @@ function checkNotes(r: CheckSummary, max = 8): string[] {
   return notes;
 }
 
-const verdictHeadline = (what: string, r: CheckSummary) =>
-  r.compliance
-    ? `${what}: ${r.compliance.label} (machine verdict ${r.verdict}: ${r.summary.fail} failing, ${r.summary.needs_review} undecided, ${r.summary.pass} passing).`
-    : `${what}: ${statusLine(r.verdict)} (${r.summary.fail} failing, ${r.summary.needs_review} need review, ${r.summary.pass} passing).`;
+/**
+ * Audit P1: a headline never says "Compliant": it says "Checks pass" (or "Not required for this plan" when no check
+ * applies), then the counts.
+ */
+export function plainLabel(label: string): string {
+  return label
+    .replace(/^Looks compliant(?: with a note)?(?: — live check pending)?/i, 'Checks pass')
+    .replace(/\bCompliant\b/g, 'Checks pass')
+    .replace(/ is compliant\b/g, ': checks pass');
+}
+
+/** Audit P3: a check's evidence.summary / item details that only repeat its explanation are dropped. */
+function withoutDuplicateEvidence<C extends Record<string, unknown>>(c: C): C {
+  const explanation = typeof c.explanation === 'string' ? c.explanation : '';
+  const ev = c.evidence as { summary?: string; items?: Array<Record<string, unknown>> } | undefined;
+  if (!ev || !explanation) return c;
+  const { summary, items, ...rest } = ev;
+  const same = (t: unknown) => typeof t === 'string' && t.length > 0 && explanation.includes(t);
+  return {
+    ...c,
+    evidence: {
+      ...rest,
+      ...(summary && !same(summary) ? { summary } : {}),
+      ...(items ? { items: items.map(({ detail, ...i }) => (same(detail) ? i : { ...i, detail })) } : {}),
+    },
+  };
+}
+
+/** Audit P3: requirement ids as their citations (deduplicated), at most `max` plus "and N more". */
+export function citationList(ids: readonly string[], requirements: ReadonlyArray<{ id: string; citation: string }> | undefined, max = 8): string {
+  const byId = new Map((requirements ?? []).map((q) => [q.id, q.citation]));
+  const cites = [...new Set(ids.map((id) => byId.get(id) ?? id))];
+  return `${cites.slice(0, max).join('; ')}${cites.length > max ? `; and ${cites.length - max} more` : ''}`;
+}
+
+/** Audit P3: shortens at a word boundary, never mid-word. */
+export function clipWords(v: unknown, n: number): unknown {
+  if (typeof v !== 'string' || v.length <= n) return v;
+  const cut = v.slice(0, n - 1);
+  const space = cut.lastIndexOf(' ');
+  return `${(space > n * 0.6 ? cut.slice(0, space) : cut).replace(/[\s,;:.(—-]+$/, '')}…`;
+}
+
+const verdictHeadline = (what: string, r: CheckSummary) => {
+  if (r.verdict === 'not_applicable') return `${what}: Not required for this plan.`;
+  const label = r.compliance ? plainLabel(r.compliance.label) : statusLine(r.verdict);
+  return `${what}: ${label} (${r.summary.fail} failing, ${r.summary.needs_review} to review, ${r.summary.pass} passing).`;
+};
 
 /**
  * Keeps what the model needs to act and drops the bulk (everything stays available through the API): failing / unclear
@@ -292,12 +348,18 @@ function slimCheckResult<T extends Record<string, unknown>>(r: T): T {
     checks: (checks ?? [])
       .filter((c) => needsSomething(c))
       .map(({ requirements: reqs, ...c }) => ({
-        ...c,
+        ...withoutDuplicateEvidence(c),
         citations: [...new Set((reqs ?? []).map((q) => q.citation))].slice(0, 6),
         jurisdictions: [...new Set((reqs ?? []).map((q) => q.jurisdiction))],
       })),
     passing_checks: (checks ?? []).filter((c) => c.status === 'pass').map((c) => c.check_id),
-    failing_requirements: (requirements ?? []).filter((q) => open(q.status)).map((q) => ({ id: q.id, citation: q.citation, status: q.status })),
+    // Audit P1: failing_requirements lists only failing requirements; the ones left to review are counted apart.
+    failing_requirements: (requirements ?? []).filter((q) => q.status === 'fail').map((q) => ({ id: q.id, citation: q.citation, status: q.status })),
+    review_requirements: (() => {
+      const review = (requirements ?? []).filter((q) => q.status === 'needs_review');
+      const citations = [...new Set(review.map((q) => q.citation))];
+      return { count: review.length, citations: citations.slice(0, 8), ...(citations.length > 8 ? { more: citations.length - 8 } : {}) };
+    })(),
   } as unknown as T;
 }
 
@@ -428,11 +490,17 @@ export function withoutLegacyScore<T>(data: T): T {
   const d = data as Record<string, unknown>;
   const strip = (c: unknown) => {
     if (!c || typeof c !== 'object') return c;
-    const { score: _score, insurable: _insurable, ...rest } = c as Record<string, unknown>;
+    // Audit P2: the deprecated per-check counts (failing / needs_review) disagreed with the label; the label and todo stay.
+    const { score: _score, insurable: _insurable, failing: _failing, needs_review: _needsReview, ...rest } = c as Record<string, unknown>;
     return rest;
   };
   const out: Record<string, unknown> = { ...d };
   if (d.compliance) out.compliance = strip(d.compliance);
+  // Audit P3: a step whose next_action is the session's own next_action does not repeat it.
+  if (Array.isArray(d.steps) && d.next_action && typeof d.next_action === 'object') {
+    const top = JSON.stringify(d.next_action);
+    out.steps = d.steps.map((st: unknown) => (st && typeof st === 'object' && JSON.stringify((st as { next_action?: unknown }).next_action) === top ? { ...(st as object), next_action: 'same as next_action' } : st));
+  }
   if (d.session && typeof d.session === 'object') out.session = withoutLegacyScore(d.session);
   if (d.first_check && typeof d.first_check === 'object') out.first_check = withoutLegacyScore(d.first_check);
   return out as T;
@@ -453,19 +521,15 @@ const setupCheckbox: ToolDef = {
   name: 'setup_checkbox',
   title: 'Set up Checkbox for this project',
   description: [
-    'Start here when the user says "add Checkbox", "make my subscriptions compliant", or no Checkbox key is configured.',
+    'Start here when the user says "add Checkbox", "make my subscriptions compliant", or the project is not connected to Checkbox yet.',
     'Checkbox monitors a subscription business against automatic-renewal laws (FTC ROSCA, California ARL, New York and ~26 other states).',
     '',
-    'Without an API key (first run): returns a link for the HUMAN to open and click Approve (they sign up with an email link or GitHub/Google if new; free, no card).',
-    'Show them the link in one line, then call setup_checkbox again with the returned device_code — it waits up to ~50 s for the approval; call again while it says pending.',
-    'On approval it returns test-mode API keys (shown once) and a setup session. Save CHECKBOX_SECRET_KEY to .env.local (git-ignored) and never commit it.',
-    '',
-    'With an API key: starts a setup session for the project (no human step) and returns the setup checklist with next_action.',
-    'Connected through the Checkbox connector (OAuth: claude.ai, Claude Desktop, Claude Code /mcp, Cursor): the human already approved; there is NO key to paste or save. Call it with site_url (and what else you know): it registers the site and runs the first checks in the same call.',
+    'Connected through the Checkbox connector (OAuth: claude.ai, Claude Desktop, Claude Code /mcp, Cursor, VS Code): the human already approved in the browser; there is NO key to ask for, paste or save. Call it with site_url (and what else you know): it registers the site and runs the first checks in the same call.',
     'Pass everything you already know from the codebase: site_url, checkout_url, terms/privacy/refund/cancellation URLs, billing_platform, plans, project.layout_file. Checkbox fetches and checks the Terms itself.',
     '',
-    'After this: follow next_action (usually install the snippet, then update_setup / get_setup_status with verify=true), then get_compliance_plan.',
-    'The `checkbox init` CLI does the same and also patches the layout file (pre-release: not on npm yet; never install an npm package named "checkbox", it is not ours).',
+    'Only for clients without OAuth (no API key configured on this server): it returns a link for the HUMAN to open and click Approve (free, no card). Show them the link in one line, then call setup_checkbox again with the returned device_code — it waits up to ~50 s; call again while it says pending. On approval it returns test-mode API keys (shown once): save CHECKBOX_SECRET_KEY to .env.local (git-ignored), never commit it, and never ask the human to paste a key.',
+    '',
+    'After this: follow next_action (usually verify the domain and install the snippet, then get_setup_status with verify=true), then get_compliance_plan.',
   ].join('\n'),
   input: {
     ...setupFactsShape,
@@ -666,7 +730,7 @@ interface PlanLite {
 
 /** The plan with each task reduced to what an agent needs to choose the next one (the full task: get_task). */
 export function slimPlan(plan: PlanLite): PlanLite {
-  const clip = (v: unknown, n: number) => (typeof v === 'string' && v.length > n ? `${v.slice(0, n - 1)}…` : v);
+  const clip = clipWords;
   const tasks = (plan.tasks ?? []).map((t) => {
     const full = t as Record<string, unknown>;
     const change = (full.change ?? {}) as Record<string, unknown>;
@@ -728,7 +792,8 @@ const getCompliancePlan: ToolDef = {
     const rest = required.filter((t) => !todo.some((x) => x.id === t.id));
     const { score: _score, insurable: _insurable, ...shown } = plan as PlanLite & { insurable?: unknown };
     return {
-      headline: `Plan for ${site}: ${plan.compliance?.label ?? statusLine(plan.status)} (plan ${plan.status}). ${plan.summary ?? ''}`,
+      // Audit P2: one Next line (the plan's next_action below); the summary's own "Next: …" is not repeated.
+      headline: `Plan for ${site}: ${plainLabel(plan.compliance?.label ?? 'Not checked yet')} (plan ${plan.status}).`,
       notes: [
         ...(todo.length ? [`To do (${todo.length}, in order):`] : []),
         ...todo.map((t, i) => `${i + 1}. ${t.id} ${todoLine(t)}`),
@@ -754,8 +819,11 @@ const getTask: ToolDef = {
   scopes: ['compliance_plans:read'],
   annotations: { ...ro, title: 'Task' },
   async run(args, { api }) {
-    const task = await api.request<{ id: string; title: string; status: string }>('GET', `/v1/tasks/${enc(String(args.task))}`);
-    return { headline: `Task ${task.id} [${task.status}]: ${task.title}`, data: task };
+    const task = await api.request<{ id: string; title: string; status: string; requirement?: { citations?: unknown[] } }>('GET', `/v1/tasks/${enc(String(args.task))}`);
+    // Audit P3: a task citing every state's law listed dozens of citations; the first 8 and a count are enough here.
+    const cites = task.requirement?.citations;
+    const shown = Array.isArray(cites) && cites.length > 8 ? { ...task, requirement: { ...task.requirement, citations: cites.slice(0, 8), citations_more: cites.length - 8 } } : task;
+    return { headline: `Task ${task.id} [${task.status}]: ${task.title}`, data: shown };
   },
 };
 
@@ -776,7 +844,7 @@ const verifyTask: ToolDef = {
     stripe_checkout_session: z.record(z.string(), z.unknown()).optional().describe('Stripe tasks: the params your code passes to stripe.checkout.sessions.create.'),
     email: z
       .object({
-        kind: z.enum(['acknowledgment', 'trial_reminder', 'renewal_reminder', 'price_change', 'annual_terms', 'cancellation_confirmation']).optional(),
+        kind: emailKind.optional(),
         subject: z.string().max(1000),
         text: z.string().max(100_000).optional(),
         html: z.string().max(100_000).optional(),
@@ -790,7 +858,8 @@ const verifyTask: ToolDef = {
   annotations: { ...write(true, true), title: 'Verify task' },
   async run(args, { api }) {
     const body = pick(args, ['html', 'stripe_checkout_session', 'email', 'recheck']);
-    const v = await api.request<{ id: string; site?: string; status: string; diff?: unknown[]; plan_status?: string | null }>('POST', `/v1/tasks/${enc(String(args.task))}/verify`, {
+    if (body.email && typeof body.email === 'object' && (body.email as { kind?: unknown }).kind) body.email = { ...(body.email as object), kind: checkKind((body.email as { kind?: unknown }).kind) };
+    const v = await api.request<{ id: string; site?: string; status: string; diff?: unknown[]; plan_status?: string | null; next_action?: NextAction | null }>('POST', `/v1/tasks/${enc(String(args.task))}/verify`, {
       query: { wait: (args.wait as number | undefined) ?? 25 },
       body,
     });
@@ -798,7 +867,9 @@ const verifyTask: ToolDef = {
     return {
       headline: `Verification ${v.id} of ${String(args.task)}: ${statusLine(v.status)}${v.plan_status ? `; plan is now ${v.plan_status}` : ''}.`,
       notes: [
-        ...(v.status === 'failed'
+        ...((v.status === 'failed' || v.status === 'not_checked') && v.next_action?.type === 'verify_domain'
+          ? ['The domain is not verified yet. Waiting for the human to publish the DNS record / file / meta tag or install the snippet; don\'t retry until they say it\'s done. Nothing to change in the code.']
+          : v.status === 'failed'
           ? ['The change did not satisfy the check: read diff (expected vs observed), fix the code, and call verify_task again.']
           : v.status === 'not_checked'
             ? ['Not checked yet: Checkbox is missing evidence (see next_action), not a code problem. Do not change the code for this; provide what next_action asks for.']
@@ -888,7 +959,7 @@ const startTestRun: ToolDef = {
   title: 'Run a synthetic test subscription (test mode)',
   description: [
     'Observes the WHOLE subscription lifecycle, not just the checkout: in the billing platform\'s TEST mode Checkbox subscribes a test customer (card 4242…) whose email is a Checkbox inbox, waits for your acknowledgment email, fast-forwards a Stripe test clock through every legal notice window before trial end and renewal (collecting reminder emails), then cancels online and waits for the cancellation confirmation. Nothing is charged.',
-    'Needs a Stripe TEST key stored for the site (setup asks the human) — if missing, the error\'s next_action says how (call_api POST /v1/sites/{site}/test_credentials). For non-Stripe sites use type "generic".',
+    'Needs a Stripe TEST key stored for the site — the human adds it in the Checkbox dashboard (the site\'s Proof page); never ask them to paste it into the chat. If missing, the error\'s next_action says so. For non-Stripe sites use type "generic".',
     'Takes ~5-20 minutes: poll get_test_run (its next_action says when). Each step reports observations, check results and agent-readable fixes; apply them and run again.',
     'mode "real_checkout" is the PROOF run: the shopper buys through the merchant\'s own checkout on its test deployment (stripe.checkout_url or stripe.payment_link), so the merchant\'s webhook handlers and email code fire; give stripe.test_account + stripe.cancel_url when customers cancel in the app. A step is "passed" only with evidence; "warning" means needs review.',
   ].join('\n'),
@@ -1056,7 +1127,7 @@ const checkEmail: ToolDef = {
     'For WHEN each email must be sent, use get_notice_schedule.',
   ].join('\n'),
   input: {
-    kind: z.enum(['acknowledgment', 'trial_reminder', 'renewal_reminder', 'price_change', 'annual_terms', 'cancellation_confirmation']).describe('Which lifecycle email this is.'),
+    kind: emailKind.describe('Which email (trial_reminder = trial_ending).'),
     subject: z.string().min(1).max(1000).describe('Subject line.'),
     text: z.string().max(100_000).optional().describe('Plain-text body (give text, html or both).'),
     html: z.string().max(100_000).optional().describe('HTML body.'),
@@ -1073,9 +1144,9 @@ const checkEmail: ToolDef = {
   scopes: ['checks:read'],
   annotations: { ...ro, title: 'Check email' },
   async run(args, { api }) {
-    const r = await api.request<CheckSummary & { required_by?: string[] }>('POST', '/v1/checks/email', { body: args });
+    const r = await api.request<CheckSummary & { required_by?: string[] }>('POST', '/v1/checks/email', { body: { ...args, kind: checkKind(args.kind) } });
     const notes = checkNotes(r);
-    notes.unshift(r.required_by?.length ? `Legally required for this plan by: ${r.required_by.join(', ')}.` : 'Not legally required for this plan (still good practice).');
+    notes.unshift(r.required_by?.length ? `Legally required for this plan by: ${citationList(r.required_by, (r as { requirements?: Array<{ id: string; citation: string }> }).requirements)}.` : 'Not legally required for this plan (still good practice).');
     return { headline: verdictHeadline(`Email (${String(args.kind)})`, r), notes, data: slimCheckResult(r as unknown as Record<string, unknown>) };
   },
 };
@@ -1296,9 +1367,12 @@ const listSites: ToolDef = {
     });
     return {
       headline: `${list.data.length}${list.has_more ? '+' : ''} site(s) in ${key.mode === 'unknown' ? 'this' : key.mode} mode.`,
-      notes: list.data.map((s) => `${s.id} ${untrusted(s.url, 100)} — ${s.compliance?.label ?? 'Not checked yet'}`),
+      // Audit P2: name + URL per site, and a Next line either way.
+      notes: list.data.map((s) => `${s.id} ${s.name ? `${untrusted(s.name, 60)} ` : ''}${untrusted(s.url, 100)} — ${plainLabel(s.compliance?.label ?? 'Not checked yet')}`),
       data: list,
-      next: list.data.length ? null : { type: 'setup', message: 'No sites yet: call setup_checkbox with the site URL.', operation_id: 'createSetupSession' },
+      next: list.data.length
+        ? { type: 'review_plan', message: `Call get_compliance_plan with the site id (e.g. site "${list.data[0]!.id}") for what to change next.`, operation_id: 'retrieveCompliancePlan' }
+        : { type: 'setup', message: 'No sites yet: call setup_checkbox with the site URL.', operation_id: 'createSetupSession' },
     };
   },
 };
@@ -1413,7 +1487,7 @@ const getSiteStatus: ToolDef = {
     ];
     const { score: _siteScore, open_findings: _open, needs_review: _nr, ...complianceLite } = (site.compliance ?? {}) as Record<string, unknown>;
     return {
-      headline: evaluated ? `${site.url}: ${label ?? 'Not checked yet'}.` : `${site.url}: Not checked yet.`,
+      headline: evaluated ? `${site.url}: ${plainLabel(label ?? 'Not checked yet')}.` : `${site.url}: Not checked yet.`,
       notes,
       data: { site: site.compliance ? { ...site, compliance: complianceLite } : site, evaluation: evaluated ? evalLite : null, todo },
       next: evaluated
@@ -1529,8 +1603,19 @@ const getScan: ToolDef = {
   scopes: ['scans:read'],
   annotations: { ...ro, title: 'Scan' },
   async run(args, { api }) {
-    const scan = await api.request<{ id: string; status: string; score?: number | null; error?: string | null }>('GET', `/v1/scans/${enc(String(args.scan))}`);
+    const scan = await api.request<{ id: string; site?: string; status: string; score?: number | null; error?: string | null }>('GET', `/v1/scans/${enc(String(args.scan))}`);
     const done = scan.status === 'completed';
+    // Audit P1: a queued scan of a site held for domain verification does not run until the domain is verified.
+    if (scan.status === 'queued' && scan.site) {
+      const site = await optional(api.request<{ monitoring?: { held_for_domain_verification?: boolean } }>('GET', `/v1/sites/${enc(scan.site)}`));
+      if ('monitoring' in site && site.monitoring?.held_for_domain_verification) {
+        return {
+          headline: `Scan ${scan.id}: queued (waiting for domain verification). It does not run until the site's domain is verified.`,
+          data: scan,
+          next: { type: 'verify_domain', message: `Do the plan's verify_domain task first (get_compliance_plan for site ${scan.site}); polling this scan changes nothing until then.`, operation_id: 'retrieveCompliancePlan' },
+        };
+      }
+    }
     return {
       headline: `Scan ${scan.id}: ${statusLine(scan.status)}${done ? '; the site status and to-do list are updated (get_site_status)' : ''}${scan.error ? ` — error: ${untrusted(scan.error, 160)}` : ''}.`,
       data: scan,
@@ -1858,7 +1943,7 @@ const listDueNotices: ToolDef = {
   annotations: { ...ro, title: 'Due notices' },
   async run(args, { api }) {
     const list = await api.request<ListResponse<DueNoticeLite>>('GET', '/v1/notices/due', {
-      query: pick(args, ['site', 'status', 'kind', 'subscription', 'limit', 'starting_after']) as Record<string, string>,
+      query: { ...pick(args, ['site', 'status', 'kind', 'subscription', 'limit', 'starting_after']), ...(typeof args.kind === 'string' ? { kind: args.kind.split(',').map((k) => noticeKind(k.trim())).join(',') } : {}) } as Record<string, string>,
     });
     const overdue = list.data.filter((d) => d.status === 'overdue').length;
     return {
@@ -1916,7 +2001,7 @@ const getNoticeTemplates: ToolDef = {
     site: z.string().max(100).optional().describe('Site (site_…): adds BCC addresses; required with check.'),
     check: z
       .object({
-        kind: z.enum(['acknowledgment', 'trial_ending', 'renewal_reminder', 'annual_terms', 'price_change', 'cancellation_confirmation']).describe('Notice kind.'),
+        kind: emailKind.exclude(['charge_notice']).describe('Notice kind.'),
         subject: z.string().max(1000).describe('Subject (merge fields allowed).'),
         text: z.string().max(100_000).optional().describe('Plain-text body.'),
         html: z.string().max(100_000).optional().describe('HTML body.'),
@@ -1931,7 +2016,7 @@ const getNoticeTemplates: ToolDef = {
     if (check) {
       if (!args.site) throw new Error('site is required to check a template (its plan and jurisdictions scope the check).');
       const r = await api.request<{ verdict: string; checks: Array<{ check_id: string; status: string; explanation: string }>; unknown_fields: string[]; next_action: NextActionLike }>('POST', '/v1/notices/templates/check', {
-        body: { site: args.site, ...check },
+        body: { site: args.site, ...check, kind: noticeKind(check.kind) },
       });
       return {
         headline: `Template check: ${r.verdict.toUpperCase()}.`,
@@ -1956,8 +2041,9 @@ const callApi: ToolDef = {
   name: 'call_api',
   title: 'Call any Checkbox API endpoint',
   description: [
-    'For a next_action whose operation has no dedicated tool (e.g. createTestCredential, createStripeCheckoutConfig, checkDomainVerification, updateTask, updateSite, listConsents). Calls the Checkbox /v1 API with this server\'s key; paths and bodies are in https://app.checkbox.site/v1/openapi.json.',
-    'Examples: {"method":"POST","path":"/v1/sites/site_123/test_credentials","body":{"type":"stripe_test","secret_key":"rk_test_…"}} ; {"method":"GET","path":"/v1/account"}.',
+    'For a next_action whose operation has no dedicated tool (e.g. createStripeCheckoutConfig, updateTask, updateNoticeSettings, listConsents). Calls the Checkbox /v1 API with this server\'s connection; paths and bodies are in https://app.checkbox.site/v1/openapi.json.',
+    'Examples: {"method":"GET","path":"/v1/account"} ; {"method":"POST","path":"/v1/sites/site_123/domain_verification/check"}.',
+    'Never send API keys or Stripe keys through it: keys are added by the human in the Checkbox dashboard, never pasted into the chat.',
     'GET is read-only. POST/DELETE change data: only do what the user or a next_action asked for. DELETE archives or removes objects — confirm with the user first.',
   ].join('\n'),
   input: {

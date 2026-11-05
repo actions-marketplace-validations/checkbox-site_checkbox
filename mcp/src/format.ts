@@ -80,6 +80,11 @@ const OPERATION_ENDPOINTS: Record<string, string> = {
   listSiteFixes: 'GET /v1/sites/{site}/fixes',
   listVerifications: 'GET /v1/sites/{site}/verifications',
   cancelTestRun: 'POST /v1/test_runs/{test_run}/cancel',
+  createReceiptToken: 'POST /v1/receipt_tokens',
+  createReceipt: 'POST /v1/receipts',
+  retrieveReceiptSettings: 'GET /v1/receipt_settings',
+  updateReceiptSettings: 'POST /v1/receipt_settings',
+  retrieveDueNotice: 'GET /v1/notices/{notice}',
 };
 
 /**
@@ -95,20 +100,91 @@ export function untrusted(value: unknown, max = 80): string {
   return `<untrusted_text>${JSON.stringify(s)}</untrusted_text>`;
 }
 
+/**
+ * Audit P1: the `checkbox` CLI is not on npm yet. While this is false, MCP output never shows `command` fields or a
+ * "CLI equivalent"; flip it once the CLI is published.
+ */
+export const CLI_PUBLISHED = false;
+
+/** REST paths of the preflight checks → their MCP tools (for text written for API users). */
+const CHECK_PATH_TOOLS: Record<string, string> = {
+  disclosure: 'check_disclosure',
+  stripe_checkout_session: 'check_stripe_checkout_session',
+  stripe_payment_link: 'call_api (POST /v1/checks/stripe_payment_link)',
+  email: 'check_email',
+  page: 'check_page_html',
+  notice_schedule: 'get_notice_schedule',
+};
+
+/** CLI commands → the MCP tool that does the same (for text that still names a command). */
+const CLI_TOOLS: Record<string, string> = { plan: 'get_compliance_plan', fix: 'get_task', answer: 'answer_task', verify: 'verify_site', init: 'get_setup_status', check: 'check_disclosure' };
+
+const OP_RE = new RegExp(`\\b(${[...Object.keys(OPERATION_TOOLS), ...Object.keys(OPERATION_ENDPOINTS)].sort((a, b) => b.length - a.length).join('|')})\\b`, 'g');
+
+/**
+ * Audit P2: text the API writes for SDK users names operations (verifyTask, updateSite, …) and REST paths. Over MCP
+ * those become the tool to call: a dedicated tool name, else `call_api` with the endpoint. CLI hints are dropped while
+ * the CLI is unpublished.
+ */
+export function mcpText(text: string): string {
+  let s = text.replace(/(?:POST )?\/v1\/checks\/(disclosure|stripe_checkout_session|stripe_payment_link|email|page|notice_schedule)\b/g, (_m, k: string) => CHECK_PATH_TOOLS[k]!);
+  s = s.replace(OP_RE, (op: string) => {
+    const tool = OPERATION_TOOLS[op];
+    if (tool) return tool;
+    const endpoint = OPERATION_ENDPOINTS[op];
+    return endpoint ? `call_api (${endpoint})` : op;
+  });
+  if (!CLI_PUBLISHED) {
+    s = s
+      .replace(/\s*\((?:or )?(?:run )?`(?:npx [^`]*)?checkbox [^`]*`[^)]*\)/g, '')
+      .replace(/,? or (?:run )?`checkbox [^`]*`/g, '')
+      .replace(/ \(`checkbox [^`]*` (?:writes|does) [^)]*\)/g, '')
+      .replace(/(?:run )?`checkbox ([a-z-]+)[^`]*`/g, (_m, cmd: string) => `\`${CLI_TOOLS[cmd] ?? 'get_compliance_plan'}\``);
+  }
+  return s;
+}
+
+const TEXT_KEYS = new Set(['message', 'description', 'summary', 'fix', 'note', 'how', 'detail', 'headline']);
+
+/** Rewrites agent-facing strings in an API object for MCP (mcpText), and drops `command` while the CLI is unpublished. */
+export function forMcp(value: unknown, depth = 0): unknown {
+  if (depth > 12 || value === null || typeof value !== 'object') return value;
+  if (Array.isArray(value)) return value.map((v) => forMcp(v, depth + 1));
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+    if (k === 'command' && !CLI_PUBLISHED && (v === null || typeof v === 'string')) continue;
+    out[k] = typeof v === 'string' && TEXT_KEYS.has(k) ? mcpText(v) : forMcp(v, depth + 1);
+  }
+  return out;
+}
+
+/** The argument hint for the tool a next step names (the right id for that tool). */
+function argHint(tool: string, next: NextAction, ctx: { data?: unknown }): string {
+  const d = (ctx.data ?? {}) as { object?: unknown; id?: unknown };
+  if (tool === 'get_verification') return d.object === 'verification' && typeof d.id === 'string' ? ` (verification: ${d.id})` : '';
+  const task = next.task ?? /\/v1\/tasks\/(task_[A-Za-z0-9]+)/.exec(next.endpoint ?? '')?.[1];
+  return task && ['get_task', 'verify_task', 'answer_task'].includes(tool) ? ` (task: ${task})` : '';
+}
+
 /** One line telling the model what to call next, in MCP terms. */
-export function describeNextAction(next: NextAction | null | undefined): string | null {
+export function describeNextAction(next: NextAction | null | undefined, ctx: { data?: unknown } = {}): string | null {
   if (!next || typeof next !== 'object' || !next.type) return null;
-  const text = (next.message ?? next.description ?? '').trim();
+  const text = mcpText((next.message ?? next.description ?? '').trim());
   if (next.type === 'done' || next.type === 'none') return `Next: nothing left to do${text ? ` — ${text}` : '.'}`;
   const op = next.operation_id ?? undefined;
-  const tool = op ? OPERATION_TOOLS[op] : undefined;
+  // Prefer the API's own mapping (next_action.mcp_tool); `call_api` means "no dedicated tool".
+  const named = next.mcp_tool && next.mcp_tool !== 'call_api' ? next.mcp_tool : undefined;
+  const tool = named ?? (op ? OPERATION_TOOLS[op] : undefined);
   const parts = [`Next (${next.type}): ${text || 'see next_action.'}`];
-  if (tool) parts.push(`→ MCP tool \`${tool}\`${next.task ? ` (task: ${next.task})` : ''}.`);
+  if (tool) parts.push(`→ MCP tool \`${tool}\`${argHint(tool, next, ctx)}.`);
   else if (op) {
-    const endpoint = next.endpoint ?? OPERATION_ENDPOINTS[op];
-    parts.push(endpoint ? `→ MCP tool \`call_api\` with ${endpoint} (operation ${op}).` : `→ operation ${op} (use \`call_api\`; paths in /v1/openapi.json).`);
+    let endpoint = next.endpoint ?? OPERATION_ENDPOINTS[op];
+    const site = (ctx.data as { site?: unknown; id?: unknown } | undefined) ?? {};
+    const siteId = typeof site.site === 'string' && site.site.startsWith('site_') ? site.site : typeof site.id === 'string' && site.id.startsWith('site_') ? site.id : undefined;
+    if (endpoint && siteId) endpoint = endpoint.replace('{site}', siteId);
+    parts.push(endpoint ? `→ MCP tool \`call_api\` with ${endpoint}.` : `→ MCP tool \`call_api\` (operation ${op}; paths in /v1/openapi.json).`);
   }
-  if (next.command) parts.push(`CLI equivalent: \`${next.command}\`.`);
+  if (next.command && CLI_PUBLISHED) parts.push(`CLI equivalent: \`${next.command}\`.`);
   if (next.url && !tool) parts.push(`Docs: ${next.url}`);
   return parts.join(' ');
 }
@@ -235,12 +311,12 @@ export function fitJson(data: unknown, max = MAX_JSON_CHARS): { json: string; pa
 }
 
 export function renderOutput(out: ToolOutput): CallToolResult {
-  const lines = [out.headline.trim()];
-  for (const n of out.notes ?? []) if (n) lines.push(`- ${n}`);
-  const next = describeNextAction(out.next === undefined ? nextActionOf(out.data) : out.next);
+  const lines = [mcpText(out.headline.trim())];
+  for (const n of out.notes ?? []) if (n) lines.push(`- ${mcpText(n)}`);
+  const next = describeNextAction(out.next === undefined ? nextActionOf(out.data) : out.next, { data: out.data });
   if (next) lines.push(next);
   if (out.data !== undefined) {
-    const fitted = fitJson(out.data);
+    const fitted = fitJson(forMcp(out.data));
     if (fitted.page) lines.push(`- ${fitted.page}`);
     lines.push('', '```json', fitted.json, '```');
   }
@@ -256,12 +332,12 @@ export function renderError(err: unknown): CallToolResult {
     if (err.requestId) data.request_id = err.requestId;
     if (err.docUrl) data.doc_url = err.docUrl;
     if (err.nextAction) data.next_action = err.nextAction;
-    const hint = ERROR_HINTS[err.code];
+    const hint = err.code === 'resource_missing' ? missingHint(err.message) : ERROR_HINTS[err.code];
     return renderOutput({
       headline: `Checkbox API error ${err.code}${err.param ? ` (param: ${err.param})` : ''}: ${err.message}`,
       notes: hint ? [hint] : [],
       data: { error: data },
-      next: err.nextAction ?? null,
+      next: err.nextAction ?? (err.code === 'resource_missing' ? missingNext(err.message) : null),
       isError: true,
     });
   }
@@ -269,15 +345,33 @@ export function renderError(err: unknown): CallToolResult {
   return renderOutput({ headline: `Tool failed: ${message}`, isError: true });
 }
 
+/** Audit P2: where to find a valid id of the kind that was missing (by its prefix in the message). */
+function missingKind(message: string): 'task' | 'site' | 'finding' | 'verification' | 'other' {
+  if (/\btask_/.test(message)) return 'task';
+  if (/\bver(?:ification)?_/.test(message)) return 'verification';
+  if (/\bfinding_/.test(message)) return 'finding';
+  if (/\bsite_/.test(message)) return 'site';
+  return 'other';
+}
+function missingHint(message: string): string {
+  const where = { task: 'get_compliance_plan lists the current task ids', verification: 'get_task shows a task\'s last_verification id', finding: 'list_findings lists finding ids', site: 'list_sites lists site ids', other: 'get_compliance_plan and list_sites list the current ids' }[missingKind(message)];
+  return `The id does not exist in this mode (test keys only see test-mode objects): ${where}.`;
+}
+function missingNext(message: string): NextAction {
+  const k = missingKind(message);
+  if (k === 'site') return { type: 'find_id', message: 'Call list_sites for the site ids in this mode.', operation_id: 'listSites' };
+  if (k === 'finding') return { type: 'find_id', message: 'Call list_findings for the finding ids.', operation_id: 'listFindings' };
+  return { type: 'find_id', message: 'Call get_compliance_plan for the current task ids (each task carries its last_verification id).', operation_id: 'retrieveCompliancePlan' };
+}
+
 const ERROR_HINTS: Record<string, string> = {
-  insufficient_scope: 'The API key this MCP server uses is a restricted key without that permission. Ask the human for a key with the permission (Dashboard → Developers → API keys) or use a read-only tool.',
+  insufficient_scope: 'This connection lacks that permission (a read-only connection or a restricted key). Ask the human to reconnect Checkbox with write access (or change the key\'s permissions in the Checkbox dashboard → Developers); never ask them to paste a key. Read-only tools still work.',
   insufficient_role: 'The key acts as a viewer; writes need a member or admin key.',
   api_key_missing: 'No Checkbox API key is configured: call setup_checkbox (one browser approval by the human) to get one.',
-  api_key_invalid: 'The configured Checkbox API key is unknown, revoked or expired: call setup_checkbox to get a new one, or ask the human for a valid key.',
+  api_key_invalid: 'The configured Checkbox API key is unknown, revoked or expired: reconnect with setup_checkbox (one browser approval by the human), or ask the human to fix the key in the Checkbox dashboard → Developers. Never ask them to paste a key into the chat.',
   account_not_activated: 'Live mode is locked until a site domain is verified. Use a test key (ck_test_…) for setup and checks, or verify the domain first.',
   parameter_invalid: 'Fix the named parameter and call the tool again.',
   parameter_missing: 'Add the named parameter and call the tool again.',
   parameter_unknown: 'Remove the named parameter and call the tool again.',
-  resource_missing: 'The id does not exist in this mode (test keys only see test-mode objects). Use list_sites / list_findings to find valid ids.',
   rate_limit_exceeded: 'Wait the number of seconds in the message, then retry.',
 };

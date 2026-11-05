@@ -610,8 +610,6 @@ SetupSessionComplianceTodoItem = TypedDict(
 SetupSessionCompliance = TypedDict(
     "SetupSessionCompliance",
     {
-        #: Deprecated: the legacy 0-100 score, kept populated for backward compatibility. No Checkbox surface shows it; read `label` / `status` and `todo`.
-        "score": float,
         #: When it was evaluated. Unix timestamp in seconds.
         "evaluated": int,
         #: Deprecated: open failing findings (per check). Read `label` (counted in tasks) and `todo` instead.
@@ -4285,8 +4283,8 @@ PageCheckResultExtraction = TypedDict(
     {
         #: How the page was read.
         "mode": Literal["static_html"],
-        #: Page URL used.
-        "url": str,
+        #: Page URL used (null when only html was sent: the page is modelled from your input).
+        "url": Optional[str],
         #: Purchase buttons found (primary first).
         "purchase_buttons": List[str],
         #: Text blocks that read like subscription terms.

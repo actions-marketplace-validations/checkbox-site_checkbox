@@ -32,6 +32,8 @@ export interface NextAction {
   endpoint?: string | null;
   url?: string | null;
   task?: string | null;
+  /** The MCP tool the API maps operation_id to (`call_api` when there is none). */
+  mcp_tool?: string | null;
 }
 
 /** A non-2xx /v1 response (the error envelope) or a network failure (status 0). */

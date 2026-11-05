@@ -409,11 +409,6 @@ export interface SetupSession {
   } | null;
   /** Latest verdict of the test-mode site. */
   compliance: {
-    /**
-     * Deprecated: the legacy 0-100 score, kept populated for backward compatibility. No Checkbox surface shows it; read `label` / `status` and `todo`.
-     * @deprecated
-     */
-    score: number;
     /** When it was evaluated. Unix timestamp in seconds. */
     evaluated: number;
     /**
@@ -2992,8 +2987,8 @@ export interface PageCheckResult {
   extraction: {
     /** How the page was read. */
     mode: "static_html";
-    /** Page URL used. */
-    url: string;
+    /** Page URL used (null when only html was sent: the page is modelled from your input). */
+    url: string | null;
     /** Purchase buttons found (primary first). */
     purchase_buttons: Array<string>;
     /** Text blocks that read like subscription terms. */

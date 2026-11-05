@@ -1,16 +1,24 @@
 # The agent loop: setup → plan → verify
 
+Each step names the MCP tool first, then the REST call for code that uses the API directly.
+
 ## Setup
 
-MCP tool `setup_checkbox` (or `POST /v1/device/authorize`; CLI `checkbox init --yes --json`, pre-release) runs a device login (the human clicks Approve once),
-writes keys, installs the snippet and drives a setup session. The JSON result holds `setup_session`, `site` and
-`next_action`. After deploying the snippet and policy pages: `get_setup_status` with verify=true (CLI `checkbox init --verify --yes --json`) (re-checks and
-returns the updated checklist). Setup steps: `account, site, snippet, policies, checks, fixes, lifecycle_test, domain,
+MCP tool `setup_checkbox` (REST: `POST /v1/setup_sessions`; without OAuth, the device login `POST /v1/device/authorize`)
+registers the site and drives a setup session. Over the Checkbox connector (OAuth) there is no key to handle. The
+result holds `setup_session`, `site` and `next_action`. After deploying the snippet and policy pages:
+`get_setup_status` with `verify: true` (REST: `POST /v1/setup_sessions/{id}/verify`) re-checks and returns the
+updated checklist. Setup steps: `account, site, snippet, policies, checks, fixes, lifecycle_test, domain,
 owner_notified`, each `done / pending / action_required / skipped / failed`. Stop when `next_action.type` is `done`.
+
+Domain verification: Checkbox only scans websites their owners have verified. The plan's first task is then
+`verify_domain`: `verify_task` on it (REST: `POST /v1/tasks/{task}/verify`) starts the check and returns the DNS
+record, file and meta tag. Publishing one is the human's job: wait until they say it is done, then `verify_task`
+again. Meanwhile check pages by sending their HTML (`check_page_html`, or `verify_task` with `html`).
 
 ## Compliance plan
 
-`GET /v1/sites/{site}/plan` (`checkbox plan --json`):
+MCP tool `get_compliance_plan` (REST: `GET /v1/sites/{site}/plan`); `get_task` returns one task in full:
 
 - `status`: `action_required` (apply open tasks), `verifying` (only confirmations pending), `blocked` (only human
   answers remain, or a critical/high task was declined), `compliant` (every automated check passes; this is a status
@@ -18,23 +26,24 @@ owner_notified`, each `done / pending / action_required / skipped / failed`. Sto
 - `tasks[]` in order. Each: `id` (stable `task_…`), `requirement { citation, plain_language }`, `why` (what was
   observed), `where { kind, file_hint, url, selector, stripe_object }`, `change { type: patch|copy|stripe_params|config|manual, content, edits[] }`,
   `verify { method, how, expected }`, `next_action`.
-- Before the first evaluation: `next_action.type = run_first_check` → call `POST /v1/sites/{site}/verify`.
+- Before the first evaluation: `next_action.type = run_first_check` → `verify_site` (REST: `POST /v1/sites/{site}/verify`).
 
 ## Apply and verify
 
-1. Apply `task.change` in the code (for `patch` tasks, `checkbox fix <task> --file <path>` prints an exact diff).
-2. `POST /v1/tasks/{task}/verify?wait=30` with what you changed: `{ "html": "<rendered page>" }` (page tasks before
-   deploying), `{ "stripe_checkout_session": { …params } }` (Stripe tasks) or `{ "email": { "kind", "subject", "text" } }`.
-   CLI: `checkbox verify <task> --wait --json`.
-3. Result: `passed`, `failed` (with what is still wrong) or `pending` (a scan, billing sync or real email confirms it;
-   poll `GET /v1/verifications/{id}?wait=30` or wait for the `task.verified` webhook).
+1. Apply `task.change` in the code (`get_task` has the full change: diff template, copy or Stripe params).
+2. `verify_task` (REST: `POST /v1/tasks/{task}/verify?wait=30`) with what you changed: `html` (the rendered page,
+   before deploying), `stripe_checkout_session` (Stripe tasks) or `email { kind, subject, text }`.
+3. Result: `passed`, `failed` (with what is still wrong), `not_checked` (evidence is missing, or the domain is not
+   verified yet: nothing to change in the code) or `pending` (a scan, billing sync or real email confirms it; poll
+   `get_verification` with the verification id, REST `GET /v1/verifications/{id}?wait=30`).
 4. Fetch the plan again. Repeat until no automated task is open (`status` `compliant` or `blocked`).
 
-Manual tasks (`change.type: "manual"`) carry a `question`. Ask the human; record their answer with
-`POST /v1/tasks/{task}/answer { "answer": "…" }`. They never block other tasks.
+Manual tasks (`change.type: "manual"`) carry a `question`. Ask the human; record their answer with `answer_task`
+(REST: `POST /v1/tasks/{task}/answer { "answer": "…" }`). They never block other tasks.
 
 ## Synthetic test subscription (Stripe test mode)
 
-The human adds a restricted Stripe TEST key for the site in the Checkbox dashboard (Site settings, Stripe test key;
-live keys are refused; never ask for it in chat), then `POST /v1/sites/{site}/test_runs {}` and poll `GET /v1/test_runs/{run}` every 15-30 s.
-Each step reports what was observed, check results and a fix. Nothing is charged.
+The human adds a restricted Stripe TEST key for the site in the Checkbox dashboard (the site's Proof page; live keys
+are refused; never ask for it in chat), then `start_test_run` (REST: `POST /v1/sites/{site}/test_runs {}`) and poll
+`get_test_run` (REST: `GET /v1/test_runs/{run}`) every 15-30 s. Each step reports what was observed, check results
+and a fix. Nothing is charged.
