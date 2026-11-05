@@ -97,10 +97,11 @@ which you report to the human):
 | Disclosure text by the pay button | `check_disclosure` | `POST /v1/checks/disclosure` |
 | Rendered checkout HTML | `check_page_html` | `POST /v1/checks/page` |
 | A lifecycle email (welcome, trial ending, renewal, cancellation) | `check_email` | `POST /v1/checks/email` |
-| When reminders must go out | `get_notice_schedule` | `POST /v1/checks/notice_schedule` |
+| When reminders must go out (every kind listed needs a sender in the code) | `get_notice_schedule` | `POST /v1/checks/notice_schedule` |
 
 Apply the returned fix verbatim: `correction.corrected_params` (Stripe), `replacement.disclosure_text` /
-`replacement.html` (disclosure, page), `template` (email). The wording is engine-verified; do not paraphrase it.
+`replacement.jsx` or `replacement.html` (disclosure, page), `template` (email; keep your own greeting and merge
+tags). The wording is engine-verified; do not paraphrase it.
 Apply fixes only to code you changed for this task; list other failures and ask before changing them.
 Request and response fields: [reference/preflight.md](reference/preflight.md).
 

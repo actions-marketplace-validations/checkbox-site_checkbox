@@ -38,6 +38,15 @@ MCP tool `get_compliance_plan` (REST: `GET /v1/sites/{site}/plan`); `get_task` r
    `get_verification` with the verification id, REST `GET /v1/verifications/{id}?wait=30`).
 4. Fetch the plan again. Repeat until no automated task is open (`status` `compliant` or `blocked`).
 
+Email tasks ("Send the … email"): by default the merchant's code sends them. Write the email from `check_email`'s
+template, add BCC to the address the task names (`…+<kind>@in.checkbox.site`) where the code sends it, then
+`verify_task` with `email`. The result stays `pending` until the first real email arrives: continue with the next
+task, do not poll. Switching the site to Checkbox Notices (`change.content`, `updateNoticeSettings`) is the human's
+decision: ask first.
+
+A verification whose `next_action.type` is `retry_later` failed inside Checkbox: nothing to change in the code; move on
+and verify again later.
+
 Manual tasks (`change.type: "manual"`) carry a `question`. Ask the human; record their answer with `answer_task`
 (REST: `POST /v1/tasks/{task}/answer { "answer": "…" }`). They never block other tasks.
 

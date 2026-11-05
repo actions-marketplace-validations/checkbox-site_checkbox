@@ -3618,6 +3618,8 @@ CheckReplacement = TypedDict(
         "button_text": str,
         #: Drop-in markup: disclosure (set off in a box) + unchecked required checkbox + button.
         "html": str,
+        #: The same markup as JSX for React / Next.js components (className, htmlFor, style objects, self-closed inputs); the text is unchanged. (optional)
+        "jsx": str,
         #: Placeholders left to fill (e.g. {{cancel_url}}).
         "placeholders": List[str],
         #: The engine passes every targeted sign-up check on a page using this replacement.

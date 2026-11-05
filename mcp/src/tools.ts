@@ -266,11 +266,14 @@ export function complianceBullet(checkId: string, c: ComplianceWire | undefined,
 }
 
 /** Bullets for the checks of a /v1/checks result that need something (the model reads these before the JSON). */
-function checkNotes(r: CheckSummary, max = 8): string[] {
+function checkNotes(r: CheckSummary, max = 8, covered?: { by: string; except?: readonly string[] }): string[] {
   const rank: Record<string, number> = { needs_fix: 0, your_call: 1, pending_live_check: 2, compliant: 3 };
+  // Agent audit round 2: six "NEEDS A FIX" lines with generic "<interval> at <price>" wording competed with the one
+  // engine-verified replacement that fixes all of them; when a verified fix covers a check, the line says so instead.
+  const coveredBy = (c: (typeof r.checks)[number]) => !!covered && c.compliance?.status === 'needs_fix' && !(covered.except ?? []).includes(c.check_id);
   const lines = r.checks
     .map((c) => {
-      const line = complianceBullet(c.check_id, c.compliance, c.status, c.title);
+      const line = coveredBy(c) ? `NEEDS A FIX ${c.check_id}: fixed by ${covered!.by}` : complianceBullet(c.check_id, c.compliance, c.status, c.title);
       const cite = c.requirements?.[0]?.citation;
       return { c, line: line && cite && c.compliance_status !== 'compliant' ? `${line} [${cite}]` : line, r: rank[c.compliance_status ?? (c.status === 'fail' ? 'needs_fix' : 'your_call')] ?? 9 };
     })
@@ -336,6 +339,21 @@ const verdictHeadline = (what: string, r: CheckSummary) => {
  * checks with their first citations, the ids of passing checks, and failing / unclear requirements only. A check run
  * over "all" jurisdictions otherwise lists every state's requirement on every check (> 60 KB).
  */
+const FAILING_REQUIREMENTS_SHOWN = 8;
+
+/** Agent audit round 2: a passing result no longer echoes the 2 KB replacement / corrected params it did not need. */
+function withoutUnneededFix(r: Record<string, unknown>): Record<string, unknown> {
+  const counts = (r.compliance as { counts?: Record<string, number> } | undefined)?.counts;
+  if (!counts || (counts.needs_fix ?? 0) > 0 || r.verdict === 'fail') return r;
+  const { replacement: _r, ...rest } = r;
+  const correction = rest.correction as { patch?: unknown[]; corrected_params?: unknown } | undefined;
+  if (correction && !correction.patch?.length) {
+    const { corrected_params: _c, ...c } = correction;
+    return { ...rest, correction: c };
+  }
+  return rest;
+}
+
 function slimCheckResult<T extends Record<string, unknown>>(r: T): T {
   const { checks, requirements, ...rest } = r as Record<string, unknown> & {
     checks?: Array<Record<string, unknown> & { requirements?: Array<{ citation: string; jurisdiction: string }> }>;
@@ -354,7 +372,12 @@ function slimCheckResult<T extends Record<string, unknown>>(r: T): T {
       })),
     passing_checks: (checks ?? []).filter((c) => c.status === 'pass').map((c) => c.check_id),
     // Audit P1: failing_requirements lists only failing requirements; the ones left to review are counted apart.
-    failing_requirements: (requirements ?? []).filter((q) => q.status === 'fail').map((q) => ({ id: q.id, citation: q.citation, status: q.status })),
+    // Agent audit round 2: a failing disclosure listed ~58 failing requirements (most of the payload); every check
+    // already carries its citations. The first ones are kept, with the total.
+    ...(() => {
+      const failing = (requirements ?? []).filter((q) => q.status === 'fail').map((q) => ({ id: q.id, citation: q.citation, status: q.status }));
+      return { failing_requirements: failing.slice(0, FAILING_REQUIREMENTS_SHOWN), ...(failing.length > FAILING_REQUIREMENTS_SHOWN ? { failing_requirements_total: failing.length } : {}) };
+    })(),
     review_requirements: (() => {
       const review = (requirements ?? []).filter((q) => q.status === 'needs_review');
       const citations = [...new Set(review.map((q) => q.citation))];
@@ -869,6 +892,10 @@ const verifyTask: ToolDef = {
       notes: [
         ...((v.status === 'failed' || v.status === 'not_checked') && v.next_action?.type === 'verify_domain'
           ? ['The domain is not verified yet. Waiting for the human to publish the DNS record / file / meta tag or install the snippet; don\'t retry until they say it\'s done. Nothing to change in the code.']
+          : v.next_action?.type === 'retry_later'
+          ? ['Checkbox could not confirm it (a problem on Checkbox\'s side): nothing to change in the code. Continue with the next task; verify again later.']
+          : v.next_action?.type === 'bcc_then_continue'
+          ? ['The copy is checked; the task closes when the first real email arrives with the BCC. Add the BCC to your sending code and continue with the next task (no need to poll).']
           : v.status === 'failed'
           ? ['The change did not satisfy the check: read diff (expected vs observed), fix the code, and call verify_task again.']
           : v.status === 'not_checked'
@@ -1046,9 +1073,9 @@ const checkDisclosure: ToolDef = {
   name: 'check_disclosure',
   title: 'Check checkout disclosure text',
   description: [
-    'Before shipping a checkout: checks the automatic-renewal disclosure shown next to the purchase button against every applicable law (ROSCA, CA, NY, …) and returns per-check verdicts with citations plus a REPLACEMENT verified by the rules engine (disclosure_text, consent_label, button_text and drop-in html).',
+    'Before shipping a checkout: checks the automatic-renewal disclosure shown next to the purchase button against every applicable law (ROSCA, CA, NY, …) and returns per-check verdicts with citations plus a REPLACEMENT verified by the rules engine (disclosure_text, consent_label, button_text, drop-in html and jsx).',
     'Pass the text exactly as rendered plus the plan terms. Example: {"text":"Renews monthly at $19.99 until you cancel.","price":19.99,"interval":"month","trial_days":14,"cancel_url":"https://acme.example/account/cancel","merchant_name":"Acme","consent":{"checkbox":true,"prechecked":false}}.',
-    'If verdict is fail, use replacement.html (or its texts) in the code, then call again to confirm pass. needs_review on styling means a rendered scan must confirm.',
+    'If verdict is fail, put replacement.jsx (React) or .html above the button, then call again with the new text, consent and placement.bold: true (it is semibold). needs_review on styling means a rendered scan must confirm.',
   ].join('\n'),
   input: {
     text: z.string().min(1).max(5000).describe('The disclosure shown next to the purchase button, exactly as rendered.'),
@@ -1083,8 +1110,9 @@ const checkDisclosure: ToolDef = {
   scopes: ['checks:read'],
   annotations: { ...ro, title: 'Check disclosure' },
   async run(args, { api }) {
-    const r = await api.request<CheckSummary & { replacement?: { verified?: boolean } }>('POST', '/v1/checks/disclosure', { body: args });
-    return { headline: verdictHeadline('Disclosure', r), notes: checkNotes(r), data: slimCheckResult(r as unknown as Record<string, unknown>) };
+    const r = await api.request<CheckSummary & { replacement?: { verified?: boolean; remaining_checks?: string[] } }>('POST', '/v1/checks/disclosure', { body: args });
+    const covered = r.replacement?.verified ? { by: 'replacement (disclosure_text above the button + consent_label, or paste replacement.jsx in React / replacement.html elsewhere)', except: r.replacement.remaining_checks ?? [] } : undefined;
+    return { headline: verdictHeadline('Disclosure', r), notes: checkNotes(r, 8, covered), data: withoutUnneededFix(slimCheckResult(r as unknown as Record<string, unknown>)) };
   },
 };
 
@@ -1110,10 +1138,12 @@ const checkStripeCheckoutSession: ToolDef = {
       '/v1/checks/stripe_checkout_session',
       { body: args },
     );
-    const notes = checkNotes(r);
-    if (r.correction?.patch?.length) notes.unshift(`Replace the params in your code with correction.corrected_params (${r.correction.patch.length} change(s); verified passes: ${r.correction.verification?.passes ?? 'n/a'}).`);
-    if (r.correction?.verification?.note) notes.push(r.correction.verification.note);
-    const { correction, ...rest } = slimCheckResult(r as unknown as Record<string, unknown>) as Record<string, unknown>;
+    const fixing = !!r.correction?.patch?.length;
+    const notes = checkNotes(r, 8, fixing && r.correction.verification?.passes ? { by: 'correction.corrected_params' } : undefined);
+    if (fixing) notes.unshift(`Replace the params in your code with correction.corrected_params (${r.correction.patch.length} change(s); verified passes: ${r.correction.verification?.passes ?? 'n/a'}).`);
+    // Agent audit round 2: on a pass the same Stripe-styling note was printed four times; it is printed once.
+    if (fixing && r.correction?.verification?.note) notes.push(r.correction.verification.note);
+    const { correction, ...rest } = withoutUnneededFix(slimCheckResult(r as unknown as Record<string, unknown>)) as Record<string, unknown>;
     return { headline: verdictHeadline('Stripe Checkout Session', r), notes, data: { correction, ...rest } };
   },
 };
@@ -1144,8 +1174,8 @@ const checkEmail: ToolDef = {
   scopes: ['checks:read'],
   annotations: { ...ro, title: 'Check email' },
   async run(args, { api }) {
-    const r = await api.request<CheckSummary & { required_by?: string[] }>('POST', '/v1/checks/email', { body: { ...args, kind: checkKind(args.kind) } });
-    const notes = checkNotes(r);
+    const r = await api.request<CheckSummary & { required_by?: string[]; template?: { verified?: boolean; remaining_checks?: string[] } }>('POST', '/v1/checks/email', { body: { ...args, kind: checkKind(args.kind) } });
+    const notes = checkNotes(r, 8, r.template?.verified ? { by: 'template (subject + text or html; add your greeting and sign-off around it if you like)', except: r.template.remaining_checks ?? [] } : undefined);
     notes.unshift(r.required_by?.length ? `Legally required for this plan by: ${citationList(r.required_by, (r as { requirements?: Array<{ id: string; citation: string }> }).requirements)}.` : 'Not legally required for this plan (still good practice).');
     return { headline: verdictHeadline(`Email (${String(args.kind)})`, r), notes, data: slimCheckResult(r as unknown as Record<string, unknown>) };
   },
@@ -1177,9 +1207,55 @@ const checkPageHtml: ToolDef = {
       const b = r.extraction.purchase_buttons;
       notes.unshift(b.length ? `Purchase buttons found: ${b.length} (first: ${untrusted(b[0], 60)}; texts in extraction.purchase_buttons).` : 'Purchase buttons found: none (send the rendered HTML).');
     }
-    return { headline: verdictHeadline('Page', r), notes, data: slimCheckResult(r as unknown as Record<string, unknown>) };
+    return { headline: verdictHeadline('Page', r), notes, data: withoutUnneededFix(slimCheckResult(r as unknown as Record<string, unknown>)) };
   },
 };
+
+interface ScheduledNotice {
+  kind: string;
+  occasion?: string;
+  anchor_date?: string;
+  send_date: string;
+  window_opens_at?: number;
+  window_closes_at?: number;
+  jurisdictions: string[];
+  days_before: number;
+}
+
+const DAY_S = 86_400;
+
+/**
+ * Agent audit round 2: "2026-11-14: trial_ending (5 days before; US-UT)" said neither before what nor the allowed window,
+ * which is what a cron job needs; the window was only in epoch seconds. The line now states both relative to the event.
+ */
+export function noticeScheduleLine(n: ScheduledNotice): string {
+  const anchor = n.anchor_date ? Date.parse(`${n.anchor_date}T00:00:00Z`) / 1000 : undefined;
+  const event = n.occasion ? n.occasion.replace(/\s*\(.*\)$/, '').toLowerCase() : 'the event';
+  if (n.days_before === 0 || anchor === undefined || n.window_opens_at === undefined || n.window_closes_at === undefined) {
+    return `${n.send_date}: ${n.kind} — ${n.days_before === 0 ? `at ${event} (same day)` : `${n.days_before} days before ${event}`} (${n.jurisdictions.join(', ')})`;
+  }
+  const most = Math.round((anchor - n.window_opens_at) / DAY_S);
+  const least = Math.round((anchor - n.window_closes_at) / DAY_S);
+  const window = least >= 0 && most >= least ? `; allowed ${least}–${most} days before` : '';
+  return `${n.send_date}: ${n.kind} — ${n.days_before} days before ${event} (${n.anchor_date})${window} (${n.jurisdictions.join(', ')})`;
+}
+
+/** One line per notice; a kind sent every charge shows its first date and how many follow. */
+export function noticeScheduleLines(notices: ScheduledNotice[]): string[] {
+  const out: string[] = [];
+  const seen = new Map<string, number>();
+  for (const n of notices) seen.set(n.kind, (seen.get(n.kind) ?? 0) + 1);
+  const shown = new Set<string>();
+  for (const n of notices) {
+    const count = seen.get(n.kind)!;
+    if (count > 2) {
+      if (shown.has(n.kind)) continue;
+      shown.add(n.kind);
+      out.push(`${noticeScheduleLine(n)} — then the same before each of the next ${count - 1} charges (all in notices[])`);
+    } else out.push(noticeScheduleLine(n));
+  }
+  return out.slice(0, 12);
+}
 
 const getNoticeSchedule: ToolDef = {
   name: 'get_notice_schedule',
@@ -1203,7 +1279,7 @@ const getNoticeSchedule: ToolDef = {
   scopes: ['checks:read'],
   annotations: { ...ro, title: 'Notice schedule' },
   async run(args, { api }) {
-    const r = await api.request<{ notices: Array<{ kind: string; send_date: string; jurisdictions: string[]; days_before: number }>; not_required?: Array<{ kind: string; reason: string }> }>(
+    const r = await api.request<{ notices: ScheduledNotice[]; not_required?: Array<{ kind: string; reason: string }> }>(
       'POST',
       '/v1/checks/notice_schedule',
       { body: args },
@@ -1211,7 +1287,7 @@ const getNoticeSchedule: ToolDef = {
     return {
       headline: `${r.notices.length} required notice(s) for this plan.`,
       notes: [
-        ...r.notices.slice(0, 12).map((n) => `${n.send_date}: ${n.kind} (${n.days_before} days before; ${n.jurisdictions.join(', ')})`),
+        ...noticeScheduleLines(r.notices),
         ...(r.not_required ?? []).map((n) => `Not required: ${n.kind} — ${n.reason}`),
       ],
       data: r,
@@ -1354,6 +1430,22 @@ const suggestImprovements: ToolDef = {
 // Sites, findings, scans, law updates
 // ---------------------------------------------------------------------------------------------------------------------
 
+/** One site in list_sites: what an agent needs to pick it. */
+export function siteListItem(s: SiteLite): Record<string, unknown> {
+  const x = s as SiteLite & { platform?: unknown; checkout?: { url?: unknown }; monitoring?: { held_for_domain_verification?: unknown; verify_domains?: unknown }; archived?: unknown; livemode?: unknown };
+  return {
+    id: s.id,
+    object: 'site',
+    name: s.name ?? null,
+    url: s.url,
+    ...(x.platform ? { platform: x.platform } : {}),
+    ...(x.checkout?.url ? { checkout_url: x.checkout.url } : {}),
+    status: plainLabel(s.compliance?.label ?? 'Not checked yet'),
+    domain_verified: x.monitoring?.held_for_domain_verification !== true,
+    ...(x.archived ? { archived: true } : {}),
+  };
+}
+
 const listSites: ToolDef = {
   name: 'list_sites',
   title: 'List sites',
@@ -1369,9 +1461,11 @@ const listSites: ToolDef = {
       headline: `${list.data.length}${list.has_more ? '+' : ''} site(s) in ${key.mode === 'unknown' ? 'this' : key.mode} mode.`,
       // Audit P2: name + URL per site, and a Next line either way.
       notes: list.data.map((s) => `${s.id} ${s.name ? `${untrusted(s.name, 60)} ` : ''}${untrusted(s.url, 100)} — ${plainLabel(s.compliance?.label ?? 'Not checked yet')}`),
-      data: list,
+      // Agent audit round 2: each site carried install details, webhook URLs, retention and legal hold (~1.5 KB) when
+      // an agent needs the id, URL and status; get_site_status / the API have the rest.
+      data: { ...list, data: list.data.map(siteListItem) },
       next: list.data.length
-        ? { type: 'review_plan', message: `Call get_compliance_plan with the site id (e.g. site "${list.data[0]!.id}") for what to change next.`, operation_id: 'retrieveCompliancePlan' }
+        ? { type: 'review_plan', message: list.data.length === 1 ? `Call get_compliance_plan with site "${list.data[0]!.id}" for what to change next.` : 'Call get_compliance_plan with the id of the site whose URL matches this project (listed above) for what to change next.', operation_id: 'retrieveCompliancePlan' }
         : { type: 'setup', message: 'No sites yet: call setup_checkbox with the site URL.', operation_id: 'createSetupSession' },
     };
   },
@@ -1666,6 +1760,22 @@ const sendFeedback: ToolDef = {
   },
 };
 
+const LAW_CHANGES_SHOWN = 10;
+
+/**
+ * Agent audit round 2: list_law_updates with limit 3 printed 62 KB (one catalog update carried 195 requirement changes,
+ * each with its full summary). Each update keeps its first changes in short form, with the total.
+ */
+export function lawUpdateItem(u: Record<string, unknown>): Record<string, unknown> {
+  const changes = Array.isArray(u.changes) ? (u.changes as Array<Record<string, unknown>>) : [];
+  const { changes: _c, ...rest } = u;
+  return {
+    ...rest,
+    changes: changes.slice(0, LAW_CHANGES_SHOWN).map((c) => pick(c, ['requirement_id', 'change', 'citation', 'title', 'effective_date'])),
+    ...(changes.length > LAW_CHANGES_SHOWN ? { changes_total: changes.length } : {}),
+  };
+}
+
 const listLawUpdates: ToolDef = {
   name: 'list_law_updates',
   title: 'List law updates and their impact',
@@ -1674,13 +1784,13 @@ const listLawUpdates: ToolDef = {
   scopes: ['law_updates:read'],
   annotations: { ...ro, title: 'Law updates' },
   async run(args, { api }) {
-    const list = await api.request<ListResponse<{ id: string; date: string; summary: string; jurisdictions?: string[]; impacts?: unknown[] }>>('GET', '/v1/law_updates', {
+    const list = await api.request<ListResponse<{ id: string; date: string; summary: string; jurisdictions?: string[]; impacts?: unknown[]; changes?: unknown[] }>>('GET', '/v1/law_updates', {
       query: pick(args, ['since', 'limit', 'starting_after']) as Record<string, string>,
     });
     return {
       headline: `${list.data.length}${list.has_more ? '+' : ''} law update(s).`,
       notes: list.data.map((u) => `${u.date} ${u.id} (${(u.jurisdictions ?? []).join(', ')}): ${u.summary}${u.impacts?.length ? ` — affects ${u.impacts.length} site(s)` : ''}`),
-      data: list,
+      data: { ...list, data: list.data.map(lawUpdateItem) },
     };
   },
 };

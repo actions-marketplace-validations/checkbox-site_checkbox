@@ -11602,6 +11602,11 @@
             "description": "Drop-in markup: disclosure (set off in a box) + unchecked required checkbox + button.",
             "example": "<div class=\"checkbox-renewal-terms\">…</div>"
           },
+          "jsx": {
+            "type": "string",
+            "description": "The same markup as JSX for React / Next.js components (className, htmlFor, style objects, self-closed inputs); the text is unchanged.",
+            "example": "<div className=\"checkbox-renewal-terms\">…</div>"
+          },
           "placeholders": {
             "type": "array",
             "items": {
@@ -26865,7 +26870,7 @@
       "post": {
         "operationId": "checkDisclosure",
         "summary": "Check checkout disclosure text",
-        "description": "Checks the automatic-renewal disclosure you are about to show next to a subscribe button: what it says (renewal until canceled, price, frequency, trial, term, how to cancel), where it sits (above the button, same page) and how it looks (size, contrast, set off), and the consent checkbox (present, not pre-checked). Returns the verdict per check and per legal requirement, plus `replacement`: compliant text and drop-in HTML generated from your price/interval/trial/cancel_url and verified by the engine. Call it whenever you write or change checkout copy. Stateless and deterministic: nothing is stored, the same input on the same as_of date gives the same verdicts. Every verdict comes from the Checkbox rules engine over the legal catalog (federal ROSCA / EFTA plus the state automatic-renewal laws); the response carries rules_version, catalog_version and a disclaimer (not legal advice). Read `verdict`, then `next_action`: it tells you exactly what to change and to call the check again until verdict is pass.",
+        "description": "Checks the automatic-renewal disclosure you are about to show next to a subscribe button: what it says (renewal until canceled, price, frequency, trial, term, how to cancel), where it sits (above the button, same page) and how it looks (size, contrast, set off), and the consent checkbox (present, not pre-checked). Returns the verdict per check and per legal requirement, plus `replacement`: compliant text and drop-in HTML (and the same markup as JSX for React) generated from your price/interval/trial/cancel_url and verified by the engine. Call it whenever you write or change checkout copy. Stateless and deterministic: nothing is stored, the same input on the same as_of date gives the same verdicts. Every verdict comes from the Checkbox rules engine over the legal catalog (federal ROSCA / EFTA plus the state automatic-renewal laws); the response carries rules_version, catalog_version and a disclaimer (not legal advice). Read `verdict`, then `next_action`: it tells you exactly what to change and to call the check again until verdict is pass.",
         "tags": [
           "Checks"
         ],

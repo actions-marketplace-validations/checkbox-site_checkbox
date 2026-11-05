@@ -2502,6 +2502,8 @@ export interface CheckReplacement {
   button_text: string;
   /** Drop-in markup: disclosure (set off in a box) + unchecked required checkbox + button. */
   html: string;
+  /** The same markup as JSX for React / Next.js components (className, htmlFor, style objects, self-closed inputs); the text is unchanged. */
+  jsx?: string;
   /** Placeholders left to fill (e.g. {{cancel_url}}). */
   placeholders: Array<string>;
   /** The engine passes every targeted sign-up check on a page using this replacement. */

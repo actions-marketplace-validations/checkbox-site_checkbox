@@ -134,6 +134,9 @@ export function mcpText(text: string): string {
     const endpoint = OPERATION_ENDPOINTS[op];
     return endpoint ? `call_api (${endpoint})` : op;
   });
+  // Agent audit round 2: "call_api (POST /v1/sites/{site}/notice_settings) (POST /v1/sites/site_…/notice_settings)":
+  // an operation followed by its own concrete endpoint is said once, with the concrete path.
+  s = s.replace(/call_api \(((?:GET|POST|DELETE) )[^()]*\) \(\1([^()]+)\)/g, (_m, verb: string, path: string) => `call_api (${verb}${path})`);
   if (!CLI_PUBLISHED) {
     s = s
       .replace(/\s*\((?:or )?(?:run )?`(?:npx [^`]*)?checkbox [^`]*`[^)]*\)/g, '')

@@ -8,12 +8,12 @@ to skip it). When the terms are missing, the check asks for them (`provide_input
 
 | kind | Send | Fix to apply |
 |---|---|---|
-| `disclosure` | `text`, `interval` (required), `price` or `amount`, `trial_days`, `cancel_url`, `merchant_name`, `placement { above_button, same_page_as_payment, font_size_px, contrast_ratio, bold, boxed }`, `consent { checkbox, prechecked, label, required }` | `replacement.disclosure_text`, `replacement.consent_label`, `replacement.html` |
-| `stripe_checkout_session` | `params` = exactly the object passed to `stripe.checkout.sessions.create` (a free trial is `subscription_data.trial_period_days`); `merchant { merchant_name, cancel_url, price, interval }` when `line_items` use a Price id | `correction.patch` (RFC 6902) or `correction.corrected_params` |
+| `disclosure` | `text`, `interval` (required), `price` or `amount`, `trial_days`, `cancel_url`, `merchant_name`, `placement { above_button, same_page_as_payment, font_size_px, contrast_ratio, bold, boxed }`, `consent { checkbox, prechecked, label, required }` | `replacement.disclosure_text`, `replacement.consent_label`, `replacement.jsx` (React / Next.js) or `replacement.html` |
+| `stripe_checkout_session` | `params` = exactly the object passed to `stripe.checkout.sessions.create` (a free trial is `subscription_data.trial_period_days`); `merchant { merchant_name, cancel_url, price, interval }` when `line_items` use a Price id | `correction.corrected_params` (replace the params object; consent is `consent_collection`, the renewal line is `custom_text`) or `correction.patch` (RFC 6902) |
 | `stripe_payment_link` | `params` = `paymentLinks.create` params or a retrieved link | `correction.patch` |
 | `email` | `kind` (`acknowledgment`, `trial_reminder` (= `trial_ending`), `renewal_reminder`, `price_change`, `annual_terms`, `charge_notice`, `cancellation_confirmation`), `subject`, `text` and/or `html`, `terms { price, interval, cancel_url, … }` | `template { subject, text, html, merge_tags }` |
 | `page` | `html` (rendered, after JavaScript) or `url` (live mode, activated account), `terms` | `replacement` |
-| `notice_schedule` | `terms`, `start_date`, optional `price_change { effective_date, new_price }` | dates per notice and jurisdiction |
+| `notice_schedule` | `terms`, `start_date`, optional `price_change { effective_date, new_price }` | per notice: `anchor_date` (the event), `send_date`, `days_before` and the allowed window (`window_opens_at`..`window_closes_at`) |
 
 Response (every kind): `verdict` (`pass` / `fail` / `needs_review` / `not_applicable`), `summary`, `checks[]`
 (`check_id`, `status`, `severity`, `explanation`, `fix`, `requirements[]` with `citation`), `requirements[]`,
@@ -22,11 +22,19 @@ Response (every kind): `verdict` (`pass` / `fail` / `needs_review` / `not_applic
 `next_action.type`: `none` (done), `replace_text`, `apply_patch`, `replace_template`, `fix_and_recheck`,
 `human_review` (show the human), `provide_input` (send the missing field named in `message`), `schedule_notices`.
 
+Emails in your own code: keep the template's required lines; your greeting, sign-off and merge tags are fine (date
+variables such as `${trialEndDate}` are accepted as written). If the check says it cannot see what a merge tag holds
+(`next_action.type` `fix_and_recheck`), keep the tag in the code and check again with sample values in its place; do
+not re-apply the template. Every email kind in the schedule needs a sender (cron job or billing webhook), with BCC to
+the site's inbound address for that kind once a site is connected (`get_notice_templates` with `site` lists them).
+
 Known limits: on any Stripe-hosted page, `signup.disclosure.conspicuous` stays `needs_review` (Stripe controls the
 styling): also show the disclosure on your own page before redirecting to Stripe. For `disclosure`, describe the
 styling you used: `replacement.html` is semibold, so after applying it pass `placement.bold: true`; when only
 conspicuousness is left, ask the human to confirm it by eye instead of re-applying the replacement. The static `page` check cannot see
 buttons rendered by JavaScript: send the rendered HTML. A passing layout estimate is reported as `needs_review`.
+The cancellation flow has no preflight: build it as in SKILL.md section 5; the plan's cancellation task confirms it
+after deploy.
 
 Errors: `{ "error": { "type", "code", "message", "param", "next_action" } }`. `parameter_invalid` / `parameter_missing`
 name the `param` to fix. Codes: https://checkbox.site/docs/api/errors.md
