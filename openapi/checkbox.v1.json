@@ -3308,14 +3308,6 @@
           "null"
         ],
         "properties": {
-          "score": {
-            "type": "number",
-            "minimum": 0,
-            "maximum": 100,
-            "description": "Deprecated: the legacy 0-100 score (one decimal place), kept populated for backward compatibility. No Checkbox surface shows it; read `compliance` (status, label, counts) and the compliance plan instead.",
-            "deprecated": true,
-            "example": 82
-          },
           "evaluated": {
             "type": "integer",
             "description": "When the latest evaluation ran. Unix timestamp in seconds.",
@@ -3353,7 +3345,6 @@
           }
         },
         "required": [
-          "score",
           "evaluated",
           "open_findings",
           "needs_review",
@@ -3399,6 +3390,36 @@
           "webhook_urls"
         ],
         "description": "What to install on the merchant site."
+      },
+      "ScanCompliance": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "needs_fix",
+              "your_call",
+              "incomplete",
+              "compliant",
+              "not_checked"
+            ],
+            "description": "Roll-up status of that evaluation: needs_fix, your_call, incomplete, compliant or not_checked.",
+            "example": "needs_fix"
+          },
+          "label": {
+            "type": "string",
+            "description": "The status label to show, counted in tasks (\"2 fixes needed\", \"Checks pass\").",
+            "example": "2 fixes needed"
+          }
+        },
+        "required": [
+          "status",
+          "label"
+        ],
+        "description": "The compliance status of the evaluation this scan produced (null until evaluated). Retrieve the evaluation for the checks and counts."
       },
       "Scan": {
         "type": "object",
@@ -3537,16 +3558,8 @@
             "description": "The evaluation this scan produced (null until evaluated).",
             "example": "eval_3f9a1c2e7b4d4e0f9a8b7c6d5e4f3a2b"
           },
-          "score": {
-            "type": [
-              "number",
-              "null"
-            ],
-            "minimum": 0,
-            "maximum": 100,
-            "description": "Deprecated: the legacy 0-100 score of that evaluation, kept for backward compatibility. Read the evaluation's `compliance` status instead.",
-            "deprecated": true,
-            "example": 82
+          "compliance": {
+            "$ref": "#/components/schemas/ScanCompliance"
           },
           "started": {
             "type": [
@@ -3581,7 +3594,7 @@
           "error",
           "warnings",
           "evaluation",
-          "score",
+          "compliance",
           "started",
           "finished",
           "created"
@@ -4328,7 +4341,6 @@
                   "reason": null
                 },
                 "compliance": {
-                  "score": 82,
                   "evaluated": 1793318400,
                   "open_findings": 2,
                   "needs_review": 1,
@@ -4398,7 +4410,10 @@
                   "error": null,
                   "warnings": [],
                   "evaluation": "eval_3f9a1c2e7b4d4e0f9a8b7c6d5e4f3a2b",
-                  "score": 82,
+                  "compliance": {
+                    "status": "needs_fix",
+                    "label": "2 fixes needed"
+                  },
                   "started": 1793318400,
                   "finished": 1793318400,
                   "created": 1793318400
@@ -5497,7 +5512,10 @@
                 "error": null,
                 "warnings": [],
                 "evaluation": "eval_3f9a1c2e7b4d4e0f9a8b7c6d5e4f3a2b",
-                "score": 82,
+                "compliance": {
+                  "status": "needs_fix",
+                  "label": "2 fixes needed"
+                },
                 "started": 1793318400,
                 "finished": 1793318400,
                 "created": 1793318400
@@ -5627,14 +5645,6 @@
             "description": "The scan row this evaluation belongs to.",
             "example": "scan_3f9a1c2e7b4d4e0f9a8b7c6d5e4f3a2b"
           },
-          "score": {
-            "type": "number",
-            "minimum": 0,
-            "maximum": 100,
-            "description": "Deprecated: the legacy severity-weighted 0-100 score (one decimal place), kept populated for backward compatibility. No Checkbox surface shows it; read `compliance` (status, label, counts) and the compliance plan instead.",
-            "deprecated": true,
-            "example": 82
-          },
           "rules_version": {
             "type": "string",
             "description": "Legal catalog / rules version used.",
@@ -5735,7 +5745,6 @@
           "livemode",
           "site",
           "scan",
-          "score",
           "rules_version",
           "evaluated",
           "observed",
@@ -5770,7 +5779,6 @@
                 "livemode": false,
                 "site": "site_3f9a1c2e7b4d4e0f9a8b7c6d5e4f3a2b",
                 "scan": "scan_3f9a1c2e7b4d4e0f9a8b7c6d5e4f3a2b",
-                "score": 82,
                 "rules_version": "2026.10.1",
                 "evaluated": 1793318400,
                 "observed": 1793318400,
@@ -7623,15 +7631,6 @@
             "description": "action_required (an agent can apply open tasks now), verifying (changes applied; waiting for confirming observations), compliant (every required check passes or only waits for a live check — an automated assessment, not a legal determination; see compliance.pending_live_checks and coverage), blocked (only human answers (\"Your call\") or declined critical tasks remain).",
             "example": "action_required"
           },
-          "score": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "description": "Deprecated: the legacy 0-100 score of the latest evaluation, kept populated for backward compatibility. No Checkbox surface shows it; read `compliance` (status, label, counts) and the open tasks instead.",
-            "deprecated": true,
-            "example": 62
-          },
           "evaluation": {
             "type": [
               "string",
@@ -8141,7 +8140,7 @@
                     "enum": [
                       false
                     ],
-                    "description": "Always false: they never change status, score or tasks.",
+                    "description": "Always false: they never change the status or the tasks.",
                     "example": false
                   },
                   "operation_id": {
@@ -8201,7 +8200,6 @@
           "livemode",
           "site",
           "status",
-          "score",
           "evaluation",
           "evaluated",
           "summary",
@@ -8408,20 +8406,57 @@
                 "type": "string",
                 "description": "What the pre-check can and cannot confirm.",
                 "example": "Static fetch: text checks are exact; layout is estimated until the confirming scan."
+              },
+              "checks": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "check_id": {
+                      "type": "string",
+                      "description": "Check id.",
+                      "example": "signup.disclosure.price"
+                    },
+                    "status": {
+                      "type": "string",
+                      "description": "Pre-check result: pass, fail, needs_review or not_applicable.",
+                      "example": "fail"
+                    },
+                    "reason": {
+                      "type": "string",
+                      "description": "What the pre-check found, in one line.",
+                      "example": "No price is stated next to the purchase button."
+                    },
+                    "fix": {
+                      "type": "string",
+                      "description": "How to fix it, in one line (absent when it passes).",
+                      "example": "State the recurring price next to the subscribe button."
+                    }
+                  },
+                  "required": [
+                    "check_id",
+                    "status",
+                    "reason"
+                  ]
+                },
+                "description": "Each pre-checked check of the task, compact (empty when the pre-check ran no engine check).",
+                "example": []
               }
             },
             "required": [
               "source",
               "verdict",
               "url",
-              "note"
+              "note",
+              "checks"
             ],
             "description": "The fast pre-check run immediately (seconds). A failing pre-check fails the verification at once.",
             "example": {
               "source": "static_fetch",
               "verdict": "pass",
               "url": "https://shop.example/checkout",
-              "note": "Static fetch: text checks are exact; layout is estimated until the confirming scan."
+              "note": "Static fetch: text checks are exact; layout is estimated until the confirming scan.",
+              "checks": []
             }
           },
           "scan": {
@@ -8646,7 +8681,8 @@
                   "source": "static_fetch",
                   "verdict": "pass",
                   "url": "https://shop.example/checkout",
-                  "note": "Static fetch: text checks are exact; layout is estimated until the confirming scan."
+                  "note": "Static fetch: text checks are exact; layout is estimated until the confirming scan.",
+                  "checks": []
                 },
                 "scan": "scan_3f9a1c2e7b4d4e0f9a8b7c6d5e4f3a2b",
                 "checks": [
@@ -10949,26 +10985,6 @@
             "description": "What changed for the site.",
             "example": "1 check now fails under the new rule."
           },
-          "score_before": {
-            "type": [
-              "number",
-              "null"
-            ],
-            "minimum": 0,
-            "maximum": 100,
-            "description": "Score before the change (0-100, one decimal place).",
-            "example": 90
-          },
-          "score_after": {
-            "type": [
-              "number",
-              "null"
-            ],
-            "minimum": 0,
-            "maximum": 100,
-            "description": "Score after re-evaluation (0-100, one decimal place).",
-            "example": 84
-          },
           "affected_checks": {
             "type": "array",
             "items": {
@@ -11052,8 +11068,6 @@
         "required": [
           "site",
           "summary",
-          "score_before",
-          "score_after",
           "affected_checks",
           "evaluated"
         ],
@@ -11194,8 +11208,6 @@
               {
                 "site": "site_3f9a1c2e7b4d4e0f9a8b7c6d5e4f3a2b",
                 "summary": "1 check now fails under the new rule.",
-                "score_before": 90,
-                "score_after": 84,
                 "affected_checks": [
                   {
                     "check_id": "cancellation.online_cancel_available",
@@ -11274,8 +11286,6 @@
                   {
                     "site": "site_3f9a1c2e7b4d4e0f9a8b7c6d5e4f3a2b",
                     "summary": "1 check now fails under the new rule.",
-                    "score_before": 90,
-                    "score_after": 84,
                     "affected_checks": [
                       {
                         "check_id": "cancellation.online_cancel_available",
@@ -15437,7 +15447,7 @@
             "enum": [
               false
             ],
-            "description": "Always false: suggestions never count for or against compliance, the score or the plan status.",
+            "description": "Always false: suggestions never count for or against compliance or the plan status.",
             "example": false
           },
           "summary": {
@@ -19722,14 +19732,6 @@
               "null"
             ],
             "properties": {
-              "score": {
-                "type": [
-                  "number",
-                  "null"
-                ],
-                "description": "Compliance score (0-100) of the observed steps alone.",
-                "example": 82
-              },
               "summary": {
                 "type": "object",
                 "properties": {
@@ -19848,14 +19850,12 @@
               }
             },
             "required": [
-              "score",
               "summary",
               "checks",
               "monitoring"
             ],
             "description": "Outcome of a finished run.",
             "example": {
-              "score": 82,
               "summary": {
                 "passed": 9,
                 "failed": 2,
@@ -20308,7 +20308,6 @@
                   }
                 },
                 "result": {
-                  "score": 82,
                   "summary": {
                     "passed": 9,
                     "failed": 2,
@@ -20596,7 +20595,7 @@
           },
           "type": {
             "type": "string",
-            "description": "Event type: site.score_changed, finding.created, finding.resolved, scan.completed, scan.failed, law.changed, certificate.issued, certificate.lapsed, certificate.revoked, notice.sent, notice.due, notice.overdue, consent.created, receipt.created, test_run.completed, test_run.failed, plan.updated, site.compliant, task.verified.",
+            "description": "Event type: site.compliance_changed, finding.created, finding.resolved, scan.completed, scan.failed, law.changed, certificate.issued, certificate.lapsed, certificate.revoked, notice.sent, notice.due, notice.overdue, consent.created, receipt.created, test_run.completed, test_run.failed, plan.updated, site.compliant, task.verified.",
             "example": "finding.created"
           },
           "api_version": {
@@ -20631,7 +20630,7 @@
                 "additionalProperties": {},
                 "description": "For *_changed events: the previous values of the changed fields.",
                 "example": {
-                  "score": 74
+                  "status": "action_required"
                 }
               }
             },
@@ -20645,7 +20644,7 @@
                 "object": "finding"
               },
               "previous_attributes": {
-                "score": 74
+                "status": "action_required"
               }
             }
           },
@@ -20729,7 +20728,7 @@
                     "object": "finding"
                   },
                   "previous_attributes": {
-                    "score": 74
+                    "status": "action_required"
                   }
                 },
                 "pending_webhooks": 0,
@@ -21047,15 +21046,6 @@
             "description": "action_required (an agent can apply open tasks now), verifying (changes applied; waiting for confirming observations), compliant (every required check passes or only waits for a live check — an automated assessment, not a legal determination; see compliance.pending_live_checks and coverage), blocked (only human answers (\"Your call\") or declined critical tasks remain).",
             "example": "action_required"
           },
-          "score": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "description": "Deprecated: the legacy 0-100 score of the latest evaluation, kept populated for backward compatibility. No Checkbox surface shows it; read `compliance` (status, label, counts) and the open tasks instead.",
-            "deprecated": true,
-            "example": 62
-          },
           "summary": {
             "type": "string",
             "description": "Two or three sentences for an LLM: where the site stands and what comes next.",
@@ -21258,7 +21248,6 @@
           "livemode",
           "site",
           "status",
-          "score",
           "summary",
           "counts",
           "next_action",
@@ -30624,10 +30613,10 @@
                     },
                     "minItems": 1,
                     "maxItems": 50,
-                    "description": "Event types to send, or [\"*\"] for all: site.score_changed, finding.created, finding.resolved, scan.completed, scan.failed, law.changed, certificate.issued, certificate.lapsed, certificate.revoked, notice.sent, notice.due, notice.overdue, consent.created, receipt.created, test_run.completed, test_run.failed, plan.updated, site.compliant, task.verified.",
+                    "description": "Event types to send, or [\"*\"] for all: site.compliance_changed, finding.created, finding.resolved, scan.completed, scan.failed, law.changed, certificate.issued, certificate.lapsed, certificate.revoked, notice.sent, notice.due, notice.overdue, consent.created, receipt.created, test_run.completed, test_run.failed, plan.updated, site.compliant, task.verified.",
                     "example": [
                       "finding.created",
-                      "site.score_changed"
+                      "site.compliance_changed"
                     ]
                   },
                   "description": {
@@ -30928,10 +30917,10 @@
                     },
                     "minItems": 1,
                     "maxItems": 50,
-                    "description": "Event types to send, or [\"*\"] for all: site.score_changed, finding.created, finding.resolved, scan.completed, scan.failed, law.changed, certificate.issued, certificate.lapsed, certificate.revoked, notice.sent, notice.due, notice.overdue, consent.created, receipt.created, test_run.completed, test_run.failed, plan.updated, site.compliant, task.verified.",
+                    "description": "Event types to send, or [\"*\"] for all: site.compliance_changed, finding.created, finding.resolved, scan.completed, scan.failed, law.changed, certificate.issued, certificate.lapsed, certificate.revoked, notice.sent, notice.due, notice.overdue, consent.created, receipt.created, test_run.completed, test_run.failed, plan.updated, site.compliant, task.verified.",
                     "example": [
                       "finding.created",
-                      "site.score_changed"
+                      "site.compliance_changed"
                     ]
                   },
                   "description": {
@@ -31580,7 +31569,7 @@
                           "previous_attributes": {
                             "type": "object",
                             "additionalProperties": {},
-                            "description": "plan.updated: the previous status and score.",
+                            "description": "plan.updated: the previous status.",
                             "example": {
                               "status": "action_required"
                             }
@@ -31596,7 +31585,6 @@
                             "livemode": false,
                             "site": "site_3f9a1c2e7b4d4e0f9a8b7c6d5e4f3a2b",
                             "status": "action_required",
-                            "score": 62,
                             "summary": "StreamMax fails 4 critical checks…",
                             "counts": {
                               "open": 3,
@@ -31695,7 +31683,7 @@
                           "previous_attributes": {
                             "type": "object",
                             "additionalProperties": {},
-                            "description": "plan.updated: the previous status and score.",
+                            "description": "plan.updated: the previous status.",
                             "example": {
                               "status": "action_required"
                             }
@@ -31718,7 +31706,8 @@
                               "source": "static_fetch",
                               "verdict": "pass",
                               "url": "https://shop.example/checkout",
-                              "note": "Static fetch: text checks are exact; layout is estimated until the confirming scan."
+                              "note": "Static fetch: text checks are exact; layout is estimated until the confirming scan.",
+                              "checks": []
                             },
                             "scan": "scan_3f9a1c2e7b4d4e0f9a8b7c6d5e4f3a2b",
                             "checks": [
@@ -32163,7 +32152,6 @@
                               }
                             },
                             "result": {
-                              "score": 82,
                               "summary": {
                                 "passed": 9,
                                 "failed": 2,
@@ -32332,7 +32320,6 @@
                               }
                             },
                             "result": {
-                              "score": 82,
                               "summary": {
                                 "passed": 9,
                                 "failed": 2,
@@ -32417,11 +32404,11 @@
         }
       }
     },
-    "site.score_changed": {
+    "site.compliance_changed": {
       "post": {
-        "operationId": "webhook_site_score_changed",
-        "summary": "site.score_changed",
-        "description": "A site's compliance score changed (data.previous_attributes.score has the old score).",
+        "operationId": "webhook_site_compliance_changed",
+        "summary": "site.compliance_changed",
+        "description": "A re-evaluation changed the site's check results; data.object is the site, with its current compliance status and label in data.object.compliance.",
         "tags": [
           "Webhooks"
         ],
@@ -32439,10 +32426,10 @@
                       "type": {
                         "type": "string",
                         "enum": [
-                          "site.score_changed"
+                          "site.compliance_changed"
                         ],
                         "description": "Event type.",
-                        "example": "site.score_changed"
+                        "example": "site.compliance_changed"
                       },
                       "data": {
                         "type": "object",
@@ -32525,7 +32512,6 @@
                               "reason": null
                             },
                             "compliance": {
-                              "score": 82,
                               "evaluated": 1793318400,
                               "open_findings": 2,
                               "needs_review": 1,
@@ -32595,7 +32581,10 @@
                               "error": null,
                               "warnings": [],
                               "evaluation": "eval_3f9a1c2e7b4d4e0f9a8b7c6d5e4f3a2b",
-                              "score": 82,
+                              "compliance": {
+                                "status": "needs_fix",
+                                "label": "2 fixes needed"
+                              },
                               "started": 1793318400,
                               "finished": 1793318400,
                               "created": 1793318400
@@ -32992,7 +32981,7 @@
       "post": {
         "operationId": "webhook_scan_completed",
         "summary": "scan.completed",
-        "description": "A scan finished (the evaluation may follow in a separate site.score_changed event).",
+        "description": "A scan finished (the evaluation may follow in a separate site.compliance_changed event).",
         "tags": [
           "Webhooks"
         ],
@@ -33041,7 +33030,10 @@
                               "error": null,
                               "warnings": [],
                               "evaluation": "eval_3f9a1c2e7b4d4e0f9a8b7c6d5e4f3a2b",
-                              "score": 82,
+                              "compliance": {
+                                "status": "needs_fix",
+                                "label": "2 fixes needed"
+                              },
                               "started": 1793318400,
                               "finished": 1793318400,
                               "created": 1793318400
@@ -33072,7 +33064,10 @@
                             "error": null,
                             "warnings": [],
                             "evaluation": "eval_3f9a1c2e7b4d4e0f9a8b7c6d5e4f3a2b",
-                            "score": 82,
+                            "compliance": {
+                              "status": "needs_fix",
+                              "label": "2 fixes needed"
+                            },
                             "started": 1793318400,
                             "finished": 1793318400,
                             "created": 1793318400
@@ -33148,7 +33143,10 @@
                               "error": null,
                               "warnings": [],
                               "evaluation": "eval_3f9a1c2e7b4d4e0f9a8b7c6d5e4f3a2b",
-                              "score": 82,
+                              "compliance": {
+                                "status": "needs_fix",
+                                "label": "2 fixes needed"
+                              },
                               "started": 1793318400,
                               "finished": 1793318400,
                               "created": 1793318400
@@ -33179,7 +33177,10 @@
                             "error": null,
                             "warnings": [],
                             "evaluation": "eval_3f9a1c2e7b4d4e0f9a8b7c6d5e4f3a2b",
-                            "score": 82,
+                            "compliance": {
+                              "status": "needs_fix",
+                              "label": "2 fixes needed"
+                            },
                             "started": 1793318400,
                             "finished": 1793318400,
                             "created": 1793318400
@@ -33273,8 +33274,6 @@
                               {
                                 "site": "site_3f9a1c2e7b4d4e0f9a8b7c6d5e4f3a2b",
                                 "summary": "1 check now fails under the new rule.",
-                                "score_before": 90,
-                                "score_after": 84,
                                 "affected_checks": [
                                   {
                                     "check_id": "cancellation.online_cancel_available",
@@ -33857,7 +33856,6 @@
                               "reason": null
                             },
                             "compliance": {
-                              "score": 82,
                               "evaluated": 1793318400,
                               "open_findings": 2,
                               "needs_review": 1,
@@ -33927,7 +33925,10 @@
                               "error": null,
                               "warnings": [],
                               "evaluation": "eval_3f9a1c2e7b4d4e0f9a8b7c6d5e4f3a2b",
-                              "score": 82,
+                              "compliance": {
+                                "status": "needs_fix",
+                                "label": "2 fixes needed"
+                              },
                               "started": 1793318400,
                               "finished": 1793318400,
                               "created": 1793318400

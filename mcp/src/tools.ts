@@ -187,7 +187,6 @@ interface SiteLite {
   url: string;
   name?: string;
   compliance?: {
-    score?: number | null;
     open_findings?: number;
     needs_review?: number;
     status?: string;
@@ -331,7 +330,8 @@ export function clipWords(v: unknown, n: number): unknown {
 const verdictHeadline = (what: string, r: CheckSummary) => {
   if (r.verdict === 'not_applicable') return `${what}: Not required for this plan.`;
   const label = r.compliance ? plainLabel(r.compliance.label) : statusLine(r.verdict);
-  return `${what}: ${label} (${r.summary.fail} failing, ${r.summary.needs_review} to review, ${r.summary.pass} passing).`;
+  // One counting system per headline: the task-based status label only (the per-check counts stay in data.summary).
+  return `${what}: ${label}.`;
 };
 
 /**
@@ -742,7 +742,6 @@ const completeSetup: ToolDef = {
 
 interface PlanLite {
   status: string;
-  score?: number | null;
   summary?: string;
   counts?: Record<string, number>;
   protection_level?: string;
@@ -813,7 +812,7 @@ const getCompliancePlan: ToolDef = {
     // One to-do list: the same ordered open tasks (titles, order, counts) as the dashboard, report, emails and CLI.
     const todo = planTodo((plan.tasks ?? []) as unknown as TodoTaskLike[]);
     const rest = required.filter((t) => !todo.some((x) => x.id === t.id));
-    const { score: _score, insurable: _insurable, ...shown } = plan as PlanLite & { insurable?: unknown };
+    const { score: _score, insurable: _insurable, ...shown } = plan as PlanLite & { score?: unknown; insurable?: unknown };
     return {
       // Audit P2: one Next line (the plan's next_action below); the summary's own "Next: …" is not repeated.
       headline: `Plan for ${site}: ${plainLabel(plan.compliance?.label ?? 'Not checked yet')} (plan ${plan.status}).`,
@@ -850,6 +849,21 @@ const getTask: ToolDef = {
   },
 };
 
+interface PrecheckLite {
+  verdict?: string;
+  checks?: Array<{ check_id: string; status: string; reason?: string; fix?: string }>;
+}
+
+/** Audit: the pre-check's per-check results, one compact line each (agents only saw the overall verdict). */
+export function precheckLines(pre: PrecheckLite | null | undefined, max = 12): string[] {
+  const checks = pre?.checks ?? [];
+  if (!checks.length) return [];
+  const order: Record<string, number> = { fail: 0, needs_review: 1, missing_data: 1, pass: 2, not_applicable: 3 };
+  const sorted = [...checks].sort((a, b) => (order[a.status] ?? 1) - (order[b.status] ?? 1));
+  const lines = sorted.slice(0, max).map((c) => `${c.check_id}: ${c.status}${c.reason ? ` — ${untrusted(c.reason, 180)}` : ''}${c.fix ? ` Fix: ${untrusted(c.fix, 200)}` : ''}`);
+  return [`Pre-check (${pre?.verdict ?? 'n/a'}), per check:`, ...lines, ...(checks.length > max ? [`and ${checks.length - max} more (data.precheck.checks)`] : [])];
+}
+
 const verifyTask: ToolDef = {
   name: 'verify_task',
   title: 'Verify a task after applying its change',
@@ -882,7 +896,7 @@ const verifyTask: ToolDef = {
   async run(args, { api }) {
     const body = pick(args, ['html', 'stripe_checkout_session', 'email', 'recheck']);
     if (body.email && typeof body.email === 'object' && (body.email as { kind?: unknown }).kind) body.email = { ...(body.email as object), kind: checkKind((body.email as { kind?: unknown }).kind) };
-    const v = await api.request<{ id: string; site?: string; status: string; diff?: unknown[]; plan_status?: string | null; next_action?: NextAction | null }>('POST', `/v1/tasks/${enc(String(args.task))}/verify`, {
+    const v = await api.request<{ id: string; site?: string; status: string; diff?: unknown[]; plan_status?: string | null; next_action?: NextAction | null; precheck?: PrecheckLite | null }>('POST', `/v1/tasks/${enc(String(args.task))}/verify`, {
       query: { wait: (args.wait as number | undefined) ?? 25 },
       body,
     });
@@ -890,6 +904,7 @@ const verifyTask: ToolDef = {
     return {
       headline: `Verification ${v.id} of ${String(args.task)}: ${statusLine(v.status)}${v.plan_status ? `; plan is now ${v.plan_status}` : ''}.`,
       notes: [
+        ...precheckLines(v.precheck),
         ...((v.status === 'failed' || v.status === 'not_checked') && v.next_action?.type === 'verify_domain'
           ? ['The domain is not verified yet. Waiting for the human to publish the DNS record / file / meta tag or install the snippet; don\'t retry until they say it\'s done. Nothing to change in the code.']
           : v.next_action?.type === 'retry_later'
@@ -946,7 +961,7 @@ const verifySite: ToolDef = {
       v.next_action?.type === 'verify_domain'
         ? `Site check ${v.id}: nothing was fetched or scanned because the site's domain is not verified yet (Checkbox only visits websites their owners have verified). Follow Next to verify it.`
         : v.status === 'failed'
-        ? `${v.next_action?.type === 'first_check_complete' ? 'First check complete' : 'Site check complete'} (${v.id}): ${v.diff?.length ?? 0} check(s) do not pass yet — this is the to-do list, not a failed change.${v.plan_status ? ` Plan: ${v.plan_status}.` : ''}`
+        ? `${v.next_action?.type === 'first_check_complete' ? 'First check complete' : 'Site check complete'} (${v.id}): the open tasks of get_compliance_plan are the to-do list, not a failed change.${v.plan_status ? ` Plan: ${v.plan_status}.` : ''}`
         : `Site check ${v.id}: ${statusLine(v.status)}${v.plan_status ? `; plan is ${v.plan_status}` : ''}.`;
     return { headline, data: v };
   },
@@ -960,8 +975,9 @@ const getVerification: ToolDef = {
   scopes: ['compliance_plans:read'],
   annotations: { ...ro, title: 'Verification' },
   async run(args, { api }) {
-    const v = await api.request<{ id: string; status: string }>('GET', `/v1/verifications/${enc(String(args.verification))}`, { query: { wait: (args.wait as number | undefined) ?? 0 } });
-    return { headline: `Verification ${v.id}: ${statusLine(v.status)}.`, data: v };
+    const v = await api.request<{ id: string; status: string; precheck?: PrecheckLite | null }>('GET', `/v1/verifications/${enc(String(args.verification))}`, { query: { wait: (args.wait as number | undefined) ?? 0 } });
+    const notes = precheckLines(v.precheck);
+    return { headline: `Verification ${v.id}: ${statusLine(v.status)}.`, ...(notes.length ? { notes } : {}), data: v };
   },
 };
 
@@ -1257,11 +1273,21 @@ export function noticeScheduleLines(notices: ScheduledNotice[]): string[] {
   return out.slice(0, 12);
 }
 
+/** Notice kinds of the schedule → the compliance plan's email task for it (same names as get_compliance_plan). */
+export const NOTICE_KIND_TASKS: Record<string, { name: string; task: string }> = {
+  acknowledgment: { name: 'acknowledgment email', task: 'acknowledgment_email' },
+  trial_ending: { name: 'trial-ending reminder', task: 'trial_reminder' },
+  renewal_reminder: { name: 'renewal reminder', task: 'renewal_reminder' },
+  annual_terms: { name: 'yearly terms reminder', task: 'annual_terms_notice' },
+  charge_notice: { name: 'charge notice', task: 'charge_notice' },
+  price_change: { name: 'price-change notice', task: 'price_change_notice' },
+};
+
 const getNoticeSchedule: ToolDef = {
   name: 'get_notice_schedule',
   title: 'Get the dates each required notice must be sent',
   description: [
-    'For a plan (price, interval, trial) and a sign-up date: every legally required notice (acknowledgment, trial-ending reminder, renewal reminder, annual terms, price-change notice) with the recommended send date, the compliant window (earliest/latest), the jurisdictions it satisfies and citations; plus notice kinds NOT required and why.',
+    'For a plan (price, interval, trial) and a sign-up date: every legally required notice (acknowledgment, trial-ending reminder, renewal reminder, yearly terms reminder, charge notice, price-change notice — the same emails as the compliance plan\'s email tasks) with the recommended send date, the compliant window (earliest/latest), the jurisdictions it satisfies and citations; plus notice kinds NOT required and why.',
     'Use it to implement reminder emails / cron jobs correctly. Example: {"terms":{"price":99,"interval":"year","trial_days":30},"start_date":"2026-11-01"}.',
   ].join('\n'),
   input: {
@@ -1284,8 +1310,12 @@ const getNoticeSchedule: ToolDef = {
       '/v1/checks/notice_schedule',
       { body: args },
     );
+    const kinds = [...new Set(r.notices.map((n) => n.kind))];
     return {
-      headline: `${r.notices.length} required notice(s) for this plan.`,
+      // Polish round: one email per kind, named like the compliance plan's email tasks (the per-send dates follow).
+      headline: kinds.length
+        ? `${kinds.length} required email${kinds.length === 1 ? '' : 's'} for this plan: ${kinds.map((k) => NOTICE_KIND_TASKS[k] ? `${NOTICE_KIND_TASKS[k]!.name} (plan task ${NOTICE_KIND_TASKS[k]!.task})` : k).join(', ')}; ${r.notices.length} send${r.notices.length === 1 ? '' : 's'} in the period below.`
+        : 'No required notices for this plan under these jurisdictions.',
       notes: [
         ...noticeScheduleLines(r.notices),
         ...(r.not_required ?? []).map((n) => `Not required: ${n.kind} — ${n.reason}`),
@@ -1579,7 +1609,7 @@ const getSiteStatus: ToolDef = {
       ...(evaluated && label ? pendingLive.slice(0, 6).map((p) => `LIVE CHECK PENDING ${p.check_id}: ${p.what} — ${p.completes}`) : []),
       ...(ro ? [ro] : []),
     ];
-    const { score: _siteScore, open_findings: _open, needs_review: _nr, ...complianceLite } = (site.compliance ?? {}) as Record<string, unknown>;
+    const { open_findings: _open, needs_review: _nr, ...complianceLite } = (site.compliance ?? {}) as Record<string, unknown>;
     return {
       headline: evaluated ? `${site.url}: ${plainLabel(label ?? 'Not checked yet')}.` : `${site.url}: Not checked yet.`,
       notes,
@@ -1697,7 +1727,7 @@ const getScan: ToolDef = {
   scopes: ['scans:read'],
   annotations: { ...ro, title: 'Scan' },
   async run(args, { api }) {
-    const scan = await api.request<{ id: string; site?: string; status: string; score?: number | null; error?: string | null }>('GET', `/v1/scans/${enc(String(args.scan))}`);
+    const scan = await api.request<{ id: string; site?: string; status: string; compliance?: { status: string; label: string } | null; error?: string | null }>('GET', `/v1/scans/${enc(String(args.scan))}`);
     const done = scan.status === 'completed';
     // Audit P1: a queued scan of a site held for domain verification does not run until the domain is verified.
     if (scan.status === 'queued' && scan.site) {
@@ -1711,7 +1741,7 @@ const getScan: ToolDef = {
       }
     }
     return {
-      headline: `Scan ${scan.id}: ${statusLine(scan.status)}${done ? '; the site status and to-do list are updated (get_site_status)' : ''}${scan.error ? ` — error: ${untrusted(scan.error, 160)}` : ''}.`,
+      headline: `Scan ${scan.id}: ${statusLine(scan.status)}${done && scan.compliance?.label ? ` — ${plainLabel(scan.compliance.label)}` : ''}${done ? '; the site status and to-do list are updated (get_site_status)' : ''}${scan.error ? ` — error: ${untrusted(scan.error, 160)}` : ''}.`,
       data: scan,
       next: done
         ? { type: 'review', message: 'Call get_compliance_plan for what to change.', operation_id: 'retrieveCompliancePlan' }

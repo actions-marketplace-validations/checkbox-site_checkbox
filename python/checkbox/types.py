@@ -1223,8 +1223,6 @@ ComplianceRollup = TypedDict(
 SiteComplianceValue = TypedDict(
     "SiteComplianceValue",
     {
-        #: Deprecated: the legacy 0-100 score (one decimal place), kept populated for backward compatibility. No Checkbox surface shows it; read `compliance` (status, label, counts) and the compliance plan instead.
-        "score": float,
         #: When the latest evaluation ran. Unix timestamp in seconds.
         "evaluated": int,
         #: Open findings whose latest status is fail.
@@ -1262,6 +1260,23 @@ SiteInstall = TypedDict(
 )
 
 
+#: The compliance status of the evaluation this scan produced (null until evaluated). Retrieve the evaluation for the checks and counts.
+ScanComplianceValue = TypedDict(
+    "ScanComplianceValue",
+    {
+        #: Roll-up status of that evaluation: needs_fix, your_call, incomplete, compliant or not_checked.
+        "status": Literal["needs_fix", "your_call", "incomplete", "compliant", "not_checked"],
+        #: The status label to show, counted in tasks ("2 fixes needed", "Checks pass").
+        "label": str,
+    },
+    total=False,
+)
+
+
+#: The compliance status of the evaluation this scan produced (null until evaluated). Retrieve the evaluation for the checks and counts.
+ScanCompliance = Optional["ScanComplianceValue"]
+
+
 #: Most recent scan (only with expand[]=latest_scan).
 Scan = TypedDict(
     "Scan",
@@ -1286,8 +1301,7 @@ Scan = TypedDict(
         "warnings": List[str],
         #: The evaluation this scan produced (null until evaluated).
         "evaluation": Optional[str],
-        #: Deprecated: the legacy 0-100 score of that evaluation, kept for backward compatibility. Read the evaluation's `compliance` status instead.
-        "score": Optional[float],
+        "compliance": "ScanCompliance",
         #: When the scan started. Unix timestamp in seconds.
         "started": Optional[int],
         #: When the scan finished. Unix timestamp in seconds.
@@ -1844,8 +1858,6 @@ Evaluation = TypedDict(
         "site": str,
         #: The scan row this evaluation belongs to.
         "scan": str,
-        #: Deprecated: the legacy severity-weighted 0-100 score (one decimal place), kept populated for backward compatibility. No Checkbox surface shows it; read `compliance` (status, label, counts) and the compliance plan instead.
-        "score": float,
         #: Legal catalog / rules version used.
         "rules_version": str,
         #: When it was evaluated. Unix timestamp in seconds.
@@ -2476,7 +2488,7 @@ CompliancePlanOptionalImprovementsConversionSuggestions = TypedDict(
         "description": str,
         #: Always false.
         "blocking": Literal[False],
-        #: Always false: they never change status, score or tasks.
+        #: Always false: they never change the status or the tasks.
         "counts_toward_compliance": Literal[False],
         #: Operation that lists them.
         "operation_id": str,
@@ -2514,8 +2526,6 @@ CompliancePlan = TypedDict(
         "site": str,
         #: action_required (an agent can apply open tasks now), verifying (changes applied; waiting for confirming observations), compliant (every required check passes or only waits for a live check — an automated assessment, not a legal determination; see compliance.pending_live_checks and coverage), blocked (only human answers ("Your call") or declined critical tasks remain).
         "status": Literal["action_required", "verifying", "compliant", "blocked"],
-        #: Deprecated: the legacy 0-100 score of the latest evaluation, kept populated for backward compatibility. No Checkbox surface shows it; read `compliance` (status, label, counts) and the open tasks instead.
-        "score": Optional[int],
         #: The evaluation the plan was built from (null before the first check).
         "evaluation": Optional[str],
         #: When that evaluation ran. Unix timestamp in seconds.
@@ -2594,6 +2604,22 @@ VerificationCheck = TypedDict(
 )
 
 
+VerificationPrecheckChecksItem = TypedDict(
+    "VerificationPrecheckChecksItem",
+    {
+        #: Check id.
+        "check_id": str,
+        #: Pre-check result: pass, fail, needs_review or not_applicable.
+        "status": str,
+        #: What the pre-check found, in one line.
+        "reason": str,
+        #: How to fix it, in one line (absent when it passes). (optional)
+        "fix": str,
+    },
+    total=False,
+)
+
+
 #: The fast pre-check run immediately (seconds). A failing pre-check fails the verification at once.
 VerificationPrecheck = TypedDict(
     "VerificationPrecheck",
@@ -2606,6 +2632,8 @@ VerificationPrecheck = TypedDict(
         "url": Optional[str],
         #: What the pre-check can and cannot confirm.
         "note": str,
+        #: Each pre-checked check of the task, compact (empty when the pre-check ran no engine check).
+        "checks": List["VerificationPrecheckChecksItem"],
     },
     total=False,
 )
@@ -3459,10 +3487,6 @@ LawSiteImpact = TypedDict(
         "site": str,
         #: What changed for the site.
         "summary": str,
-        #: Score before the change (0-100, one decimal place).
-        "score_before": Optional[float],
-        #: Score after re-evaluation (0-100, one decimal place).
-        "score_after": Optional[float],
         #: Checks whose result changed or that the change touches.
         "affected_checks": List["LawSiteImpactAffectedChecksItem"],
         #: When the site was re-evaluated. Unix timestamp in seconds.
@@ -4698,7 +4722,7 @@ SuggestionReport = TypedDict(
         "site": Optional[str],
         #: Always true: suggestions are optional and never block anything.
         "optional": Literal[True],
-        #: Always false: suggestions never count for or against compliance, the score or the plan status.
+        #: Always false: suggestions never count for or against compliance or the plan status.
         "counts_toward_compliance": Literal[False],
         #: One paragraph for an LLM or a human.
         "summary": str,
@@ -6199,8 +6223,6 @@ TestRunResultMonitoring = TypedDict(
 TestRunResult = TypedDict(
     "TestRunResult",
     {
-        #: Compliance score (0-100) of the observed steps alone.
-        "score": Optional[float],
         #: Counts.
         "summary": "TestRunResultSummary",
         #: Every check result of the run.
@@ -6473,7 +6495,7 @@ Event = TypedDict(
         "id": str,
         #: String representing the object's type. Always "event".
         "object": Literal["event"],
-        #: Event type: site.score_changed, finding.created, finding.resolved, scan.completed, scan.failed, law.changed, certificate.issued, certificate.lapsed, certificate.revoked, notice.sent, notice.due, notice.overdue, consent.created, receipt.created, test_run.completed, test_run.failed, plan.updated, site.compliant, task.verified.
+        #: Event type: site.compliance_changed, finding.created, finding.resolved, scan.completed, scan.failed, law.changed, certificate.issued, certificate.lapsed, certificate.revoked, notice.sent, notice.due, notice.overdue, consent.created, receipt.created, test_run.completed, test_run.failed, plan.updated, site.compliant, task.verified.
         "type": str,
         #: API version used to render data.object.
         "api_version": str,
@@ -6676,8 +6698,6 @@ CompliancePlanSummary = TypedDict(
         "site": str,
         #: action_required (an agent can apply open tasks now), verifying (changes applied; waiting for confirming observations), compliant (every required check passes or only waits for a live check — an automated assessment, not a legal determination; see compliance.pending_live_checks and coverage), blocked (only human answers ("Your call") or declined critical tasks remain).
         "status": Literal["action_required", "verifying", "compliant", "blocked"],
-        #: Deprecated: the legacy 0-100 score of the latest evaluation, kept populated for backward compatibility. No Checkbox surface shows it; read `compliance` (status, label, counts) and the open tasks instead.
-        "score": Optional[int],
         #: Two or three sentences for an LLM: where the site stands and what comes next.
         "summary": str,
         #: Tasks per status.
@@ -7364,7 +7384,7 @@ CreateWebhookEndpointParams = TypedDict(
     {
         #: HTTPS URL.
         "url": str,
-        #: Event types to send, or ["*"] for all: site.score_changed, finding.created, finding.resolved, scan.completed, scan.failed, law.changed, certificate.issued, certificate.lapsed, certificate.revoked, notice.sent, notice.due, notice.overdue, consent.created, receipt.created, test_run.completed, test_run.failed, plan.updated, site.compliant, task.verified.
+        #: Event types to send, or ["*"] for all: site.compliance_changed, finding.created, finding.resolved, scan.completed, scan.failed, law.changed, certificate.issued, certificate.lapsed, certificate.revoked, notice.sent, notice.due, notice.overdue, consent.created, receipt.created, test_run.completed, test_run.failed, plan.updated, site.compliant, task.verified.
         "enabled_events": List[str],
         #: Description. (optional)
         "description": str,
@@ -7396,7 +7416,7 @@ UpdateWebhookEndpointParams = TypedDict(
     {
         #: HTTPS URL. (optional)
         "url": str,
-        #: Event types to send, or ["*"] for all: site.score_changed, finding.created, finding.resolved, scan.completed, scan.failed, law.changed, certificate.issued, certificate.lapsed, certificate.revoked, notice.sent, notice.due, notice.overdue, consent.created, receipt.created, test_run.completed, test_run.failed, plan.updated, site.compliant, task.verified. (optional)
+        #: Event types to send, or ["*"] for all: site.compliance_changed, finding.created, finding.resolved, scan.completed, scan.failed, law.changed, certificate.issued, certificate.lapsed, certificate.revoked, notice.sent, notice.due, notice.overdue, consent.created, receipt.created, test_run.completed, test_run.failed, plan.updated, site.compliant, task.verified. (optional)
         "enabled_events": List[str],
         #: Description (null clears it). (optional)
         "description": Optional[str],
@@ -7755,8 +7775,7 @@ CreateScanResponse = TypedDict(
         "warnings": List[str],
         #: The evaluation this scan produced (null until evaluated).
         "evaluation": Optional[str],
-        #: Deprecated: the legacy 0-100 score of that evaluation, kept for backward compatibility. Read the evaluation's `compliance` status instead.
-        "score": Optional[float],
+        "compliance": "ScanCompliance",
         #: When the scan started. Unix timestamp in seconds.
         "started": Optional[int],
         #: When the scan finished. Unix timestamp in seconds.
@@ -7792,8 +7811,7 @@ RetrieveScanResponse = TypedDict(
         "warnings": List[str],
         #: The evaluation this scan produced (null until evaluated).
         "evaluation": Optional[str],
-        #: Deprecated: the legacy 0-100 score of that evaluation, kept for backward compatibility. Read the evaluation's `compliance` status instead.
-        "score": Optional[float],
+        "compliance": "ScanCompliance",
         #: When the scan started. Unix timestamp in seconds.
         "started": Optional[int],
         #: When the scan finished. Unix timestamp in seconds.
@@ -7809,7 +7827,7 @@ PlanUpdatedEventData = TypedDict(
     "PlanUpdatedEventData",
     {
         "object": "CompliancePlanSummary",
-        #: plan.updated: the previous status and score. (optional)
+        #: plan.updated: the previous status. (optional)
         "previous_attributes": Dict[str, Any],
     },
     total=False,
@@ -7859,7 +7877,7 @@ TaskVerifiedEventData = TypedDict(
     "TaskVerifiedEventData",
     {
         "object": "Verification",
-        #: plan.updated: the previous status and score. (optional)
+        #: plan.updated: the previous status. (optional)
         "previous_attributes": Dict[str, Any],
     },
     total=False,
@@ -8155,8 +8173,8 @@ TestRunFailedEvent = TypedDict(
 )
 
 
-SiteScoreChangedEventData = TypedDict(
-    "SiteScoreChangedEventData",
+SiteComplianceChangedEventData = TypedDict(
+    "SiteComplianceChangedEventData",
     {
         "object": "Site",
         #: Previous values of changed fields. (optional)
@@ -8167,8 +8185,8 @@ SiteScoreChangedEventData = TypedDict(
 
 
 #: What caused the event.
-SiteScoreChangedEventRequest = TypedDict(
-    "SiteScoreChangedEventRequest",
+SiteComplianceChangedEventRequest = TypedDict(
+    "SiteComplianceChangedEventRequest",
     {
         #: API request that caused the event (null for automatic changes).
         "id": Optional[str],
@@ -8179,27 +8197,27 @@ SiteScoreChangedEventRequest = TypedDict(
 )
 
 
-#: site.score_changed: A site's compliance score changed (data.previous_attributes.score has the old score).
-SiteScoreChangedEvent = TypedDict(
-    "SiteScoreChangedEvent",
+#: site.compliance_changed: A re-evaluation changed the site's check results; data.object is the site, with its current compliance status and label in data.object.compliance.
+SiteComplianceChangedEvent = TypedDict(
+    "SiteComplianceChangedEvent",
     {
         #: Unique identifier of the event (evt_…).
         "id": str,
         #: String representing the object's type. Always "event".
         "object": Literal["event"],
         #: Event type.
-        "type": Literal["site.score_changed"],
+        "type": Literal["site.compliance_changed"],
         #: API version used to render data.object.
         "api_version": str,
         #: When the event happened. Unix timestamp in seconds.
         "created": int,
         #: true for live-mode objects, false for test mode (ck_test_ keys act on an isolated sandbox).
         "livemode": bool,
-        "data": "SiteScoreChangedEventData",
+        "data": "SiteComplianceChangedEventData",
         #: Webhook deliveries not yet acknowledged.
         "pending_webhooks": int,
         #: What caused the event.
-        "request": "SiteScoreChangedEventRequest",
+        "request": "SiteComplianceChangedEventRequest",
     },
     total=False,
 )
@@ -8329,7 +8347,7 @@ ScanCompletedEventRequest = TypedDict(
 )
 
 
-#: scan.completed: A scan finished (the evaluation may follow in a separate site.score_changed event).
+#: scan.completed: A scan finished (the evaluation may follow in a separate site.compliance_changed event).
 ScanCompletedEvent = TypedDict(
     "ScanCompletedEvent",
     {
@@ -8756,7 +8774,7 @@ SiteCompliantEvent = TypedDict(
 
 
 #: Every event Checkbox delivers to webhook endpoints, discriminated by ``type``.
-WebhookEvent = Union["PlanUpdatedEvent", "TaskVerifiedEvent", "NoticeDueEvent", "NoticeOverdueEvent", "ReceiptCreatedEvent", "TestRunCompletedEvent", "TestRunFailedEvent", "SiteScoreChangedEvent", "FindingCreatedEvent", "FindingResolvedEvent", "ScanCompletedEvent", "ScanFailedEvent", "LawChangedEvent", "CertificateIssuedEvent", "CertificateLapsedEvent", "CertificateRevokedEvent", "NoticeSentEvent", "ConsentCreatedEvent", "SiteCompliantEvent"]
+WebhookEvent = Union["PlanUpdatedEvent", "TaskVerifiedEvent", "NoticeDueEvent", "NoticeOverdueEvent", "ReceiptCreatedEvent", "TestRunCompletedEvent", "TestRunFailedEvent", "SiteComplianceChangedEvent", "FindingCreatedEvent", "FindingResolvedEvent", "ScanCompletedEvent", "ScanFailedEvent", "LawChangedEvent", "CertificateIssuedEvent", "CertificateLapsedEvent", "CertificateRevokedEvent", "NoticeSentEvent", "ConsentCreatedEvent", "SiteCompliantEvent"]
 
 WEBHOOK_EVENT_TYPES = (
     "plan.updated",
@@ -8766,7 +8784,7 @@ WEBHOOK_EVENT_TYPES = (
     "receipt.created",
     "test_run.completed",
     "test_run.failed",
-    "site.score_changed",
+    "site.compliance_changed",
     "finding.created",
     "finding.resolved",
     "scan.completed",

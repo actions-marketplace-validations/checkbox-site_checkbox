@@ -815,11 +815,6 @@ export interface ComplianceRollup {
 
 /** Latest verdict; null until the first evaluation. */
 export type SiteCompliance = {
-  /**
-   * Deprecated: the legacy 0-100 score (one decimal place), kept populated for backward compatibility. No Checkbox surface shows it; read `compliance` (status, label, counts) and the compliance plan instead.
-   * @deprecated
-   */
-  score: number;
   /** When the latest evaluation ran. Unix timestamp in seconds. */
   evaluated: number;
   /** Open findings whose latest status is fail. */
@@ -845,6 +840,14 @@ export interface SiteInstall {
   webhook_urls: Record<string, string>;
 }
 
+/** The compliance status of the evaluation this scan produced (null until evaluated). Retrieve the evaluation for the checks and counts. */
+export type ScanCompliance = {
+  /** Roll-up status of that evaluation: needs_fix, your_call, incomplete, compliant or not_checked. */
+  status: "needs_fix" | "your_call" | "incomplete" | "compliant" | "not_checked";
+  /** The status label to show, counted in tasks ("2 fixes needed", "Checks pass"). */
+  label: string;
+} | null;
+
 /** Most recent scan (only with expand[]=latest_scan). */
 export interface Scan {
   /** Unique identifier of the scan (scan_…). */
@@ -867,11 +870,7 @@ export interface Scan {
   warnings: Array<string>;
   /** The evaluation this scan produced (null until evaluated). */
   evaluation: string | null;
-  /**
-   * Deprecated: the legacy 0-100 score of that evaluation, kept for backward compatibility. Read the evaluation's `compliance` status instead.
-   * @deprecated
-   */
-  score: number | null;
+  compliance: ScanCompliance;
   /** When the scan started. Unix timestamp in seconds. */
   started: number | null;
   /** When the scan finished. Unix timestamp in seconds. */
@@ -1237,11 +1236,6 @@ export interface Evaluation {
   site: string;
   /** The scan row this evaluation belongs to. */
   scan: string;
-  /**
-   * Deprecated: the legacy severity-weighted 0-100 score (one decimal place), kept populated for backward compatibility. No Checkbox surface shows it; read `compliance` (status, label, counts) and the compliance plan instead.
-   * @deprecated
-   */
-  score: number;
   /** Legal catalog / rules version used. */
   rules_version: string;
   /** When it was evaluated. Unix timestamp in seconds. */
@@ -1649,11 +1643,6 @@ export interface CompliancePlan {
   site: string;
   /** action_required (an agent can apply open tasks now), verifying (changes applied; waiting for confirming observations), compliant (every required check passes or only waits for a live check — an automated assessment, not a legal determination; see compliance.pending_live_checks and coverage), blocked (only human answers ("Your call") or declined critical tasks remain). */
   status: "action_required" | "verifying" | "compliant" | "blocked";
-  /**
-   * Deprecated: the legacy 0-100 score of the latest evaluation, kept populated for backward compatibility. No Checkbox surface shows it; read `compliance` (status, label, counts) and the open tasks instead.
-   * @deprecated
-   */
-  score: number | null;
   /** The evaluation the plan was built from (null before the first check). */
   evaluation: string | null;
   /** When that evaluation ran. Unix timestamp in seconds. */
@@ -1731,7 +1720,7 @@ export interface CompliancePlan {
       description: string;
       /** Always false. */
       blocking: false;
-      /** Always false: they never change status, score or tasks. */
+      /** Always false: they never change the status or the tasks. */
       counts_toward_compliance: false;
       /** Operation that lists them. */
       operation_id: string;
@@ -1799,6 +1788,17 @@ export interface Verification {
     url: string | null;
     /** What the pre-check can and cannot confirm. */
     note: string;
+    /** Each pre-checked check of the task, compact (empty when the pre-check ran no engine check). */
+    checks: Array<{
+      /** Check id. */
+      check_id: string;
+      /** Pre-check result: pass, fail, needs_review or not_applicable. */
+      status: string;
+      /** What the pre-check found, in one line. */
+      reason: string;
+      /** How to fix it, in one line (absent when it passes). */
+      fix?: string;
+    }>;
   } | null;
   /** Confirming scan queued by the verification. */
   scan: string | null;
@@ -2377,10 +2377,6 @@ export interface LawSiteImpact {
   site: string;
   /** What changed for the site. */
   summary: string;
-  /** Score before the change (0-100, one decimal place). */
-  score_before: number | null;
-  /** Score after re-evaluation (0-100, one decimal place). */
-  score_after: number | null;
   /** Checks whose result changed or that the change touches. */
   affected_checks: Array<{
     /** Check id. */
@@ -3222,7 +3218,7 @@ export interface SuggestionReport {
   site: string | null;
   /** Always true: suggestions are optional and never block anything. */
   optional: true;
-  /** Always false: suggestions never count for or against compliance, the score or the plan status. */
+  /** Always false: suggestions never count for or against compliance or the plan status. */
   counts_toward_compliance: false;
   /** One paragraph for an LLM or a human. */
   summary: string;
@@ -4233,8 +4229,6 @@ export interface TestRun {
   } | null;
   /** Outcome of a finished run. */
   result: {
-    /** Compliance score (0-100) of the observed steps alone. */
-    score: number | null;
     /** Counts. */
     summary: {
       /** Checks that passed. */
@@ -4405,7 +4399,7 @@ export interface Event {
   id: string;
   /** String representing the object's type. Always "event". */
   object: "event";
-  /** Event type: site.score_changed, finding.created, finding.resolved, scan.completed, scan.failed, law.changed, certificate.issued, certificate.lapsed, certificate.revoked, notice.sent, notice.due, notice.overdue, consent.created, receipt.created, test_run.completed, test_run.failed, plan.updated, site.compliant, task.verified. */
+  /** Event type: site.compliance_changed, finding.created, finding.resolved, scan.completed, scan.failed, law.changed, certificate.issued, certificate.lapsed, certificate.revoked, notice.sent, notice.due, notice.overdue, consent.created, receipt.created, test_run.completed, test_run.failed, plan.updated, site.compliant, task.verified. */
   type: string;
   /** API version used to render data.object. */
   api_version: string;
@@ -4522,11 +4516,6 @@ export interface CompliancePlanSummary {
   site: string;
   /** action_required (an agent can apply open tasks now), verifying (changes applied; waiting for confirming observations), compliant (every required check passes or only waits for a live check — an automated assessment, not a legal determination; see compliance.pending_live_checks and coverage), blocked (only human answers ("Your call") or declined critical tasks remain). */
   status: "action_required" | "verifying" | "compliant" | "blocked";
-  /**
-   * Deprecated: the legacy 0-100 score of the latest evaluation, kept populated for backward compatibility. No Checkbox surface shows it; read `compliance` (status, label, counts) and the open tasks instead.
-   * @deprecated
-   */
-  score: number | null;
   /** Two or three sentences for an LLM: where the site stands and what comes next. */
   summary: string;
   /** Tasks per status. */
@@ -5013,7 +5002,7 @@ export interface ListTestRunsParams {
 export interface CreateWebhookEndpointParams {
   /** HTTPS URL. */
   url: string;
-  /** Event types to send, or ["*"] for all: site.score_changed, finding.created, finding.resolved, scan.completed, scan.failed, law.changed, certificate.issued, certificate.lapsed, certificate.revoked, notice.sent, notice.due, notice.overdue, consent.created, receipt.created, test_run.completed, test_run.failed, plan.updated, site.compliant, task.verified. */
+  /** Event types to send, or ["*"] for all: site.compliance_changed, finding.created, finding.resolved, scan.completed, scan.failed, law.changed, certificate.issued, certificate.lapsed, certificate.revoked, notice.sent, notice.due, notice.overdue, consent.created, receipt.created, test_run.completed, test_run.failed, plan.updated, site.compliant, task.verified. */
   enabled_events: Array<string>;
   /** Description. */
   description?: string;
@@ -5035,7 +5024,7 @@ export interface ListWebhookEndpointsParams {
 export interface UpdateWebhookEndpointParams {
   /** HTTPS URL. */
   url?: string;
-  /** Event types to send, or ["*"] for all: site.score_changed, finding.created, finding.resolved, scan.completed, scan.failed, law.changed, certificate.issued, certificate.lapsed, certificate.revoked, notice.sent, notice.due, notice.overdue, consent.created, receipt.created, test_run.completed, test_run.failed, plan.updated, site.compliant, task.verified. */
+  /** Event types to send, or ["*"] for all: site.compliance_changed, finding.created, finding.resolved, scan.completed, scan.failed, law.changed, certificate.issued, certificate.lapsed, certificate.revoked, notice.sent, notice.due, notice.overdue, consent.created, receipt.created, test_run.completed, test_run.failed, plan.updated, site.compliant, task.verified. */
   enabled_events?: Array<string>;
   /** Description (null clears it). */
   description?: string | null;
@@ -5072,7 +5061,7 @@ export type PlanUpdatedEvent = Event & {
   type?: "plan.updated";
   data?: {
     object: CompliancePlanSummary;
-    /** plan.updated: the previous status and score. */
+    /** plan.updated: the previous status. */
     previous_attributes?: Record<string, unknown>;
   };
 };
@@ -5083,7 +5072,7 @@ export type TaskVerifiedEvent = Event & {
   type?: "task.verified";
   data?: {
     object: Verification;
-    /** plan.updated: the previous status and score. */
+    /** plan.updated: the previous status. */
     previous_attributes?: Record<string, unknown>;
   };
 };
@@ -5143,10 +5132,10 @@ export type TestRunFailedEvent = Event & {
   };
 };
 
-/** `site.score_changed`: A site's compliance score changed (data.previous_attributes.score has the old score). */
-export type SiteScoreChangedEvent = Event & {
+/** `site.compliance_changed`: A re-evaluation changed the site's check results; data.object is the site, with its current compliance status and label in data.object.compliance. */
+export type SiteComplianceChangedEvent = Event & {
   /** Event type. */
-  type?: "site.score_changed";
+  type?: "site.compliance_changed";
   data?: {
     object: Site;
     /** Previous values of changed fields. */
@@ -5176,7 +5165,7 @@ export type FindingResolvedEvent = Event & {
   };
 };
 
-/** `scan.completed`: A scan finished (the evaluation may follow in a separate site.score_changed event). */
+/** `scan.completed`: A scan finished (the evaluation may follow in a separate site.compliance_changed event). */
 export type ScanCompletedEvent = Event & {
   /** Event type. */
   type?: "scan.completed";
@@ -5284,7 +5273,7 @@ export type WebhookEvent =
   | ReceiptCreatedEvent
   | TestRunCompletedEvent
   | TestRunFailedEvent
-  | SiteScoreChangedEvent
+  | SiteComplianceChangedEvent
   | FindingCreatedEvent
   | FindingResolvedEvent
   | ScanCompletedEvent
@@ -5298,7 +5287,7 @@ export type WebhookEvent =
   | SiteCompliantEvent;
 
 /** Every webhook event type. */
-export const WEBHOOK_EVENT_TYPES = ["plan.updated","task.verified","notice.due","notice.overdue","receipt.created","test_run.completed","test_run.failed","site.score_changed","finding.created","finding.resolved","scan.completed","scan.failed","law.changed","certificate.issued","certificate.lapsed","certificate.revoked","notice.sent","consent.created","site.compliant"] as const;
+export const WEBHOOK_EVENT_TYPES = ["plan.updated","task.verified","notice.due","notice.overdue","receipt.created","test_run.completed","test_run.failed","site.compliance_changed","finding.created","finding.resolved","scan.completed","scan.failed","law.changed","certificate.issued","certificate.lapsed","certificate.revoked","notice.sent","consent.created","site.compliant"] as const;
 export type WebhookEventType = (typeof WEBHOOK_EVENT_TYPES)[number];
 
 // ---- Errors ----------------------------------------------------------------------------------------------------
