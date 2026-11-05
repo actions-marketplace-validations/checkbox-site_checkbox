@@ -5,7 +5,7 @@ import { z, type ZodRawShape } from 'zod';
 import type { ToolAnnotations } from '@modelcontextprotocol/sdk/types.js';
 import { planTodo, todoLine, type TodoTaskLike } from './todo.ts';
 import { CheckboxApiError, type CheckboxApi, type NextAction } from './api.ts';
-import { nextActionOf, untrusted, type ToolOutput } from './format.ts';
+import { ciHint, nextActionOf, untrusted, type ToolOutput } from './format.ts';
 import { keyAllows, type KeyContext, type ToolScope } from './permissions.ts';
 
 export interface IssuedKeys {
@@ -281,6 +281,9 @@ function checkNotes(r: CheckSummary, max = 8, covered?: { by: string; except?: r
   const notes = lines.slice(0, max).map((x) => x.line);
   if (lines.length > max) notes.push(`…and ${lines.length - max} more (see checks in the JSON).`);
   for (const w of r.warnings ?? []) notes.push(`Warning ${w.code}: ${w.message}`);
+  // A pass, or a needs_review whose roll-up is compliant (e.g. Stripe's own styling of custom_text, shown as a note).
+  const ci = ciHint(r.verdict === 'pass' || ['compliant', 'pending_live_check', 'verified_live'].includes(r.compliance?.status ?? ''));
+  if (ci) notes.push(ci);
   return notes;
 }
 

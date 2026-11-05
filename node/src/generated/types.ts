@@ -4010,7 +4010,7 @@ export interface ReceiptSettings {
   livemode: boolean;
   /** Receipts are collected. Off by default: turn on after adding the receipts paragraph to your privacy policy (browser receipts answer 403 receipts_disabled when off; Elements consents are recorded without a receipt). */
   enabled: boolean;
-  /** Days a receipt is kept (default 1461 = 4 years: the California Unfair Competition Law limitation period; pending attorney review). */
+  /** Days a receipt is kept (default 1461 = 4 years: the California Unfair Competition Law limitation period; adjust to your counsel's advice). */
   retention_days: number;
   /** Last change. Unix timestamp in seconds. */
   updated: number | null;

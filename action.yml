@@ -1,0 +1,67 @@
+# Checkbox GitHub Action: runs `checkbox ci` (npm package @checkbox-site/cli) on every pull request. It checks the files
+# listed in checkbox.json (Stripe Checkout params, disclosure text, checkout / pricing pages, lifecycle emails, the
+# notice schedule) against automatic-renewal laws, annotates the lines that need a fix and writes a job summary with
+# the corrected params / text. Offline by default: no API key, nothing leaves the runner.
+#
+#   - uses: actions/checkout@v4
+#   - uses: checkbox-site/checkbox@v1
+#
+# Docs: https://checkbox.site/docs/guides/ci
+name: Checkbox compliance checks
+description: Check subscription checkouts, disclosures, pages and emails against auto-renewal laws (ROSCA, CA, NY) on every pull request.
+author: Checkbox
+branding:
+  icon: check-square
+  color: green
+
+inputs:
+  config:
+    description: Path to checkbox.json, relative to working-directory.
+    required: false
+    default: checkbox.json
+  strict:
+    description: Also fail when a check needs review ("true" or "false").
+    required: false
+    default: "false"
+  working-directory:
+    description: Directory to run in (the project root that holds checkbox.json).
+    required: false
+    default: "."
+  args:
+    description: More arguments for `checkbox ci`, e.g. "--online" (with the CHECKBOX_SECRET_KEY env) or "--changed-only".
+    required: false
+    default: ""
+  version:
+    description: Version of @checkbox-site/cli to run.
+    required: false
+    default: "0.2.0"
+  node-version:
+    description: Node.js version (22+ runs TypeScript "module" entries without tsx).
+    required: false
+    default: "22"
+
+outputs:
+  status:
+    description: pass, fail, needs_review, error or skipped.
+    value: ${{ steps.checkbox.outputs.status }}
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v4
+      with:
+        node-version: ${{ inputs.node-version }}
+    - id: checkbox
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        CHECKBOX_CONFIG_FILE: ${{ inputs.config }}
+        CHECKBOX_STRICT: ${{ inputs.strict }}
+        CHECKBOX_ARGS: ${{ inputs.args }}
+        CHECKBOX_CLI_VERSION: ${{ inputs.version }}
+      run: |
+        args=(ci --config "$CHECKBOX_CONFIG_FILE")
+        if [ "$CHECKBOX_STRICT" = "true" ]; then args+=(--strict); fi
+        # shellcheck disable=SC2206 # word-splitting the extra arguments is intended
+        extra=($CHECKBOX_ARGS)
+        npx --yes "@checkbox-site/cli@${CHECKBOX_CLI_VERSION}" "${args[@]}" "${extra[@]}"

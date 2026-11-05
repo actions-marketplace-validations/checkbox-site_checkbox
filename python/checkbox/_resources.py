@@ -2751,7 +2751,7 @@ class ReceiptsResource(Resource):
     def erase(self, params: Optional["types.ReceiptErasureParams"] = None, /, *, request_options: Optional[RequestOptions] = None, **kwargs: Any) -> "types.ReceiptErasure":
         """Erase a subscriber's receipts.
 
-        For a subscriber's deletion request: deletes every receipt that matches customer_reference, email (hashed before the lookup) or checkout_session (optionally only for one site). The signed copy in the write-once evidence vault is kept but holds only a salted commitment to the subscriber's identifiers; erasing destroys the salt, so it can no longer be tied to the person. Pending attorney review.
+        For a subscriber's deletion request: deletes every receipt that matches customer_reference, email (hashed before the lookup) or checkout_session (optionally only for one site). The signed copy in the write-once evidence vault is kept but holds only a salted commitment to the subscriber's identifiers; erasing destroys the salt, so it can no longer be tied to the person. Ask your counsel whether this meets a deletion request in your jurisdiction.
 
         Parameters can be given as a dict (positional) or as keyword arguments.
 
@@ -2811,7 +2811,7 @@ class ReceiptSettingsResource(Resource):
     def update(self, params: Optional["types.ReceiptSettingsUpdateParams"] = None, /, *, request_options: Optional[RequestOptions] = None, **kwargs: Any) -> "types.ReceiptSettings":
         """Update receipt settings.
 
-        Turn receipts on or off and set the retention in days (default 1461 = 4 years, the California UCL limitation period; pending attorney review). A new retention applies to receipts recorded afterwards.
+        Turn receipts on or off and set the retention in days (default 1461 = 4 years: the California Unfair Competition Law limitation period; adjust to your counsel's advice). A new retention applies to receipts recorded afterwards.
 
         Parameters can be given as a dict (positional) or as keyword arguments.
 

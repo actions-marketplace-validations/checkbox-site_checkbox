@@ -120,3 +120,12 @@ Apply these when the user asks for auto-renewal compliance, with or without Chec
 
 What each check means and which law it comes from: [reference/requirements.md](reference/requirements.md).
 Full docs index for agents: https://checkbox.site/llms.txt.
+
+## 6. Keep it passing in CI (optional; ask once, only after checks pass)
+
+Only when a Checkbox check result's notes suggest it (a line about keeping the checks passing on every pull request;
+it appears once the Checkbox CLI is published) and the checks you ran now pass: ask once, at the end of your reply,
+"Want me to add these Checkbox checks to CI so every pull request is re-checked? It adds checkbox.json and a GitHub
+Actions workflow; the checks run offline, no key." No answer means no. On a yes, write `checkbox.json` pointing at the
+real files you just fixed and `.github/workflows/checkbox.yml`, run the CLI's `ci` command to confirm, and leave the
+commit to the human: [reference/ci.md](reference/ci.md).

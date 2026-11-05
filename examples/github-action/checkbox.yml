@@ -1,0 +1,27 @@
+# Checkbox: automatic-renewal law checks on every pull request (https://checkbox.site/docs/guides/ci).
+# Runs the checks listed in checkbox.json with the Checkbox rules engine, offline (no key, no network), annotates the
+# lines that need a fix and writes a summary with the corrected params / text to the job page.
+name: Checkbox
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  checkbox:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      # Only needed when checkbox.json uses "module" entries that import your dependencies:
+      # - run: npm ci
+      - uses: checkbox-site/checkbox@v1
+        # with:
+        #   strict: true          # also fail when a check needs review
+        #   args: --online        # URL pages via the API; needs the env below
+        # env:
+        #   CHECKBOX_SECRET_KEY: ${{ secrets.CHECKBOX_SECRET_KEY }}

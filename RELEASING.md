@@ -25,6 +25,19 @@ PyPI. Versions already on a registry are skipped, so a failed run can be re-run.
    git push origin v0.1.1
    ```
 
+## GitHub Action
+
+[`action.yml`](action.yml) runs the published CLI (`npx @checkbox-site/cli@<version input> ci`); the CLI itself is
+built and published from Checkbox's main codebase. Users pin the moving major tag `v1`, which never triggers the
+release workflow (it only runs on full versions, `v*.*.*`):
+
+```sh
+git tag -f v1 && git push -f origin v1
+```
+
+Publish the CLI version named in `action.yml` before moving `v1`. Marketplace: draft a release from the `v1` tag and
+tick "Publish this Action to the GitHub Marketplace" (category Continuous integration).
+
 ## One-time setup
 
 ### npm

@@ -18876,7 +18876,7 @@
           },
           "retention_days": {
             "type": "integer",
-            "description": "Days a receipt is kept (default 1461 = 4 years: the California Unfair Competition Law limitation period; pending attorney review).",
+            "description": "Days a receipt is kept (default 1461 = 4 years: the California Unfair Competition Law limitation period; adjust to your counsel's advice).",
             "example": 1461
           },
           "updated": {
@@ -28577,7 +28577,7 @@
       "post": {
         "operationId": "eraseReceipts",
         "summary": "Erase a subscriber's receipts",
-        "description": "For a subscriber's deletion request: deletes every receipt that matches customer_reference, email (hashed before the lookup) or checkout_session (optionally only for one site). The signed copy in the write-once evidence vault is kept but holds only a salted commitment to the subscriber's identifiers; erasing destroys the salt, so it can no longer be tied to the person. Pending attorney review.",
+        "description": "For a subscriber's deletion request: deletes every receipt that matches customer_reference, email (hashed before the lookup) or checkout_session (optionally only for one site). The signed copy in the write-once evidence vault is kept but holds only a salted commitment to the subscriber's identifiers; erasing destroys the salt, so it can no longer be tied to the person. Ask your counsel whether this meets a deletion request in your jurisdiction.",
         "tags": [
           "Receipts"
         ],
@@ -29022,7 +29022,7 @@
       "post": {
         "operationId": "updateReceiptSettings",
         "summary": "Update receipt settings",
-        "description": "Turn receipts on or off and set the retention in days (default 1461 = 4 years, the California UCL limitation period; pending attorney review). A new retention applies to receipts recorded afterwards.",
+        "description": "Turn receipts on or off and set the retention in days (default 1461 = 4 years: the California Unfair Competition Law limitation period; adjust to your counsel's advice). A new retention applies to receipts recorded afterwards.",
         "tags": [
           "Receipts"
         ],

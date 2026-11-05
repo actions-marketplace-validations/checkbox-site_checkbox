@@ -56,7 +56,7 @@ the next tool to call.
 
 ## Not legal advice
 
-Checkbox output is an automated assessment against a legal catalog pending attorney review; it is not legal advice.
+Rules drafted from the statute text and updated as new statutes come into effect. Automated checks, not legal advice. Every rule cites its source, so you or your lawyer can check it.
 
 ## License
 

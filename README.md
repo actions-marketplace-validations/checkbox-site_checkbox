@@ -11,8 +11,8 @@ and returns the exact change to make. Free to start. Checkbox is a System1 compa
 - Open dataset of the laws: https://github.com/checkbox-site/auto-renewal-laws
 - Starter apps: https://github.com/checkbox-site/templates
 
-Checkbox output is an automated assessment, not legal advice. Its rules are drafted from primary sources and are
-pending attorney review.
+Rules drafted from the statute text and updated as new statutes come into effect. Automated checks, not legal advice.
+Every rule cites its source, so you or your lawyer can check it.
 
 ## Use it from your coding assistant
 
@@ -30,6 +30,26 @@ What they do: when you build or change a subscription, a free trial, Stripe Chec
 page or a cancel flow, the assistant asks **once** whether you want it made compliant with US auto-renewal laws. If
 you say no, it does not ask again or add anything. If you say yes, it connects Checkbox (one browser approval, free
 account), checks your Stripe params, disclosure and emails, and applies the fixes.
+
+## GitHub Action: compliance checks on every pull request
+
+Describe what to check in `checkbox.json` (the merchant, your plans, and the files that produce the Stripe Checkout
+params, the disclosure, checkout / pricing pages and lifecycle emails), then add the Action. It runs the Checkbox
+rules engine offline (no API key, nothing leaves the runner), annotates the lines that need a fix and writes a job
+summary with the corrected params / text. [`action.yml`](action.yml) ·
+[example workflow](examples/github-action/checkbox.yml) · CLI: [`@checkbox-site/cli`](cli) · Docs:
+https://checkbox.site/docs/guides/ci
+
+```yaml
+steps:
+  - uses: actions/checkout@v4
+  - uses: checkbox-site/checkbox@v1
+    # with: { strict: true, config: checkbox.json, working-directory: ., args: --changed-only }
+```
+
+`npx @checkbox-site/cli ci init --yes` writes a first `checkbox.json` and the workflow from your project. Inputs:
+`config` (default `checkbox.json`), `strict` (`false`), `working-directory` (`.`), `args`, `version` (the CLI version),
+`node-version` (`22`). Output: `status` (`pass`, `fail`, `needs_review`, `error`, `skipped`).
 
 ## MCP server
 
@@ -52,7 +72,8 @@ projects.
 ## Repository layout
 
 This repository mirrors the public parts of Checkbox's main codebase and is updated with each release: `node/`,
-`mcp/` (npm workspaces), `python/`, `openapi/`, `integrations/`, `plugins/` and `mcp-registry/`. Releases are
+`mcp/` (npm workspaces), `python/`, `openapi/`, `integrations/`, `plugins/`, `mcp-registry/`, the GitHub Action
+(`action.yml`) and the CLI's README (`cli/`; the CLI is built and published from the main codebase). Releases are
 published from tags by GitHub Actions ([RELEASING.md](RELEASING.md)). Issues and pull requests are welcome: see
 [CONTRIBUTING.md](CONTRIBUTING.md).
 

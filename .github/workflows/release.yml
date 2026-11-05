@@ -8,7 +8,8 @@ name: Release
 
 on:
   push:
-    tags: ['v*']
+    # Full versions only: the GitHub Action's moving major tag (v1) must not publish the packages.
+    tags: ['v*.*.*']
   workflow_dispatch:
 
 permissions:

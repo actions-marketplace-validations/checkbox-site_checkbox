@@ -106,6 +106,18 @@ export function untrusted(value: unknown, max = 80): string {
  */
 export const CLI_PUBLISHED = false;
 
+/** Docs for `checkbox ci` / the GitHub Action (checkbox.json + .github/workflows/checkbox.yml). */
+export const CI_DOCS_URL = 'https://checkbox.site/docs/guides/ci';
+
+/**
+ * After a check passes, one line offering to keep it passing in CI. The Action runs the published CLI, so this stays
+ * off until CLI_PUBLISHED is true (`published` is for tests).
+ */
+export function ciHint(passing: boolean, published: boolean = CLI_PUBLISHED): string | null {
+  if (!published || !passing) return null;
+  return `Optional, ask the human once: keep these checks passing on every pull request. With a yes, write checkbox.json listing the files you just checked (Stripe params via "source" or "module", disclosure / email template files, the plans) and .github/workflows/checkbox.yml (uses: checkbox-site/checkbox@v1; offline, no key), then run \`npx @checkbox-site/cli ci\` to confirm. \`npx @checkbox-site/cli ci init --yes\` drafts both. ${CI_DOCS_URL}`;
+}
+
 /** REST paths of the preflight checks → their MCP tools (for text written for API users). */
 const CHECK_PATH_TOOLS: Record<string, string> = {
   disclosure: 'check_disclosure',
