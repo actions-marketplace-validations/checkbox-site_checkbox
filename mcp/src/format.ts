@@ -104,7 +104,7 @@ export function untrusted(value: unknown, max = 80): string {
  * Audit P1: the `checkbox` CLI is not on npm yet. While this is false, MCP output never shows `command` fields or a
  * "CLI equivalent"; flip it once the CLI is published.
  */
-export const CLI_PUBLISHED = false;
+export const CLI_PUBLISHED = true;
 
 /** Docs for `checkbox ci` / the GitHub Action (checkbox.json + .github/workflows/checkbox.yml). */
 export const CI_DOCS_URL = 'https://checkbox.site/docs/guides/ci';
