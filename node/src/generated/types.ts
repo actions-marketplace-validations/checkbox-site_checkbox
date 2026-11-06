@@ -603,9 +603,9 @@ export interface SetupVerification {
 
 /** Account default retention (sites without their own setting use it). */
 export interface Retention {
-  /** Years good-practice records are kept (consent receipts, disclosures as shown, passing scans, certificates, compliant emails, confirmed cancellations, evidence-chain entries). Default 7. */
+  /** Years records are kept (consent receipts, disclosures as shown, passing check results, certificates, emails sent, confirmed cancellations, evidence-chain entries). Default 7. */
   good_practice_years: number;
-  /** Days after a problem is resolved before its history is deleted (resolved findings, captures of the failing page, fix history); only aggregate counts stay. Open problems are never deleted. Default 30. */
+  /** Days superseded check results are kept after a later check replaces them (with their page captures and change history); only summary counts stay. Current results are not deleted. Default 30. */
   problem_history_days: number;
 }
 
@@ -680,7 +680,7 @@ export interface Account {
   next_action: NextAction | null;
 }
 
-/** Default retention for every site without its own setting. Problem history also shows how fast you fixed things; keep it longer if you want that record. */
+/** Default retention for every site without its own setting. A longer period for superseded check results keeps a fuller timeline of changes to your site. */
 export interface RetentionParams {
   /** Years (1-10). On a site, null returns to the account default. */
   good_practice_years?: number | null;

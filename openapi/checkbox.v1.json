@@ -2476,12 +2476,12 @@
         "properties": {
           "good_practice_years": {
             "type": "integer",
-            "description": "Years good-practice records are kept (consent receipts, disclosures as shown, passing scans, certificates, compliant emails, confirmed cancellations, evidence-chain entries). Default 7.",
+            "description": "Years records are kept (consent receipts, disclosures as shown, passing check results, certificates, emails sent, confirmed cancellations, evidence-chain entries). Default 7.",
             "example": 7
           },
           "problem_history_days": {
             "type": "integer",
-            "description": "Days after a problem is resolved before its history is deleted (resolved findings, captures of the failing page, fix history); only aggregate counts stay. Open problems are never deleted. Default 30.",
+            "description": "Days superseded check results are kept after a later check replaces them (with their page captures and change history); only summary counts stay. Current results are not deleted. Default 30.",
             "example": 30
           }
         },
@@ -2823,7 +2823,7 @@
             "example": 30
           }
         },
-        "description": "Default retention for every site without its own setting. Problem history also shows how fast you fixed things; keep it longer if you want that record."
+        "description": "Default retention for every site without its own setting. A longer period for superseded check results keeps a fuller timeline of changes to your site."
       },
       "LegalHoldParams": {
         "type": "object",
@@ -5270,7 +5270,7 @@
                 "$ref": "#/components/schemas/RetentionParams"
               },
               {
-                "description": "Retention for this site (admin key; null values return to the account default). Problem history also shows how fast you fixed things; keep it longer if you want that record."
+                "description": "Retention for this site (admin key; null values return to the account default). A longer period for superseded check results keeps a fuller timeline of changes to your site."
               }
             ],
             "example": {
