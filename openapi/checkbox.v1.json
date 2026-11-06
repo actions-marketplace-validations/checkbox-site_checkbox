@@ -2474,18 +2474,32 @@
       "Retention": {
         "type": "object",
         "properties": {
-          "good_practice_years": {
+          "records_years": {
             "type": "integer",
             "description": "Years records are kept (consent receipts, disclosures as shown, passing check results, certificates, emails sent, confirmed cancellations, evidence-chain entries). Default 7.",
             "example": 7
           },
-          "problem_history_days": {
+          "superseded_results_days": {
             "type": "integer",
             "description": "Days superseded check results are kept after a later check replaces them (with their page captures and change history); only summary counts stay. Current results are not deleted. Default 30.",
             "example": 30
+          },
+          "good_practice_years": {
+            "type": "integer",
+            "description": "Deprecated: same as records_years.",
+            "example": 7,
+            "deprecated": true
+          },
+          "problem_history_days": {
+            "type": "integer",
+            "description": "Deprecated: same as superseded_results_days.",
+            "example": 30,
+            "deprecated": true
           }
         },
         "required": [
+          "records_years",
+          "superseded_results_days",
           "good_practice_years",
           "problem_history_days"
         ],
@@ -2802,6 +2816,26 @@
       "RetentionParams": {
         "type": "object",
         "properties": {
+          "records_years": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1,
+            "maximum": 10,
+            "description": "Years records are kept (1-10). On a site, null returns to the account default.",
+            "example": 7
+          },
+          "superseded_results_days": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 7,
+            "maximum": 730,
+            "description": "Days superseded check results are kept (7-730). On a site, null returns to the account default.",
+            "example": 30
+          },
           "good_practice_years": {
             "type": [
               "integer",
@@ -2809,8 +2843,9 @@
             ],
             "minimum": 1,
             "maximum": 10,
-            "description": "Years (1-10). On a site, null returns to the account default.",
-            "example": 7
+            "description": "Deprecated: use records_years.",
+            "example": 7,
+            "deprecated": true
           },
           "problem_history_days": {
             "type": [
@@ -2819,8 +2854,9 @@
             ],
             "minimum": 7,
             "maximum": 730,
-            "description": "Days (7-730). On a site, null returns to the account default.",
-            "example": 30
+            "description": "Deprecated: use superseded_results_days.",
+            "example": 30,
+            "deprecated": true
           }
         },
         "description": "Default retention for every site without its own setting. A longer period for superseded check results keeps a fuller timeline of changes to your site."
@@ -4331,6 +4367,8 @@
                 },
                 "protection_level": "balanced",
                 "retention": {
+                  "records_years": 7,
+                  "superseded_results_days": 30,
                   "good_practice_years": 7,
                   "problem_history_days": 30
                 },
@@ -5274,6 +5312,8 @@
               }
             ],
             "example": {
+              "records_years": 7,
+              "superseded_results_days": 30,
               "good_practice_years": 7,
               "problem_history_days": 30
             }
@@ -32502,6 +32542,8 @@
                             },
                             "protection_level": "balanced",
                             "retention": {
+                              "records_years": 7,
+                              "superseded_results_days": 30,
                               "good_practice_years": 7,
                               "problem_history_days": 30
                             },
@@ -33846,6 +33888,8 @@
                             },
                             "protection_level": "balanced",
                             "retention": {
+                              "records_years": 7,
+                              "superseded_results_days": 30,
                               "good_practice_years": 7,
                               "problem_history_days": 30
                             },

@@ -604,8 +604,18 @@ export interface SetupVerification {
 /** Account default retention (sites without their own setting use it). */
 export interface Retention {
   /** Years records are kept (consent receipts, disclosures as shown, passing check results, certificates, emails sent, confirmed cancellations, evidence-chain entries). Default 7. */
-  good_practice_years: number;
+  records_years: number;
   /** Days superseded check results are kept after a later check replaces them (with their page captures and change history); only summary counts stay. Current results are not deleted. Default 30. */
+  superseded_results_days: number;
+  /**
+   * Deprecated: same as records_years.
+   * @deprecated
+   */
+  good_practice_years: number;
+  /**
+   * Deprecated: same as superseded_results_days.
+   * @deprecated
+   */
   problem_history_days: number;
 }
 
@@ -682,9 +692,19 @@ export interface Account {
 
 /** Default retention for every site without its own setting. A longer period for superseded check results keeps a fuller timeline of changes to your site. */
 export interface RetentionParams {
-  /** Years (1-10). On a site, null returns to the account default. */
+  /** Years records are kept (1-10). On a site, null returns to the account default. */
+  records_years?: number | null;
+  /** Days superseded check results are kept (7-730). On a site, null returns to the account default. */
+  superseded_results_days?: number | null;
+  /**
+   * Deprecated: use records_years.
+   * @deprecated
+   */
   good_practice_years?: number | null;
-  /** Days (7-730). On a site, null returns to the account default. */
+  /**
+   * Deprecated: use superseded_results_days.
+   * @deprecated
+   */
   problem_history_days?: number | null;
 }
 

@@ -891,8 +891,12 @@ Retention = TypedDict(
     "Retention",
     {
         #: Years records are kept (consent receipts, disclosures as shown, passing check results, certificates, emails sent, confirmed cancellations, evidence-chain entries). Default 7.
-        "good_practice_years": int,
+        "records_years": int,
         #: Days superseded check results are kept after a later check replaces them (with their page captures and change history); only summary counts stay. Current results are not deleted. Default 30.
+        "superseded_results_days": int,
+        #: Deprecated: same as records_years.
+        "good_practice_years": int,
+        #: Deprecated: same as superseded_results_days.
         "problem_history_days": int,
     },
     total=False,
@@ -1016,9 +1020,13 @@ Account = TypedDict(
 RetentionParams = TypedDict(
     "RetentionParams",
     {
-        #: Years (1-10). On a site, null returns to the account default. (optional)
+        #: Years records are kept (1-10). On a site, null returns to the account default. (optional)
+        "records_years": Optional[int],
+        #: Days superseded check results are kept (7-730). On a site, null returns to the account default. (optional)
+        "superseded_results_days": Optional[int],
+        #: Deprecated: use records_years. (optional)
         "good_practice_years": Optional[int],
-        #: Days (7-730). On a site, null returns to the account default. (optional)
+        #: Deprecated: use superseded_results_days. (optional)
         "problem_history_days": Optional[int],
     },
     total=False,
@@ -1093,8 +1101,12 @@ SiteRetention = TypedDict(
     "SiteRetention",
     {
         #: Years records are kept (consent receipts, disclosures as shown, passing check results, certificates, emails sent, confirmed cancellations, evidence-chain entries). Default 7.
-        "good_practice_years": int,
+        "records_years": int,
         #: Days superseded check results are kept after a later check replaces them (with their page captures and change history); only summary counts stay. Current results are not deleted. Default 30.
+        "superseded_results_days": int,
+        #: Deprecated: same as records_years.
+        "good_practice_years": int,
+        #: Deprecated: same as superseded_results_days.
         "problem_history_days": int,
         #: Both values come from the account default (no site override).
         "inherited": bool,
