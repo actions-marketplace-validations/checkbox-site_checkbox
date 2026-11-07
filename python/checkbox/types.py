@@ -1775,7 +1775,7 @@ UpdateSiteParams = TypedDict(
 )
 
 
-#: Chargebee only: the webhook to add by hand in Chargebee (Settings › Configure Chargebee › API Keys and Webhooks › Webhooks). Null for platforms whose webhook Checkbox registers itself.
+#: Chargebee and Recurly: the webhook to add by hand (Chargebee: Settings › Configure Chargebee › API Keys and Webhooks › Webhooks; Recurly: Integrations › Webhooks). Null for platforms whose webhook Checkbox registers itself.
 IntegrationWebhookSetup = TypedDict(
     "IntegrationWebhookSetup",
     {
@@ -1791,6 +1791,10 @@ IntegrationWebhookSetup = TypedDict(
         "events": List[str],
         #: Webhook API version to choose.
         "api_version": Optional[str],
+        #: Payload format to choose on the endpoint (Recurly: JSON). Null when the platform has no choice.
+        "payload_format": Optional[Literal["json"]],
+        #: Recurly: whether the endpoint’s secret key is saved in Checkbox (dashboard › Billing connection › Recurly webhook), so every delivery’s signature is checked too. Null for platforms without signatures.
+        "signing_key_configured": Optional[bool],
     },
     total=False,
 )
@@ -1814,7 +1818,7 @@ Integration = TypedDict(
         "last_synced": Optional[int],
         #: A problem worth fixing, e.g. a test-mode key on a live site.
         "warning": Optional[str],
-        #: Chargebee only: the webhook to add by hand in Chargebee (Settings › Configure Chargebee › API Keys and Webhooks › Webhooks). Null for platforms whose webhook Checkbox registers itself.
+        #: Chargebee and Recurly: the webhook to add by hand (Chargebee: Settings › Configure Chargebee › API Keys and Webhooks › Webhooks; Recurly: Integrations › Webhooks). Null for platforms whose webhook Checkbox registers itself.
         "webhook_setup": Optional["IntegrationWebhookSetup"],
     },
     total=False,
@@ -1825,8 +1829,8 @@ ConnectBillingPlatformParams = TypedDict(
     "ConnectBillingPlatformParams",
     {
         #: Billing platform.
-        "platform": Literal["stripe", "recharge", "shopify", "chargebee"],
-        #: Read-only credentials. Stripe: { "secretKey": "rk_test_…" } (a restricted key with read access; rk_test_ in test mode). Recharge: { "apiToken": "…" }. Shopify: { "shop": "store.myshopify.com", "accessToken": "shpat_…" }. Chargebee: { "site": "acme", "apiKey": "live_…" } (the site name before .chargebee.com and a read-only API key).
+        "platform": Literal["stripe", "recharge", "shopify", "chargebee", "recurly"],
+        #: Read-only credentials. Stripe: { "secretKey": "rk_test_…" } (a restricted key with read access; rk_test_ in test mode). Recharge: { "apiToken": "…" }. Shopify: { "shop": "store.myshopify.com", "accessToken": "shpat_…" }. Chargebee: { "site": "acme", "apiKey": "live_…" } (the site name before .chargebee.com and a read-only API key). Recurly: { "apiKey": "…", "region": "us" } (a private API key of the site; region "eu" for sites hosted in Recurly’s EU data centre, default "us"). Checkbox only reads.
         "credentials": Dict[str, str],
     },
     total=False,
@@ -3218,7 +3222,7 @@ UpdateNoticeSettingsParams = TypedDict(
     {
         #: merchant: you send the emails (Checkbox tracks them); checkbox: Checkbox sends them. Turning an enabled_kinds notice on implies checkbox. (optional)
         "mode": Literal["merchant", "checkbox"],
-        #: Notices to send (turning one on needs cancel_url, a confirmed policy and a connected Stripe, Recharge or Chargebee account). trial_reminder is accepted as an alias of trial_ending. (optional)
+        #: Notices to send (turning one on needs cancel_url, a confirmed policy and a connected Stripe, Recharge, Chargebee or Recurly account). trial_reminder is accepted as an alias of trial_ending. (optional)
         "enabled_kinds": List[Literal["acknowledgment", "trial_ending", "renewal_reminder", "annual_terms", "price_change", "cancellation_confirmation", "charge_notice", "trial_reminder"]],
         #: Brand name. (optional)
         "brand_name": Optional[str],

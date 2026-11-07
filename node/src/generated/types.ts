@@ -1211,7 +1211,7 @@ export interface Integration {
   last_synced: number | null;
   /** A problem worth fixing, e.g. a test-mode key on a live site. */
   warning: string | null;
-  /** Chargebee only: the webhook to add by hand in Chargebee (Settings › Configure Chargebee › API Keys and Webhooks › Webhooks). Null for platforms whose webhook Checkbox registers itself. */
+  /** Chargebee and Recurly: the webhook to add by hand (Chargebee: Settings › Configure Chargebee › API Keys and Webhooks › Webhooks; Recurly: Integrations › Webhooks). Null for platforms whose webhook Checkbox registers itself. */
   webhook_setup: {
     /** Webhook URL to add in the platform. */
     url: string;
@@ -1225,13 +1225,17 @@ export interface Integration {
     events: Array<string>;
     /** Webhook API version to choose. */
     api_version: string | null;
+    /** Payload format to choose on the endpoint (Recurly: JSON). Null when the platform has no choice. */
+    payload_format: "json" | null;
+    /** Recurly: whether the endpoint’s secret key is saved in Checkbox (dashboard › Billing connection › Recurly webhook), so every delivery’s signature is checked too. Null for platforms without signatures. */
+    signing_key_configured: boolean | null;
   } | null;
 }
 
 export interface ConnectBillingPlatformParams {
   /** Billing platform. */
-  platform: "stripe" | "recharge" | "shopify" | "chargebee";
-  /** Read-only credentials. Stripe: { "secretKey": "rk_test_…" } (a restricted key with read access; rk_test_ in test mode). Recharge: { "apiToken": "…" }. Shopify: { "shop": "store.myshopify.com", "accessToken": "shpat_…" }. Chargebee: { "site": "acme", "apiKey": "live_…" } (the site name before .chargebee.com and a read-only API key). */
+  platform: "stripe" | "recharge" | "shopify" | "chargebee" | "recurly";
+  /** Read-only credentials. Stripe: { "secretKey": "rk_test_…" } (a restricted key with read access; rk_test_ in test mode). Recharge: { "apiToken": "…" }. Shopify: { "shop": "store.myshopify.com", "accessToken": "shpat_…" }. Chargebee: { "site": "acme", "apiKey": "live_…" } (the site name before .chargebee.com and a read-only API key). Recurly: { "apiKey": "…", "region": "us" } (a private API key of the site; region "eu" for sites hosted in Recurly’s EU data centre, default "us"). Checkbox only reads. */
   credentials: Record<string, string>;
 }
 
@@ -2202,7 +2206,7 @@ export interface NoticeSettings {
 export interface UpdateNoticeSettingsParams {
   /** merchant: you send the emails (Checkbox tracks them); checkbox: Checkbox sends them. Turning an enabled_kinds notice on implies checkbox. */
   mode?: "merchant" | "checkbox";
-  /** Notices to send (turning one on needs cancel_url, a confirmed policy and a connected Stripe, Recharge or Chargebee account). trial_reminder is accepted as an alias of trial_ending. */
+  /** Notices to send (turning one on needs cancel_url, a confirmed policy and a connected Stripe, Recharge, Chargebee or Recurly account). trial_reminder is accepted as an alias of trial_ending. */
   enabled_kinds?: Array<"acknowledgment" | "trial_ending" | "renewal_reminder" | "annual_terms" | "price_change" | "cancellation_confirmation" | "charge_notice" | "trial_reminder">;
   /** Brand name. */
   brand_name?: string | null;
