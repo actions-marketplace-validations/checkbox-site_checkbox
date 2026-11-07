@@ -3685,9 +3685,10 @@
               "dns_txt",
               "well_known",
               "snippet",
-              "meta_tag"
+              "meta_tag",
+              "shopify_install"
             ],
-            "description": "How control was proven: dns_txt, well_known, snippet (the site's Checkbox snippet live on https://<domain>/) or meta_tag (<meta name=\"checkbox-verify\"> on https://<domain>/).",
+            "description": "How control was proven: dns_txt, well_known, snippet (the site's Checkbox snippet live on https://<domain>/), meta_tag (<meta name=\"checkbox-verify\"> on https://<domain>/) or shopify_install (the domain is the primary domain of a Shopify store that installed the Checkbox app and is connected to this site).",
             "example": null
           },
           "verified_at": {

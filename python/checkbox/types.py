@@ -1399,8 +1399,8 @@ DomainVerification = TypedDict(
         "domain": Optional[str],
         #: not_started until createDomainVerification; verified once the TXT record, the file, the live snippet or the meta tag was found.
         "status": Literal["not_started", "pending", "verified"],
-        #: How control was proven: dns_txt, well_known, snippet (the site's Checkbox snippet live on https://<domain>/) or meta_tag (<meta name="checkbox-verify"> on https://<domain>/).
-        "method": Optional[Literal["dns_txt", "well_known", "snippet", "meta_tag"]],
+        #: How control was proven: dns_txt, well_known, snippet (the site's Checkbox snippet live on https://<domain>/), meta_tag (<meta name="checkbox-verify"> on https://<domain>/) or shopify_install (the domain is the primary domain of a Shopify store that installed the Checkbox app and is connected to this site).
+        "method": Optional[Literal["dns_txt", "well_known", "snippet", "meta_tag", "shopify_install"]],
         #: When it was verified. Unix timestamp in seconds.
         "verified_at": Optional[int],
         #: Last check. Unix timestamp in seconds.
@@ -7540,8 +7540,8 @@ RetrieveDomainVerificationResponse = TypedDict(
         "domain": Optional[str],
         #: not_started until createDomainVerification; verified once the TXT record, the file, the live snippet or the meta tag was found.
         "status": Literal["not_started", "pending", "verified"],
-        #: How control was proven: dns_txt, well_known, snippet (the site's Checkbox snippet live on https://<domain>/) or meta_tag (<meta name="checkbox-verify"> on https://<domain>/).
-        "method": Optional[Literal["dns_txt", "well_known", "snippet", "meta_tag"]],
+        #: How control was proven: dns_txt, well_known, snippet (the site's Checkbox snippet live on https://<domain>/), meta_tag (<meta name="checkbox-verify"> on https://<domain>/) or shopify_install (the domain is the primary domain of a Shopify store that installed the Checkbox app and is connected to this site).
+        "method": Optional[Literal["dns_txt", "well_known", "snippet", "meta_tag", "shopify_install"]],
         #: When it was verified. Unix timestamp in seconds.
         "verified_at": Optional[int],
         #: Last check. Unix timestamp in seconds.
@@ -7639,8 +7639,8 @@ CreateDomainVerificationResponse = TypedDict(
         "domain": Optional[str],
         #: not_started until createDomainVerification; verified once the TXT record, the file, the live snippet or the meta tag was found.
         "status": Literal["not_started", "pending", "verified"],
-        #: How control was proven: dns_txt, well_known, snippet (the site's Checkbox snippet live on https://<domain>/) or meta_tag (<meta name="checkbox-verify"> on https://<domain>/).
-        "method": Optional[Literal["dns_txt", "well_known", "snippet", "meta_tag"]],
+        #: How control was proven: dns_txt, well_known, snippet (the site's Checkbox snippet live on https://<domain>/), meta_tag (<meta name="checkbox-verify"> on https://<domain>/) or shopify_install (the domain is the primary domain of a Shopify store that installed the Checkbox app and is connected to this site).
+        "method": Optional[Literal["dns_txt", "well_known", "snippet", "meta_tag", "shopify_install"]],
         #: When it was verified. Unix timestamp in seconds.
         "verified_at": Optional[int],
         #: Last check. Unix timestamp in seconds.
@@ -7738,8 +7738,8 @@ CheckDomainVerificationResponse = TypedDict(
         "domain": Optional[str],
         #: not_started until createDomainVerification; verified once the TXT record, the file, the live snippet or the meta tag was found.
         "status": Literal["not_started", "pending", "verified"],
-        #: How control was proven: dns_txt, well_known, snippet (the site's Checkbox snippet live on https://<domain>/) or meta_tag (<meta name="checkbox-verify"> on https://<domain>/).
-        "method": Optional[Literal["dns_txt", "well_known", "snippet", "meta_tag"]],
+        #: How control was proven: dns_txt, well_known, snippet (the site's Checkbox snippet live on https://<domain>/), meta_tag (<meta name="checkbox-verify"> on https://<domain>/) or shopify_install (the domain is the primary domain of a Shopify store that installed the Checkbox app and is connected to this site).
+        "method": Optional[Literal["dns_txt", "well_known", "snippet", "meta_tag", "shopify_install"]],
         #: When it was verified. Unix timestamp in seconds.
         "verified_at": Optional[int],
         #: Last check. Unix timestamp in seconds.
