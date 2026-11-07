@@ -5493,6 +5493,76 @@
             ],
             "description": "A problem worth fixing, e.g. a test-mode key on a live site.",
             "example": null
+          },
+          "webhook_setup": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "url": {
+                "type": "string",
+                "description": "Webhook URL to add in the platform.",
+                "example": "https://api.checkbox.site/webhooks/chargebee/6f1c…"
+              },
+              "auth": {
+                "type": "string",
+                "enum": [
+                  "basic"
+                ],
+                "description": "Authentication the webhook uses.",
+                "example": "basic"
+              },
+              "username": {
+                "type": "string",
+                "description": "Basic-auth username to enter.",
+                "example": "checkbox-1a2b3c4d5e6f7a8b"
+              },
+              "password": {
+                "type": "string",
+                "description": "Basic-auth password to enter. Treat it as a secret.",
+                "example": "q8V…"
+              },
+              "events": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Events to select.",
+                "example": [
+                  "subscription_created",
+                  "subscription_renewal_reminder"
+                ]
+              },
+              "api_version": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Webhook API version to choose.",
+                "example": "v2"
+              }
+            },
+            "required": [
+              "url",
+              "auth",
+              "username",
+              "password",
+              "events",
+              "api_version"
+            ],
+            "description": "Chargebee only: the webhook to add by hand in Chargebee (Settings › Configure Chargebee › API Keys and Webhooks › Webhooks). Null for platforms whose webhook Checkbox registers itself.",
+            "example": {
+              "url": "https://api.checkbox.site/webhooks/chargebee/6f1c…",
+              "auth": "basic",
+              "username": "checkbox-1a2b3c4d5e6f7a8b",
+              "password": "q8V…",
+              "events": [
+                "subscription_created",
+                "subscription_renewal_reminder"
+              ],
+              "api_version": "v2"
+            }
           }
         },
         "required": [
@@ -5502,7 +5572,8 @@
           "platform",
           "status",
           "last_synced",
-          "warning"
+          "warning",
+          "webhook_setup"
         ],
         "description": "A billing-platform connection of a site."
       },
@@ -5514,7 +5585,8 @@
             "enum": [
               "stripe",
               "recharge",
-              "shopify"
+              "shopify",
+              "chargebee"
             ],
             "description": "Billing platform.",
             "example": "stripe"
@@ -5525,7 +5597,7 @@
               "type": "string",
               "maxLength": 4096
             },
-            "description": "Read-only credentials. Stripe: { \"secretKey\": \"rk_test_…\" } (a restricted key with read access; rk_test_ in test mode). Recharge: { \"apiToken\": \"…\" }. Shopify: { \"shop\": \"store.myshopify.com\", \"accessToken\": \"shpat_…\" }.",
+            "description": "Read-only credentials. Stripe: { \"secretKey\": \"rk_test_…\" } (a restricted key with read access; rk_test_ in test mode). Recharge: { \"apiToken\": \"…\" }. Shopify: { \"shop\": \"store.myshopify.com\", \"accessToken\": \"shpat_…\" }. Chargebee: { \"site\": \"acme\", \"apiKey\": \"live_…\" } (the site name before .chargebee.com and a read-only API key).",
             "example": {
               "secretKey": "rk_test_51H…"
             }
@@ -10123,7 +10195,7 @@
                 "trial_reminder"
               ]
             },
-            "description": "Notices to send (turning one on needs cancel_url, a confirmed policy and a connected Stripe/Recharge account). trial_reminder is accepted as an alias of trial_ending.",
+            "description": "Notices to send (turning one on needs cancel_url, a confirmed policy and a connected Stripe, Recharge or Chargebee account). trial_reminder is accepted as an alias of trial_ending.",
             "example": [
               "acknowledgment",
               "renewal_reminder"
@@ -23029,7 +23101,7 @@
       "post": {
         "operationId": "connectBillingPlatform",
         "summary": "Connect a billing platform",
-        "description": "Connects the site's billing platform with read-only credentials (a Stripe restricted key, a Recharge token or a Shopify Admin API token), so Checkbox reads the customer-portal and reminder settings. Works for test-mode sites too (use an rk_test_ key). The credentials are validated by reading the settings once and stored encrypted.",
+        "description": "Connects the site's billing platform with read-only credentials (a Stripe restricted key, a Recharge token, a Shopify Admin API token or a Chargebee read-only API key), so Checkbox reads the customer-portal and reminder settings. Works for test-mode sites too (use an rk_test_ key). The credentials are validated by reading the settings once and stored encrypted.",
         "tags": [
           "Sites"
         ],
@@ -26415,7 +26487,7 @@
       "post": {
         "operationId": "updateNoticeSettings",
         "summary": "Update notice settings",
-        "description": "Chooses who sends the required emails (mode: merchant = you send them and Checkbox tracks them, the default; checkbox = Checkbox sends them), and sets branding, cancel_url and the confirmed cancellation policy. In checkbox mode, turning a notice on (enabled_kinds) requires cancel_url, a confirmed policy, a connected Stripe or Recharge account and a sending address; otherwise resource_conflict explains what is missing.",
+        "description": "Chooses who sends the required emails (mode: merchant = you send them and Checkbox tracks them, the default; checkbox = Checkbox sends them), and sets branding, cancel_url and the confirmed cancellation policy. In checkbox mode, turning a notice on (enabled_kinds) requires cancel_url, a confirmed policy, a connected Stripe, Recharge or Chargebee account and a sending address; otherwise resource_conflict explains what is missing.",
         "tags": [
           "Notices"
         ],

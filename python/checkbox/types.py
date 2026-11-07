@@ -1775,6 +1775,27 @@ UpdateSiteParams = TypedDict(
 )
 
 
+#: Chargebee only: the webhook to add by hand in Chargebee (Settings › Configure Chargebee › API Keys and Webhooks › Webhooks). Null for platforms whose webhook Checkbox registers itself.
+IntegrationWebhookSetup = TypedDict(
+    "IntegrationWebhookSetup",
+    {
+        #: Webhook URL to add in the platform.
+        "url": str,
+        #: Authentication the webhook uses.
+        "auth": Literal["basic"],
+        #: Basic-auth username to enter.
+        "username": str,
+        #: Basic-auth password to enter. Treat it as a secret.
+        "password": str,
+        #: Events to select.
+        "events": List[str],
+        #: Webhook API version to choose.
+        "api_version": Optional[str],
+    },
+    total=False,
+)
+
+
 #: A billing-platform connection of a site.
 Integration = TypedDict(
     "Integration",
@@ -1793,6 +1814,8 @@ Integration = TypedDict(
         "last_synced": Optional[int],
         #: A problem worth fixing, e.g. a test-mode key on a live site.
         "warning": Optional[str],
+        #: Chargebee only: the webhook to add by hand in Chargebee (Settings › Configure Chargebee › API Keys and Webhooks › Webhooks). Null for platforms whose webhook Checkbox registers itself.
+        "webhook_setup": Optional["IntegrationWebhookSetup"],
     },
     total=False,
 )
@@ -1802,8 +1825,8 @@ ConnectBillingPlatformParams = TypedDict(
     "ConnectBillingPlatformParams",
     {
         #: Billing platform.
-        "platform": Literal["stripe", "recharge", "shopify"],
-        #: Read-only credentials. Stripe: { "secretKey": "rk_test_…" } (a restricted key with read access; rk_test_ in test mode). Recharge: { "apiToken": "…" }. Shopify: { "shop": "store.myshopify.com", "accessToken": "shpat_…" }.
+        "platform": Literal["stripe", "recharge", "shopify", "chargebee"],
+        #: Read-only credentials. Stripe: { "secretKey": "rk_test_…" } (a restricted key with read access; rk_test_ in test mode). Recharge: { "apiToken": "…" }. Shopify: { "shop": "store.myshopify.com", "accessToken": "shpat_…" }. Chargebee: { "site": "acme", "apiKey": "live_…" } (the site name before .chargebee.com and a read-only API key).
         "credentials": Dict[str, str],
     },
     total=False,
@@ -3195,7 +3218,7 @@ UpdateNoticeSettingsParams = TypedDict(
     {
         #: merchant: you send the emails (Checkbox tracks them); checkbox: Checkbox sends them. Turning an enabled_kinds notice on implies checkbox. (optional)
         "mode": Literal["merchant", "checkbox"],
-        #: Notices to send (turning one on needs cancel_url, a confirmed policy and a connected Stripe/Recharge account). trial_reminder is accepted as an alias of trial_ending. (optional)
+        #: Notices to send (turning one on needs cancel_url, a confirmed policy and a connected Stripe, Recharge or Chargebee account). trial_reminder is accepted as an alias of trial_ending. (optional)
         "enabled_kinds": List[Literal["acknowledgment", "trial_ending", "renewal_reminder", "annual_terms", "price_change", "cancellation_confirmation", "charge_notice", "trial_reminder"]],
         #: Brand name. (optional)
         "brand_name": Optional[str],

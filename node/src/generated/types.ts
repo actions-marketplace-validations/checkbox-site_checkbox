@@ -1211,12 +1211,27 @@ export interface Integration {
   last_synced: number | null;
   /** A problem worth fixing, e.g. a test-mode key on a live site. */
   warning: string | null;
+  /** Chargebee only: the webhook to add by hand in Chargebee (Settings › Configure Chargebee › API Keys and Webhooks › Webhooks). Null for platforms whose webhook Checkbox registers itself. */
+  webhook_setup: {
+    /** Webhook URL to add in the platform. */
+    url: string;
+    /** Authentication the webhook uses. */
+    auth: "basic";
+    /** Basic-auth username to enter. */
+    username: string;
+    /** Basic-auth password to enter. Treat it as a secret. */
+    password: string;
+    /** Events to select. */
+    events: Array<string>;
+    /** Webhook API version to choose. */
+    api_version: string | null;
+  } | null;
 }
 
 export interface ConnectBillingPlatformParams {
   /** Billing platform. */
-  platform: "stripe" | "recharge" | "shopify";
-  /** Read-only credentials. Stripe: { "secretKey": "rk_test_…" } (a restricted key with read access; rk_test_ in test mode). Recharge: { "apiToken": "…" }. Shopify: { "shop": "store.myshopify.com", "accessToken": "shpat_…" }. */
+  platform: "stripe" | "recharge" | "shopify" | "chargebee";
+  /** Read-only credentials. Stripe: { "secretKey": "rk_test_…" } (a restricted key with read access; rk_test_ in test mode). Recharge: { "apiToken": "…" }. Shopify: { "shop": "store.myshopify.com", "accessToken": "shpat_…" }. Chargebee: { "site": "acme", "apiKey": "live_…" } (the site name before .chargebee.com and a read-only API key). */
   credentials: Record<string, string>;
 }
 
@@ -2187,7 +2202,7 @@ export interface NoticeSettings {
 export interface UpdateNoticeSettingsParams {
   /** merchant: you send the emails (Checkbox tracks them); checkbox: Checkbox sends them. Turning an enabled_kinds notice on implies checkbox. */
   mode?: "merchant" | "checkbox";
-  /** Notices to send (turning one on needs cancel_url, a confirmed policy and a connected Stripe/Recharge account). trial_reminder is accepted as an alias of trial_ending. */
+  /** Notices to send (turning one on needs cancel_url, a confirmed policy and a connected Stripe, Recharge or Chargebee account). trial_reminder is accepted as an alias of trial_ending. */
   enabled_kinds?: Array<"acknowledgment" | "trial_ending" | "renewal_reminder" | "annual_terms" | "price_change" | "cancellation_confirmation" | "charge_notice" | "trial_reminder">;
   /** Brand name. */
   brand_name?: string | null;
