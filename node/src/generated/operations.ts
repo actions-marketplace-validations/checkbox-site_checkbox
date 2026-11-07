@@ -2181,7 +2181,7 @@ export class SitesResource extends Resource {
   /**
    * Connect a billing platform.
    *
-   * Connects the site's billing platform with read-only credentials (a Stripe restricted key, a Recharge token, a Shopify Admin API token, a Chargebee read-only API key or a Recurly private API key), so Checkbox reads the customer-portal and reminder settings. Works for test-mode sites too (use an rk_test_ key). The credentials are validated by reading the settings once and stored encrypted.
+   * Connects the site's billing platform with read-only credentials (a Stripe restricted key, a Recharge token, a Shopify Admin API token, a Chargebee read-only API key, a Recurly private API key or a Paddle API key with read permissions), so Checkbox reads the customer-portal and reminder settings. Works for test-mode sites too (use an rk_test_ key). The credentials are validated by reading the settings once and stored encrypted.
    *
    * @param site Unique identifier of the site (site_…).
    * @see POST /v1/sites/{site}/integrations (operation `connectBillingPlatform`, scope `sites:write`)
@@ -2644,7 +2644,7 @@ export class NoticeSettingsResource extends Resource {
   /**
    * Update notice settings.
    *
-   * Chooses who sends the required emails (mode: merchant = you send them and Checkbox tracks them, the default; checkbox = Checkbox sends them), and sets branding, cancel_url and the confirmed cancellation policy. In checkbox mode, turning a notice on (enabled_kinds) requires cancel_url, a confirmed policy, a connected Stripe, Recharge, Chargebee or Recurly account and a sending address; otherwise resource_conflict explains what is missing.
+   * Chooses who sends the required emails (mode: merchant = you send them and Checkbox tracks them, the default; checkbox = Checkbox sends them), and sets branding, cancel_url and the confirmed cancellation policy. In checkbox mode, turning a notice on (enabled_kinds) requires cancel_url, a confirmed policy, a connected Stripe, Recharge, Chargebee, Recurly or Paddle account and a sending address; otherwise resource_conflict explains what is missing.
    *
    * @param site Unique identifier of the site (site_…).
    * @see POST /v1/sites/{site}/notice_settings (operation `updateNoticeSettings`, scope `notices:write`, live mode needs an activated account)

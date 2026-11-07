@@ -5508,19 +5508,26 @@
               "auth": {
                 "type": "string",
                 "enum": [
-                  "basic"
+                  "basic",
+                  "signature"
                 ],
-                "description": "Authentication the webhook uses.",
+                "description": "Authentication the webhook uses: basic (enter the username and password below; Chargebee, Recurly) or signature (the platform signs deliveries with a secret key it makes, which you paste into Checkbox; Paddle).",
                 "example": "basic"
               },
               "username": {
-                "type": "string",
-                "description": "Basic-auth username to enter.",
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Basic-auth username to enter. Null for signature auth.",
                 "example": "checkbox-1a2b3c4d5e6f7a8b"
               },
               "password": {
-                "type": "string",
-                "description": "Basic-auth password to enter. Treat it as a secret.",
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Basic-auth password to enter. Treat it as a secret. Null for signature auth.",
                 "example": "q8V…"
               },
               "events": {
@@ -5558,7 +5565,31 @@
                   "boolean",
                   "null"
                 ],
-                "description": "Recurly: whether the endpoint’s secret key is saved in Checkbox (dashboard › Billing connection › Recurly webhook), so every delivery’s signature is checked too. Null for platforms without signatures.",
+                "description": "Recurly and Paddle: whether the endpoint’s secret key is saved in Checkbox (dashboard › Billing connection › webhook), so every delivery’s signature is checked. Paddle deliveries are refused until it is. Null for platforms without signatures.",
+                "example": null
+              },
+              "destination_status": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "enum": [
+                  "found",
+                  "inactive",
+                  "missing"
+                ],
+                "description": "Paddle: whether a notification destination with this URL exists in Paddle (from the settings Checkbox last read; needs the Notification settings: Read permission). Null when unknown or for other platforms.",
+                "example": null
+              },
+              "missing_events": {
+                "type": [
+                  "array",
+                  "null"
+                ],
+                "items": {
+                  "type": "string"
+                },
+                "description": "Paddle: events the destination does not send yet. Null when unknown or for other platforms.",
                 "example": null
               }
             },
@@ -5570,9 +5601,11 @@
               "events",
               "api_version",
               "payload_format",
-              "signing_key_configured"
+              "signing_key_configured",
+              "destination_status",
+              "missing_events"
             ],
-            "description": "Chargebee and Recurly: the webhook to add by hand (Chargebee: Settings › Configure Chargebee › API Keys and Webhooks › Webhooks; Recurly: Integrations › Webhooks). Null for platforms whose webhook Checkbox registers itself.",
+            "description": "Chargebee, Recurly and Paddle: the webhook to add by hand (Chargebee: Settings › Configure Chargebee › API Keys and Webhooks › Webhooks; Recurly: Integrations › Webhooks; Paddle: Events › Notifications › New destination, under Developer tools in older dashboards). Null for platforms whose webhook Checkbox registers itself.",
             "example": {
               "url": "https://api.checkbox.site/webhooks/chargebee/6f1c…",
               "auth": "basic",
@@ -5584,7 +5617,9 @@
               ],
               "api_version": "v2",
               "payload_format": null,
-              "signing_key_configured": null
+              "signing_key_configured": null,
+              "destination_status": null,
+              "missing_events": null
             }
           }
         },
@@ -5610,7 +5645,8 @@
               "recharge",
               "shopify",
               "chargebee",
-              "recurly"
+              "recurly",
+              "paddle"
             ],
             "description": "Billing platform.",
             "example": "stripe"
@@ -5621,7 +5657,7 @@
               "type": "string",
               "maxLength": 4096
             },
-            "description": "Read-only credentials. Stripe: { \"secretKey\": \"rk_test_…\" } (a restricted key with read access; rk_test_ in test mode). Recharge: { \"apiToken\": \"…\" }. Shopify: { \"shop\": \"store.myshopify.com\", \"accessToken\": \"shpat_…\" }. Chargebee: { \"site\": \"acme\", \"apiKey\": \"live_…\" } (the site name before .chargebee.com and a read-only API key). Recurly: { \"apiKey\": \"…\", \"region\": \"us\" } (a private API key of the site; region \"eu\" for sites hosted in Recurly’s EU data centre, default \"us\"). Checkbox only reads.",
+            "description": "Read-only credentials. Stripe: { \"secretKey\": \"rk_test_…\" } (a restricted key with read access; rk_test_ in test mode). Recharge: { \"apiToken\": \"…\" }. Shopify: { \"shop\": \"store.myshopify.com\", \"accessToken\": \"shpat_…\" }. Chargebee: { \"site\": \"acme\", \"apiKey\": \"live_…\" } (the site name before .chargebee.com and a read-only API key). Recurly: { \"apiKey\": \"…\", \"region\": \"us\" } (a private API key of the site; region \"eu\" for sites hosted in Recurly’s EU data centre, default \"us\"). Paddle: { \"apiKey\": \"pdl_live_apikey_…\" } (a Paddle Billing API key with read permissions; sandbox keys, pdl_sdbx_…, read the sandbox; \"environment\": \"live\" or \"sandbox\" only for older keys without that prefix). Checkbox only reads.",
             "example": {
               "secretKey": "rk_test_51H…"
             }
@@ -10219,7 +10255,7 @@
                 "trial_reminder"
               ]
             },
-            "description": "Notices to send (turning one on needs cancel_url, a confirmed policy and a connected Stripe, Recharge, Chargebee or Recurly account). trial_reminder is accepted as an alias of trial_ending.",
+            "description": "Notices to send (turning one on needs cancel_url, a confirmed policy and a connected Stripe, Recharge, Chargebee, Recurly or Paddle account). trial_reminder is accepted as an alias of trial_ending.",
             "example": [
               "acknowledgment",
               "renewal_reminder"
@@ -23125,7 +23161,7 @@
       "post": {
         "operationId": "connectBillingPlatform",
         "summary": "Connect a billing platform",
-        "description": "Connects the site's billing platform with read-only credentials (a Stripe restricted key, a Recharge token, a Shopify Admin API token, a Chargebee read-only API key or a Recurly private API key), so Checkbox reads the customer-portal and reminder settings. Works for test-mode sites too (use an rk_test_ key). The credentials are validated by reading the settings once and stored encrypted.",
+        "description": "Connects the site's billing platform with read-only credentials (a Stripe restricted key, a Recharge token, a Shopify Admin API token, a Chargebee read-only API key, a Recurly private API key or a Paddle API key with read permissions), so Checkbox reads the customer-portal and reminder settings. Works for test-mode sites too (use an rk_test_ key). The credentials are validated by reading the settings once and stored encrypted.",
         "tags": [
           "Sites"
         ],
@@ -26511,7 +26547,7 @@
       "post": {
         "operationId": "updateNoticeSettings",
         "summary": "Update notice settings",
-        "description": "Chooses who sends the required emails (mode: merchant = you send them and Checkbox tracks them, the default; checkbox = Checkbox sends them), and sets branding, cancel_url and the confirmed cancellation policy. In checkbox mode, turning a notice on (enabled_kinds) requires cancel_url, a confirmed policy, a connected Stripe, Recharge, Chargebee or Recurly account and a sending address; otherwise resource_conflict explains what is missing.",
+        "description": "Chooses who sends the required emails (mode: merchant = you send them and Checkbox tracks them, the default; checkbox = Checkbox sends them), and sets branding, cancel_url and the confirmed cancellation policy. In checkbox mode, turning a notice on (enabled_kinds) requires cancel_url, a confirmed policy, a connected Stripe, Recharge, Chargebee, Recurly or Paddle account and a sending address; otherwise resource_conflict explains what is missing.",
         "tags": [
           "Notices"
         ],

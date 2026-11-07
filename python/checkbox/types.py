@@ -1775,26 +1775,30 @@ UpdateSiteParams = TypedDict(
 )
 
 
-#: Chargebee and Recurly: the webhook to add by hand (Chargebee: Settings › Configure Chargebee › API Keys and Webhooks › Webhooks; Recurly: Integrations › Webhooks). Null for platforms whose webhook Checkbox registers itself.
+#: Chargebee, Recurly and Paddle: the webhook to add by hand (Chargebee: Settings › Configure Chargebee › API Keys and Webhooks › Webhooks; Recurly: Integrations › Webhooks; Paddle: Events › Notifications › New destination, under Developer tools in older dashboards). Null for platforms whose webhook Checkbox registers itself.
 IntegrationWebhookSetup = TypedDict(
     "IntegrationWebhookSetup",
     {
         #: Webhook URL to add in the platform.
         "url": str,
-        #: Authentication the webhook uses.
-        "auth": Literal["basic"],
-        #: Basic-auth username to enter.
-        "username": str,
-        #: Basic-auth password to enter. Treat it as a secret.
-        "password": str,
+        #: Authentication the webhook uses: basic (enter the username and password below; Chargebee, Recurly) or signature (the platform signs deliveries with a secret key it makes, which you paste into Checkbox; Paddle).
+        "auth": Literal["basic", "signature"],
+        #: Basic-auth username to enter. Null for signature auth.
+        "username": Optional[str],
+        #: Basic-auth password to enter. Treat it as a secret. Null for signature auth.
+        "password": Optional[str],
         #: Events to select.
         "events": List[str],
         #: Webhook API version to choose.
         "api_version": Optional[str],
         #: Payload format to choose on the endpoint (Recurly: JSON). Null when the platform has no choice.
         "payload_format": Optional[Literal["json"]],
-        #: Recurly: whether the endpoint’s secret key is saved in Checkbox (dashboard › Billing connection › Recurly webhook), so every delivery’s signature is checked too. Null for platforms without signatures.
+        #: Recurly and Paddle: whether the endpoint’s secret key is saved in Checkbox (dashboard › Billing connection › webhook), so every delivery’s signature is checked. Paddle deliveries are refused until it is. Null for platforms without signatures.
         "signing_key_configured": Optional[bool],
+        #: Paddle: whether a notification destination with this URL exists in Paddle (from the settings Checkbox last read; needs the Notification settings: Read permission). Null when unknown or for other platforms.
+        "destination_status": Optional[Literal["found", "inactive", "missing"]],
+        #: Paddle: events the destination does not send yet. Null when unknown or for other platforms.
+        "missing_events": Optional[List[str]],
     },
     total=False,
 )
@@ -1818,7 +1822,7 @@ Integration = TypedDict(
         "last_synced": Optional[int],
         #: A problem worth fixing, e.g. a test-mode key on a live site.
         "warning": Optional[str],
-        #: Chargebee and Recurly: the webhook to add by hand (Chargebee: Settings › Configure Chargebee › API Keys and Webhooks › Webhooks; Recurly: Integrations › Webhooks). Null for platforms whose webhook Checkbox registers itself.
+        #: Chargebee, Recurly and Paddle: the webhook to add by hand (Chargebee: Settings › Configure Chargebee › API Keys and Webhooks › Webhooks; Recurly: Integrations › Webhooks; Paddle: Events › Notifications › New destination, under Developer tools in older dashboards). Null for platforms whose webhook Checkbox registers itself.
         "webhook_setup": Optional["IntegrationWebhookSetup"],
     },
     total=False,
@@ -1829,8 +1833,8 @@ ConnectBillingPlatformParams = TypedDict(
     "ConnectBillingPlatformParams",
     {
         #: Billing platform.
-        "platform": Literal["stripe", "recharge", "shopify", "chargebee", "recurly"],
-        #: Read-only credentials. Stripe: { "secretKey": "rk_test_…" } (a restricted key with read access; rk_test_ in test mode). Recharge: { "apiToken": "…" }. Shopify: { "shop": "store.myshopify.com", "accessToken": "shpat_…" }. Chargebee: { "site": "acme", "apiKey": "live_…" } (the site name before .chargebee.com and a read-only API key). Recurly: { "apiKey": "…", "region": "us" } (a private API key of the site; region "eu" for sites hosted in Recurly’s EU data centre, default "us"). Checkbox only reads.
+        "platform": Literal["stripe", "recharge", "shopify", "chargebee", "recurly", "paddle"],
+        #: Read-only credentials. Stripe: { "secretKey": "rk_test_…" } (a restricted key with read access; rk_test_ in test mode). Recharge: { "apiToken": "…" }. Shopify: { "shop": "store.myshopify.com", "accessToken": "shpat_…" }. Chargebee: { "site": "acme", "apiKey": "live_…" } (the site name before .chargebee.com and a read-only API key). Recurly: { "apiKey": "…", "region": "us" } (a private API key of the site; region "eu" for sites hosted in Recurly’s EU data centre, default "us"). Paddle: { "apiKey": "pdl_live_apikey_…" } (a Paddle Billing API key with read permissions; sandbox keys, pdl_sdbx_…, read the sandbox; "environment": "live" or "sandbox" only for older keys without that prefix). Checkbox only reads.
         "credentials": Dict[str, str],
     },
     total=False,
@@ -3222,7 +3226,7 @@ UpdateNoticeSettingsParams = TypedDict(
     {
         #: merchant: you send the emails (Checkbox tracks them); checkbox: Checkbox sends them. Turning an enabled_kinds notice on implies checkbox. (optional)
         "mode": Literal["merchant", "checkbox"],
-        #: Notices to send (turning one on needs cancel_url, a confirmed policy and a connected Stripe, Recharge, Chargebee or Recurly account). trial_reminder is accepted as an alias of trial_ending. (optional)
+        #: Notices to send (turning one on needs cancel_url, a confirmed policy and a connected Stripe, Recharge, Chargebee, Recurly or Paddle account). trial_reminder is accepted as an alias of trial_ending. (optional)
         "enabled_kinds": List[Literal["acknowledgment", "trial_ending", "renewal_reminder", "annual_terms", "price_change", "cancellation_confirmation", "charge_notice", "trial_reminder"]],
         #: Brand name. (optional)
         "brand_name": Optional[str],
