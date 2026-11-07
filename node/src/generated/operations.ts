@@ -703,6 +703,23 @@ export const OPERATIONS = {
     paginated: false,
     summary: "List fix plans for a site",
   },
+  publishShopifyTerms: {
+    operationId: "publishShopifyTerms",
+    namespace: "fixes",
+    method: "publishShopifyTerms",
+    httpMethod: "POST",
+    path: "/v1/sites/{site}/fixes/shopify/publish",
+    pathParams: ["site"],
+    queryParams: [],
+    body: true,
+    idempotent: true,
+    auth: true,
+    scope: "fixes:write",
+    response: "json",
+    list: false,
+    paginated: false,
+    summary: "Publish the renewal terms to the Shopify app block",
+  },
   listEvidence: {
     operationId: "listEvidence",
     namespace: "evidence",
@@ -1890,6 +1907,7 @@ export interface OperationTypes {
   listVerifications: { args: { site: string } & T.ListVerificationsParams; response: T.VerificationList };
   retrieveFindingFix: { args: { finding: string } & T.RetrieveFindingFixParams; response: T.Fix };
   listSiteFixes: { args: { site: string } & T.ListSiteFixesParams; response: T.FixList };
+  publishShopifyTerms: { args: { site: string } & T.PublishShopifyTermsParams; response: T.ShopifyTermsPublication };
   listEvidence: { args: T.ListEvidenceParams; response: T.EvidenceList };
   retrieveEvidence: { args: { evidence: string }; response: T.Evidence };
   downloadEvidenceContent: { args: { evidence: string }; response: T.CheckboxFile };
@@ -2491,6 +2509,18 @@ export class FixesResource extends Resource {
    */
   list(site: string, params?: T.ListSiteFixesParams, options?: RequestOptions): Promise<T.FixList> {
     return this._request(OPERATIONS.listSiteFixes, [site], params, options) as Promise<T.FixList>;
+  }
+
+  /**
+   * Publish the renewal terms to the Shopify app block.
+   *
+   * For a Shopify store connected through the Checkbox Shopify app (site.shopify.connection = app): generates the renewal disclosure and consent label from the site's real plan, verifies them against the rules engine, and publishes them to the app-owned metafield the Checkbox "Renewal terms + consent" theme block reads. Nothing else in the store changes (no theme, product or checkout edits). The merchant places the block once in the theme editor (theme_editor_url); after that, publishing again updates the text the block shows. Then verify the sign-up task (verifyTask) or the site (verifySite). Errors: shopify_not_connected (only the merchant can install and connect the app; next_action has the step), terms_incomplete (problems lists the missing plan facts; next_action names the call that sets them), fix_verification_failed, platform_error (Shopify refused the write). In test mode it acts on test-mode sites, whose connected store is written the same way.
+   *
+   * @param site Unique identifier of the site (site_…).
+   * @see POST /v1/sites/{site}/fixes/shopify/publish (operation `publishShopifyTerms`, scope `fixes:write`, live mode needs an activated account)
+   */
+  publishShopifyTerms(site: string, params?: T.PublishShopifyTermsParams, options?: RequestOptions): Promise<T.ShopifyTermsPublication> {
+    return this._request(OPERATIONS.publishShopifyTerms, [site], params, options) as Promise<T.ShopifyTermsPublication>;
   }
 
 }

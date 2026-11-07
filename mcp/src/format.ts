@@ -38,6 +38,7 @@ export const OPERATION_TOOLS: Record<string, string> = {
   listFindings: 'list_findings',
   retrieveFinding: 'get_finding',
   retrieveFindingFix: 'get_finding',
+  publishShopifyTerms: 'publish_shopify_terms',
   createScan: 'run_scan',
   retrieveScan: 'get_scan',
   listLawUpdates: 'list_law_updates',
@@ -389,4 +390,7 @@ const ERROR_HINTS: Record<string, string> = {
   parameter_missing: 'Add the named parameter and call the tool again.',
   parameter_unknown: 'Remove the named parameter and call the tool again.',
   rate_limit_exceeded: 'Wait the number of seconds in the message, then retry.',
+  shopify_not_connected: 'Only the merchant can connect the store: tell them the step in next_action (install the Checkbox app in the Shopify admin, then "Connect to Checkbox"). Do not retry until they say it is done.',
+  terms_incomplete: 'Checkbox never guesses prices or cancellation terms: send the missing plan facts (next_action), then call the tool again.',
+  platform_error: 'The merchant\'s platform refused the change; nothing was applied. Retry in a few minutes.',
 };

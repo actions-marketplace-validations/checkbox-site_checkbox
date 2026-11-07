@@ -707,6 +707,23 @@ OPERATIONS: Dict[str, Dict[str, Any]] = {
         "paginated": False,
         "summary": "List fix plans for a site",
     },
+    "publishShopifyTerms": {
+        "operation_id": "publishShopifyTerms",
+        "namespace": "fixes",
+        "method": "publish_shopify_terms",
+        "http_method": "POST",
+        "path": "/v1/sites/{site}/fixes/shopify/publish",
+        "path_params": ("site", ),
+        "query_params": (),
+        "body": True,
+        "idempotent": True,
+        "auth": True,
+        "scope": "fixes:write",
+        "response": "json",
+        "list": False,
+        "paginated": False,
+        "summary": "Publish the renewal terms to the Shopify app block",
+    },
     "listEvidence": {
         "operation_id": "listEvidence",
         "namespace": "evidence",
@@ -2303,6 +2320,17 @@ class FixesResource(Resource):
         ``GET /v1/sites/{site}/fixes`` (operation ``listSiteFixes``, scope ``fixes:read``).
         """
         return self._call("listSiteFixes", (site, ), params, kwargs, request_options)  # type: ignore[no-any-return]
+
+    def publish_shopify_terms(self, site: str, params: Optional["types.PublishShopifyTermsParams"] = None, /, *, request_options: Optional[RequestOptions] = None, **kwargs: Any) -> "types.ShopifyTermsPublication":
+        """Publish the renewal terms to the Shopify app block.
+
+        For a Shopify store connected through the Checkbox Shopify app (site.shopify.connection = app): generates the renewal disclosure and consent label from the site's real plan, verifies them against the rules engine, and publishes them to the app-owned metafield the Checkbox "Renewal terms + consent" theme block reads. Nothing else in the store changes (no theme, product or checkout edits). The merchant places the block once in the theme editor (theme_editor_url); after that, publishing again updates the text the block shows. Then verify the sign-up task (verifyTask) or the site (verifySite). Errors: shopify_not_connected (only the merchant can install and connect the app; next_action has the step), terms_incomplete (problems lists the missing plan facts; next_action names the call that sets them), fix_verification_failed, platform_error (Shopify refused the write). In test mode it acts on test-mode sites, whose connected store is written the same way.
+
+        Parameters can be given as a dict (positional) or as keyword arguments.
+
+        ``POST /v1/sites/{site}/fixes/shopify/publish`` (operation ``publishShopifyTerms``, scope ``fixes:write``).
+        """
+        return self._call("publishShopifyTerms", (site, ), params, kwargs, request_options)  # type: ignore[no-any-return]
 
 
 class EvidenceResource(Resource):

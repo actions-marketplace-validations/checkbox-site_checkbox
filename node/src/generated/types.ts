@@ -41,6 +41,8 @@ export interface Error {
     message: string;
     /** The parameter the error relates to, when there is one. */
     param?: string;
+    /** What is missing or wrong, one entry each (terms_incomplete). */
+    problems?: Array<string>;
     /** Link to the documentation of this error code. */
     doc_url: string;
     /** Id of the request (also in the Request-Id header). Quote it to support. */
@@ -860,6 +862,27 @@ export interface SiteInstall {
   webhook_urls: Record<string, string>;
 }
 
+/** The site's Shopify store connection; null when the site neither uses platform shopify nor has a Shopify connection. */
+export type SiteShopify = {
+  /** How the store is connected. app: through the Checkbox Shopify app (Checkbox can publish the verified terms to the app block: publishShopifyTerms). own_app: with the store's own custom-app access token (read-only; use the standalone theme snippet). none: not connected (only the merchant can install the Checkbox app from the Shopify admin). */
+  connection: "app" | "own_app" | "none";
+  /** The store's myshopify.com domain, when connected. */
+  shop: string | null;
+  /** Status of the Shopify connection (connected, error, disconnected); null without one. */
+  status: string | null;
+  /** The newest publish of the verified renewal terms to the Checkbox app block; null when never published. Whether the block is placed on the theme shows in the scans (Checkbox does not read the theme). */
+  terms_published: {
+    /** The fix application that recorded the publish. */
+    application: string;
+    /** When the text was published. Unix timestamp in seconds. */
+    published: number;
+    /** sha256 of the published texts (disclosure + newline + consent label). */
+    sha256: string;
+  } | null;
+  /** Theme editor link that adds the "Renewal terms + consent" block to the product page (the merchant opens it once and clicks Save). Null without a connected store. */
+  theme_editor_url: string | null;
+} | null;
+
 /** The compliance status of the evaluation this scan produced (null until evaluated). Retrieve the evaluation for the checks and counts. */
 export type ScanCompliance = {
   /** Roll-up status of that evaluation: needs_fix, your_call, incomplete, compliant or not_checked. */
@@ -1015,6 +1038,7 @@ export interface Site {
   legal_hold: LegalHold;
   compliance: SiteCompliance;
   install: SiteInstall;
+  shopify: SiteShopify;
   /** Archived (soft-deleted); evidence is retained. */
   archived: boolean;
   /** When the site was created. Unix timestamp in seconds. */
@@ -1924,6 +1948,7 @@ export interface Fix {
   /** Why parts of the fix could not be generated (e.g. plan terms unknown). */
   problems: Array<string>;
   remediation: Remediation;
+  next_action: NextAction | null;
 }
 
 /** A page of fix plans. */
@@ -1936,6 +1961,40 @@ export interface FixList {
   has_more: boolean;
   /** The URL of this list. */
   url: string;
+}
+
+/** The verified renewal terms published to the Checkbox Shopify app block (an app-owned metafield; nothing else in the store changes). */
+export interface ShopifyTermsPublication {
+  /** Id of the recorded fix application (the evidence trail of this publish). */
+  id: string;
+  /** String representing the object's type. Always "shopify_terms_publication". */
+  object: "shopify_terms_publication";
+  /** true for live-mode objects, false for test mode (ck_test_ keys act on an isolated sandbox). */
+  livemode: boolean;
+  /** The site. */
+  site: string;
+  /** The Shopify store (myshopify.com domain) the text was published to. */
+  shop: string;
+  /** The renewal disclosure the "Renewal terms + consent" block now shows (engine-verified). */
+  disclosure: string;
+  /** Label of the unchecked, required consent checkbox the block shows. */
+  consent_label: string;
+  /** sha256 of the published texts (disclosure + newline + consent label). */
+  sha256: string;
+  /** Sign-up checks the published text was verified against. */
+  check_ids: Array<string>;
+  /** When the text was published. Unix timestamp in seconds. */
+  published: number;
+  /** Theme editor link that adds the "Renewal terms + consent" block to the product page. The merchant opens it once and clicks Save (Checkbox never edits the theme). */
+  theme_editor_url: string;
+  next_action: NextAction;
+}
+
+export interface PublishShopifyTermsParams {
+  /** Billing-platform plan / price id to write the terms for (default: the plan Checkbox resolved for the site). */
+  plan?: string;
+  /** Cancellation URL to state (default: the hosted cancellation page or the declared account page). */
+  cancel_url?: string;
 }
 
 /** A record in the tamper-evident evidence vault. */
@@ -5349,7 +5408,10 @@ export const ERROR_CODES = {
   test_run_in_progress: { status: 409, type: "invalid_request_error", description: "The site already has a queued or running test run; wait for it (retrieveTestRun) or cancel it (cancelTestRun)." },
   legal_hold_active: { status: 409, type: "invalid_request_error", description: "A legal hold is on for the account or the site: deleting data and shortening retention are refused until it is turned off (updateAccount / updateSite legal_hold)." },
   idempotency_key_in_use: { status: 409, type: "idempotency_error", description: "A request with this Idempotency-Key is still being processed; retry shortly." },
+  shopify_not_connected: { status: 409, type: "invalid_request_error", description: "The site's Shopify store is not connected through the Checkbox Shopify app, so Checkbox cannot publish to the app block. Only the merchant can connect it: install the Checkbox app from the Shopify admin and click \"Connect to Checkbox\" (`next_action` has the exact step)." },
   resource_archived: { status: 410, type: "invalid_request_error", description: "The object is archived; restore it before changing it." },
+  terms_incomplete: { status: 422, type: "invalid_request_error", description: "Checkbox cannot write the exact, verified renewal terms yet: plan facts are missing (price, interval, trial, cancellation URL or merchant name). `problems` lists them; `next_action` names the call that sets them." },
+  fix_verification_failed: { status: 422, type: "invalid_request_error", description: "The generated disclosure did not pass every sign-up check of the rules engine, so nothing was published. The message names the failing checks." },
   body_too_large: { status: 413, type: "invalid_request_error", description: "The request body is too large." },
   content_type_unsupported: { status: 415, type: "invalid_request_error", description: "Send JSON bodies with Content-Type: application/json." },
   site_limit_reached: { status: 403, type: "invalid_request_error", description: "The account reached its fair-use site limit (default 25); contact support to raise it." },
@@ -5357,6 +5419,7 @@ export const ERROR_CODES = {
   plan_required: { status: 402, type: "invalid_request_error", description: "Only when billing is enabled on this deployment: the feature needs a paid plan." },
   rate_limit_exceeded: { status: 429, type: "rate_limit_error", description: "Too many requests; slow down and retry after the Retry-After header." },
   receipts_disabled: { status: 403, type: "permission_error", description: "Consent receipts are turned off for this account (updateReceiptSettings enabled=true turns them on)." },
+  platform_error: { status: 502, type: "api_error", description: "The merchant's platform (e.g. Shopify) refused or failed the change; nothing was recorded as applied. Retry later; `message` has the platform's answer." },
   feature_unavailable: { status: 503, type: "api_error", description: "The feature is not configured on this deployment (for example the database migration is missing)." },
   internal_error: { status: 500, type: "api_error", description: "Something went wrong on Checkbox's side. Retrying with the same Idempotency-Key is safe." },
 } as const;

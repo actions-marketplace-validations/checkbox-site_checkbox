@@ -44,6 +44,12 @@ template, add BCC to the address the task names (`…+<kind>@in.checkbox.site`) 
 task, do not poll. Switching the site to Checkbox Notices (`change.content`, `updateNoticeSettings`) is the human's
 decision: ask first.
 
+Shopify stores linked through the Checkbox Shopify app (site `shopify.connection` is `app`): the sign-up task's
+change is a call, not code. `publish_shopify_terms` (REST: `POST /v1/sites/{site}/fixes/shopify/publish`) publishes
+the verified terms to the app's theme block, writing only the app's own metafield. Then the merchant places the
+"Renewal terms + consent" block once with the returned `theme_editor_url`, and you `verify_site`. Installing and
+connecting the app is the merchant's job (`shopify_not_connected` says how).
+
 A verification whose `next_action.type` is `retry_later` failed inside Checkbox: nothing to change in the code; move on
 and verify again later.
 

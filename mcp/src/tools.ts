@@ -1577,6 +1577,25 @@ const updateSite: ToolDef = {
   },
 };
 
+interface SiteShopifyLite {
+  connection: 'app' | 'own_app' | 'none';
+  shop: string | null;
+  terms_published: { published: number } | null;
+  theme_editor_url: string | null;
+}
+
+/** The site's Shopify connection in one line, naming the tool (or the human step) that comes next. */
+export function shopifyLines(sh: SiteShopifyLite | null | undefined, site: string): string[] {
+  if (!sh) return [];
+  if (sh.connection === 'app') {
+    return sh.terms_published
+      ? [`Shopify: ${sh.shop ?? 'The store'} is connected through the Checkbox app; renewal terms published to the app block on ${new Date(sh.terms_published.published * 1000).toISOString().slice(0, 10)}. If the storefront does not show them, the merchant still has to place the "Renewal terms + consent" block once: ${sh.theme_editor_url ?? 'theme editor'}. publish_shopify_terms republishes after plan changes.`]
+      : [`Shopify: ${sh.shop ?? 'The store'} is connected through the Checkbox app; the renewal terms are not published yet: call publish_shopify_terms with site "${site}", then the merchant places the block once (${sh.theme_editor_url ?? 'theme editor'}).`];
+  }
+  if (sh.connection === 'own_app') return [`Shopify: ${sh.shop ?? 'The store'} is connected with its own custom-app token (read-only): use the standalone theme snippet from the plan's sign-up task, or have the merchant install the Checkbox Shopify app so publish_shopify_terms can update the block.`];
+  return ['Shopify: the store is not connected. Only the merchant can connect it: install the Checkbox app in the Shopify admin, open it and click "Connect to Checkbox" (then publish_shopify_terms works).'];
+}
+
 const getSiteStatus: ToolDef = {
   name: 'get_site_status',
   title: 'Get a site\'s compliance status',
@@ -1611,6 +1630,7 @@ const getSiteStatus: ToolDef = {
       ...(todo.length ? [`To do (${todo.length}, from the compliance plan, in order):`, ...todo.map((t, i) => `${i + 1}. ${t.id} ${todoLine(t)}`)] : []),
       ...(evaluated && label ? pendingLive.slice(0, 6).map((p) => `LIVE CHECK PENDING ${p.check_id}: ${p.what} — ${p.completes}`) : []),
       ...(ro ? [ro] : []),
+      ...shopifyLines((site as { shopify?: SiteShopifyLite | null }).shopify, site.id),
     ];
     const { open_findings: _open, needs_review: _nr, ...complianceLite } = (site.compliance ?? {}) as Record<string, unknown>;
     return {
@@ -1699,6 +1719,47 @@ const getFinding: ToolDef = {
       notes: [complianceBullet(finding.check_id, finding.compliance, finding.status, finding.title)].filter((x): x is string => !!x),
       data: { finding, fix },
       next: nextActionOf(fix) ?? { type: 'apply_fix', message: 'Apply fix (or the matching task from get_compliance_plan), then call verify_site.', operation_id: 'verifySite' },
+    };
+  },
+};
+
+interface ShopifyPublicationLite {
+  id: string;
+  site: string;
+  shop: string;
+  disclosure: string;
+  consent_label: string;
+  theme_editor_url: string;
+  next_action?: NextAction;
+}
+
+const publishShopifyTerms: ToolDef = {
+  name: 'publish_shopify_terms',
+  title: 'Publish renewal terms to the Shopify app block (write)',
+  description: [
+    'WRITE (admin key). Shopify store linked through the Checkbox Shopify app (get_site_status: shopify.connection "app"): publishes the engine-verified renewal terms + consent label for the site\'s real plan to the Checkbox app block. Read-only on the store except that app-owned metafield (no theme/product/checkout edits); safe to repeat.',
+    'The merchant still places the "Renewal terms + consent" block once: give them theme_editor_url from the result. Then verify_site.',
+    'shopify_not_connected: only the merchant can install the app in Shopify and click "Connect to Checkbox". terms_incomplete: follow next_action.',
+  ].join('\n'),
+  input: {
+    site: requiredSite,
+    cancel_url: z.string().max(2048).optional().describe('Cancellation URL to state (default: detected).'),
+    plan: z.string().max(200).optional().describe('Plan / price id (default: detected).'),
+  },
+  scopes: ['fixes:write'],
+  annotations: { ...write(true, true), title: 'Publish Shopify terms' },
+  async run(args, { api }) {
+    const site = String(args.site);
+    const r = await api.request<ShopifyPublicationLite>('POST', `/v1/sites/${enc(site)}/fixes/shopify/publish`, { body: pick(args, ['cancel_url', 'plan']) });
+    return {
+      headline: `Published the verified renewal terms to the Checkbox app block on ${r.shop} (${r.id}).`,
+      notes: [
+        `Disclosure: ${untrusted(r.disclosure, 600)}`,
+        `Consent checkbox: ${untrusted(r.consent_label, 200)}`,
+        `Only the merchant can place the block (once): ask them to open ${r.theme_editor_url} , check the "Renewal terms + consent" block sits directly above the add-to-cart button, and click Save. Later publishes update it in place.`,
+      ],
+      data: r,
+      next: r.next_action ?? { type: 'place_theme_block', message: `After the merchant saved the block in the theme editor, call verify_site for ${r.site}.`, operation_id: 'verifySite' },
     };
   },
 };
@@ -2236,6 +2297,7 @@ export const TOOLS: readonly ToolDef[] = [
   getSiteStatus,
   listFindings,
   getFinding,
+  publishShopifyTerms,
   runScan,
   getScan,
   listLawUpdates,
@@ -2276,6 +2338,7 @@ export const TOOL_OPERATIONS: Record<string, string[]> = {
   get_site_status: ['retrieveSite', 'retrieveLatestEvaluation', 'listFindings'],
   list_findings: ['listFindings'],
   get_finding: ['retrieveFinding', 'retrieveFindingFix'],
+  publish_shopify_terms: ['publishShopifyTerms'],
   run_scan: ['createScan'],
   get_scan: ['retrieveScan'],
   list_law_updates: ['listLawUpdates'],
