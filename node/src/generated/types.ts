@@ -571,8 +571,8 @@ export interface SetupSessionUpdate {
   support_email?: string;
   /** The brand subscribers know (it names the seller in generated disclosures and emails). Default: the site's host name, which the plan asks you to replace. */
   merchant_name?: string;
-  /** Billing platform. */
-  billing_platform?: "stripe" | "shopify" | "recharge" | "chargebee" | "recurly" | "paddle" | "woocommerce" | "custom";
+  /** Billing platform. lemon_squeezy: Checkbox checks your pages and emails (no billing connection). */
+  billing_platform?: "stripe" | "shopify" | "recharge" | "chargebee" | "recurly" | "paddle" | "lemon_squeezy" | "woocommerce" | "custom";
   /** Plans and prices (sets the free-trial and term facts the law depends on). */
   plans?: Array<SetupPlan>;
   /** Facts about the builder's codebase. */
@@ -1516,6 +1516,8 @@ export interface EvidenceItem {
   screenshot_ref?: string;
   /** When it was captured / received. */
   at?: string;
+  /** Set when a Checkbox test run recorded this page view (not a scan of your site). */
+  test_run_id?: string;
 }
 
 /** What a verdict was based on. Never a pass without it; needs_review says what is missing. */
@@ -2288,6 +2290,56 @@ export interface CertificateList {
   object: "list";
   /** Certificates, newest first. */
   data: Array<Certificate>;
+  /** Whether more items exist after this page. Pass the last id as starting_after to fetch them. */
+  has_more: boolean;
+  /** The URL of this list. */
+  url: string;
+}
+
+/** One email Checkbox Notices sent (or tried to send) for the site. */
+export interface NoticeSend {
+  /** Unique identifier of the notice (ntc_…). */
+  id: string;
+  /** String representing the object's type. Always "notice_send". */
+  object: "notice_send";
+  /** The site. */
+  site: string;
+  /** Notice kind. */
+  kind: "acknowledgment" | "trial_ending" | "renewal_reminder" | "annual_terms" | "price_change" | "cancellation_confirmation" | "charge_notice";
+  /** sent: the provider accepted it; failed: will be retried while its window is open; skipped: not sent, error says why; bounced; claimed: being sent. */
+  status: "claimed" | "sent" | "failed" | "bounced" | "skipped";
+  /** A "Send a test" sample (never counts toward a check). */
+  sample: boolean;
+  /** Billing platform of the subscription. */
+  platform: string;
+  /** Billing-platform subscription id (null for a sample). */
+  subscription: string | null;
+  /** Masked recipient address. */
+  recipient: string | null;
+  /** Subject line. */
+  subject: string | null;
+  /** Sent after its window opened late. */
+  late: boolean;
+  /** Why it failed or was skipped. */
+  error: string | null;
+  /** Send attempts. */
+  attempts: number;
+  /** When it was due. Unix timestamp in seconds. */
+  due: number | null;
+  /** When it was sent. Unix timestamp in seconds. */
+  sent: number | null;
+  /** When the send was first claimed. Unix timestamp in seconds. */
+  created: number;
+  /** Evidence record of the sent email. */
+  evidence: string | null;
+}
+
+/** A page of checkbox notices sends, newest first. */
+export interface NoticeSendList {
+  /** String representing the object's type. Always "list". */
+  object: "list";
+  /** Checkbox Notices sends, newest first. */
+  data: Array<NoticeSend>;
   /** Whether more items exist after this page. Pass the last id as starting_after to fetch them. */
   has_more: boolean;
   /** The URL of this list. */
@@ -3339,8 +3391,10 @@ export interface PageCheckParams {
     /** Plan name, as in setup plans[] (updateSetupSession; alias of plan_name). */
     name?: string;
   }>;
-  /** Where the shopper pays: own_page (a form on this page), stripe_checkout or payment_link (a Stripe-hosted page that collects consent, so no checkbox is needed here). Inferred from a purchase link to buy.stripe.com / checkout.stripe.com when absent. */
+  /** Where the shopper pays: own_page (a form on this page), stripe_checkout or payment_link (a Stripe-hosted page that collects consent, so no checkbox is needed here). Inferred from a purchase link to buy.stripe.com / checkout.stripe.com, or to one of payment_links, when absent. */
   checkout_type?: "own_page" | "stripe_checkout" | "payment_link";
+  /** Your Stripe Payment Link URLs (buy.stripe.com or your own domain). A link to one of them is the purchase button, and the purchase and consent complete on Stripe, so no checkbox is added on this page. With site, the Payment Links read from your connected Stripe account are added. */
+  payment_links?: Array<string>;
   /** A site of yours (site_…): the page is judged exactly as verifyTask judges it — against the site's plans (the connected Stripe Prices win over plans typed in setup), its jurisdictions and its checkout type. These replace terms, plans, jurisdictions and checkout_type when the site knows them. Without it, the one site of the account with Stripe connected gives the plans when there is exactly one (warning site_from_stripe says so). "none" judges only what you send. */
   site?: string;
   /** Where you sell: "all" (default) or state codes ("US-CA", "CA", "US-NY"; "US-FED" is always included). */
@@ -5153,6 +5207,18 @@ export interface RevokeCertificateParams {
   reason: string;
 }
 
+/** Parameters of `noticeSends.list()` (listNoticeSends). */
+export interface ListNoticeSendsParams {
+  /** At most this many rows (default 50). */
+  limit?: number;
+  /** Only this kind. */
+  kind?: "acknowledgment" | "trial_ending" | "renewal_reminder" | "annual_terms" | "price_change" | "cancellation_confirmation" | "charge_notice";
+  /** Only sends for this billing-platform subscription id. */
+  subscription?: string;
+  /** Include "Send a test" samples. */
+  include_samples?: "true" | "false";
+}
+
 /** Parameters of `notices.listDue()` (listDueNotices). */
 export interface ListDueNoticesParams {
   /** Number of objects to return, 1-100 (default 10). */
@@ -5690,7 +5756,7 @@ export const ERROR_CODES = {
   idempotency_key_reused: { status: 400, type: "idempotency_error", description: "The Idempotency-Key was already used with different parameters within 24 hours." },
   test_key_missing: { status: 400, type: "invalid_request_error", description: "A Stripe test run needs a Stripe TEST-mode key stored for the site: the agent stores the restricted test key (rk_test_…) with createTestCredential, or a person adds it in the dashboard." },
   test_key_not_test_mode: { status: 400, type: "invalid_request_error", description: "The billing key is a live-mode (or malformed) key. Agents only store TEST-mode restricted keys (rk_test_…); a human adds live keys in the Checkbox dashboard." },
-  test_key_not_restricted: { status: 400, type: "invalid_request_error", description: "The key is a Stripe secret key (sk_test_…). Store a restricted test key (rk_test_…) with the permissions on Checkbox's key checklist instead; `message` lists them." },
+  test_key_not_restricted: { status: 400, type: "invalid_request_error", description: "The key is a full Stripe secret key (sk_test_… or sk_live_…), which is refused on every connect path (createTestCredential, connectBillingPlatform, the dashboard). Use a restricted key (rk_test_…) with the permissions on Checkbox's key checklist instead; `message` lists them." },
   test_key_declined: { status: 403, type: "permission_error", description: "The owner did not allow the agent to use the project's Stripe TEST key when approving the setup; only a person can add it, in the dashboard." },
   test_key_rejected: { status: 400, type: "invalid_request_error", description: "Stripe rejected the test-mode key or it lacks a permission test runs need; `message` names it." },
   authorization_pending: { status: 400, type: "invalid_request_error", description: "Device login: the human has not approved yet. Keep polling createDeviceToken every `interval` seconds." },

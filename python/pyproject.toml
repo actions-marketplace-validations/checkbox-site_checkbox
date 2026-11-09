@@ -11,7 +11,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
 authors = [{ name = "Checkbox", email = "support@checkbox.site" }]
-keywords = ["subscription", "auto-renewal", "automatic renewal", "compliance", "ROSCA", "click to cancel", "stripe", "checkout"]
+keywords = ["subscription", "auto-renewal", "automatic renewal", "auto-renewal law", "compliance", "ROSCA", "click to cancel", "FTC", "negative option", "renewal reminder", "stripe", "stripe checkout", "checkout"]
 dependencies = []
 classifiers = [
   "Development Status :: 4 - Beta",

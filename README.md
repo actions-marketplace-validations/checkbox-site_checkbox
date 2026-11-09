@@ -9,7 +9,7 @@ npx @checkbox-site/cli check disclosure --offline \
 ```
 
 ```text
-FAIL  disclosure · all jurisdictions · rules 1.4.0 · catalog 2026.11.10.1 · offline
+FAIL  disclosure · all jurisdictions · rules 1.4.0 · catalog 2026.11.09.2 · offline
   ✗ signup.disclosure.autorenew_language (critical)
   ✓ signup.disclosure.price (critical)
   ✓ signup.disclosure.frequency (critical)

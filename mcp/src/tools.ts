@@ -32,6 +32,11 @@ export interface ToolContext {
   devicePoll?: { maxWaitMs: number; intervalMs: number };
   /** An API client for a key issued during this call (remote: the rest of setup_checkbox runs with it). */
   apiForKey?: (secretKey: string) => CheckboxApi;
+  /**
+   * stdio (round 25, pilot 24 item 12): writes the issued keys to a git-ignored file in the project, so the result
+   * carries only a hint and the secret key never enters the LLM transcript.
+   */
+  saveKeys?: (keys: IssuedKeys) => Promise<{ ok: true; file: string; gitignored: boolean; note?: string } | { ok: false; error: string }>;
 }
 
 export interface ToolDef {
@@ -152,12 +157,12 @@ const setupFactsShape = {
   privacy_url: z.string().max(2048).nullable().optional().describe('Privacy policy URL.'),
   refund_url: z.string().max(2048).nullable().optional().describe('Refund policy URL.'),
   cancellation_url: z.string().max(2048).nullable().optional().describe('Cancellation policy URL, if separate from the Terms.'),
-  support_email: z.string().max(320).optional().describe('Support address subscribers can write to.'),
+  support_email: z.string().max(320).optional().describe('Support address for subscribers.'),
   merchant_name: z.string().max(100).optional().describe('The brand subscribers know (names the seller in generated disclosures), e.g. from the <title> or package.json (also accepted as "brand"). Default: the host name, which the plan then asks you to replace.'),
   billing_platform: z
-    .enum(['stripe', 'shopify', 'recharge', 'chargebee', 'recurly', 'paddle', 'woocommerce', 'custom'])
+    .enum(['stripe', 'shopify', 'recharge', 'chargebee', 'recurly', 'paddle', 'lemon_squeezy', 'woocommerce', 'custom'])
     .optional()
-    .describe('Billing platform the code uses.'),
+    .describe('Billing platform.'),
   plans: z
     .array(
       strictObject(
@@ -530,7 +535,7 @@ interface SitePlanLite {
 /** Round 20: one line with the plans Checkbox judges the site against (setup's site_plans), so no second call is needed. */
 export function sitePlansNote(plans: unknown): string | null {
   if (!Array.isArray(plans)) return null;
-  if (!plans.length) return 'Plans: none known yet. Pass plans[] (name, price, interval, trial, Stripe price id) with update_setup, or ask the human to connect Stripe.';
+  if (!plans.length) return 'Plans: none known yet. Pass plans[] ({ name, amount, currency, interval, trial_days, price_id }) with update_setup, or ask the human to connect Stripe.';
   const lines = (plans as SitePlanLite[]).slice(0, 6).map((p) => {
     const every = (p.interval_count ?? 1) > 1 ? `every ${p.interval_count} ${p.interval}s` : `/${p.interval ?? '?'}`;
     const trial = p.trial_days ? `, ${p.trial_days}-day trial` : ', no trial';
@@ -638,7 +643,7 @@ const setupCheckbox: ToolDef = {
     'Connected through the Checkbox connector (OAuth: claude.ai, Claude Desktop, Claude Code /mcp, Cursor, VS Code): the human already approved in the browser; there is NO key to ask for, paste or save. Call it with site_url (and what else you know): it registers the site and runs the first checks in the same call.',
     'Pass everything you already know from the codebase: site_url, checkout_url, terms/privacy/refund/cancellation URLs, billing_platform, plans, project.layout_file. Checkbox fetches and checks the Terms itself.',
     '',
-    'Only for clients without OAuth (no API key configured on this server): it returns a link for the HUMAN to open and click Approve (free, no card). Show them the link in one line, then call setup_checkbox again with the returned device_code — it waits up to ~50 s; call again while it says pending. On approval it returns test-mode API keys (shown once): save CHECKBOX_SECRET_KEY to .env.local (git-ignored), never commit it, and never ask the human to paste a key.',
+    'Only for clients without OAuth (no API key configured on this server): it returns a link for the HUMAN to open and click Approve (free, no card). Show them the link in one line, then call setup_checkbox again with the returned device_code — it waits up to ~50 s; call again while it says pending. On approval the stdio server saves the key to the git-ignored .env.local, showing a hint; the remote one returns it once: save it to .env.local, never commit it or ask for a pasted key.',
     '',
     'After this: follow next_action (usually verify the domain and install the snippet, then get_setup_status with verify=true), then get_compliance_plan.',
   ].join('\n'),
@@ -665,15 +670,23 @@ const setupCheckbox: ToolDef = {
         };
       }
       const notes: string[] = [];
+      const saved = ctx.saveKeys ? await ctx.saveKeys(res).catch((err: unknown) => ({ ok: false as const, error: err instanceof Error ? err.message : String(err) })) : null;
       if (ctx.adoptKeys) {
         await ctx.adoptKeys(res);
         notes.push('This MCP server now uses the new test-mode key for the rest of the session (more tools are now available).');
-        notes.push('Save CHECKBOX_SECRET_KEY to .env.local (and set CHECKBOX_API_KEY in the MCP server config) so future sessions keep working.');
+        if (saved?.ok) {
+          notes.push(`The secret key was saved to ${saved.file} in this project${saved.gitignored ? ' (git-ignored)' : ' (add it to .gitignore: this folder is not a git repository)'} and is not shown here: never print, copy or commit it. ${saved.note ?? ''}This server reads it from there on its next start.`.replace(/ +/g, ' '));
+        } else if (saved) {
+          notes.push(`The key could not be saved in this project (${saved.error.slice(0, 160)}), and it is not shown here. This server uses it until it stops; for a lasting key, the human creates one in the Checkbox dashboard (Agent & API) and sets CHECKBOX_API_KEY in the MCP server config.`);
+        } else {
+          notes.push('Save CHECKBOX_SECRET_KEY to .env.local (and set CHECKBOX_API_KEY in the MCP server config) so future sessions keep working.');
+        }
       } else {
         notes.push('This remote MCP connection is stateless and keeps no key: save CHECKBOX_SECRET_KEY to .env.local and pass it on the connection (Authorization: Bearer) for the next calls:');
         notes.push(`claude mcp add --transport http checkbox ${ctx.mcpUrl} --header "Authorization: Bearer $CHECKBOX_SECRET_KEY" (Cursor / VS Code: add the same header to the server config). Until then, the plan below is all you need; the HTTP API works with the key right away.`);
       }
-      notes.push('The secret key is shown only this once. Never commit it; the publishable key (pk_) is safe in browser code (e.g. NEXT_PUBLIC_CHECKBOX_PUBLISHABLE_KEY).');
+      if (!saved) notes.push('The secret key is shown only this once. Never commit it; the publishable key (pk_) is safe in browser code (e.g. NEXT_PUBLIC_CHECKBOX_PUBLISHABLE_KEY).');
+      else notes.push('The publishable key (pk_) is safe in browser code (e.g. NEXT_PUBLIC_CHECKBOX_PUBLISHABLE_KEY).');
       // Round 16 (pilot 15, sveltekit / change-guard): two public keys in one response, unexplained.
       notes.push("Two public keys: the snippet tag's data-key is the site's snippet key (install.snippet_key; use the script_tag exactly as given); publishable_key is the account key for Checkbox Elements and consent receipts only.");
       // In the same call, with the new key: apply the facts given (they are not lost between the two calls), run the
@@ -717,10 +730,11 @@ const setupCheckbox: ToolDef = {
         notes,
         ...(next ? { next } : {}),
         data: {
-          ...res,
+          ...(saved ? withoutSecrets(res) : res),
           site,
           ...(next ? { next_action: next } : {}),
-          env: { CHECKBOX_SECRET_KEY: res.secret_key, ...(res.publishable_key ? { CHECKBOX_PUBLISHABLE_KEY: res.publishable_key } : {}) },
+          ...(saved?.ok ? { key_file: saved.file } : {}),
+          env: { CHECKBOX_SECRET_KEY: saved ? `${hintOf(res.secret_key)} (${saved.ok ? `saved in ${saved.file}` : 'not shown'})` : res.secret_key, ...(res.publishable_key ? { CHECKBOX_PUBLISHABLE_KEY: res.publishable_key } : {}) },
           public_keys: labelledPublicKeys(snippetKey ?? (res as { install?: { snippet_key?: unknown } }).install?.snippet_key, res.publishable_key),
           ...(firstCheck ? { first_check: firstCheck } : {}),
           ...(inputWarnings.length ? { warnings: inputWarnings } : {}),
@@ -770,6 +784,18 @@ const setupCheckbox: ToolDef = {
     };
   },
 };
+
+/** "ck_test_…ab12": recognisable, never usable. */
+function hintOf(key: string | null | undefined): string | null {
+  if (!key) return null;
+  const m = /^([a-z]{2}_(?:live|test)_)/.exec(key);
+  return `${m?.[1] ?? key.slice(0, 3)}…${key.slice(-4)}`;
+}
+
+/** The device token without its secret keys (hints only): what the stdio server returns once it saved them. */
+function withoutSecrets<T extends IssuedKeys>(res: T): T {
+  return { ...res, secret_key: hintOf(res.secret_key)!, ...(res.live_secret_key ? { live_secret_key: hintOf(res.live_secret_key) } : {}) };
+}
 
 /**
  * Round 20 (pilot 19 item 16, sveltekit / change-guard: a pk_ site key and a pk_test_ key side by side, unlabelled): each
@@ -1885,7 +1911,8 @@ const getSiteStatus: ToolDef = {
     const ro = unverifiedScanNote((site as { unverified_scan?: unknown }).unverified_scan);
     const notes = [
       ...(todo.length ? [`To do (${todo.length}, from the compliance plan, in order):`, ...todo.map((t, i) => `${i + 1}. ${t.id} ${todoLine(t)}`)] : []),
-      ...(evaluated && label ? pendingLive.slice(0, 6).map((p) => `LIVE CHECK PENDING ${p.check_id}: ${p.what} — ${p.completes}`) : []),
+      // Round 25 (pilot 24 item 22: "4 live checks pending" listed 3): every pending live check the label counts.
+      ...(evaluated && label ? pendingLive.map((p) => `LIVE CHECK PENDING ${p.check_id}: ${p.what} — ${p.completes}`) : []),
       ...(ro ? [ro] : []),
       ...shopifyLines((site as { shopify?: SiteShopifyLite | null }).shopify, site.id),
     ];
@@ -2553,7 +2580,7 @@ const callApi: ToolDef = {
  * brand are read as merchant_name; any other unknown field is listed back as ignored.
  */
 export const SETUP_FIELD_ALIASES: Readonly<Record<string, string>> = Object.freeze({ brand: 'merchant_name', brand_name: 'merchant_name', business_name: 'merchant_name', company_name: 'merchant_name', platform: 'billing_platform' });
-const BILLING_PLATFORMS = new Set(['stripe', 'shopify', 'recharge', 'chargebee', 'recurly', 'paddle', 'woocommerce', 'custom']);
+const BILLING_PLATFORMS = new Set(['stripe', 'shopify', 'recharge', 'chargebee', 'recurly', 'paddle', 'lemon_squeezy', 'woocommerce', 'custom']);
 
 export function normalizeSetupArgs(raw: Record<string, unknown>, known: ReadonlySet<string>): { args: Record<string, unknown>; aliased: string[]; ignored: string[] } {
   const args: Record<string, unknown> = {};

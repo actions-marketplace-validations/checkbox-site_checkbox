@@ -860,6 +860,23 @@ OPERATIONS: Dict[str, Dict[str, Any]] = {
         "paginated": False,
         "summary": "Revoke a certificate",
     },
+    "listNoticeSends": {
+        "operation_id": "listNoticeSends",
+        "namespace": "notice_sends",
+        "method": "list",
+        "http_method": "GET",
+        "path": "/v1/sites/{site}/notice_sends",
+        "path_params": ("site", ),
+        "query_params": ("limit", "kind", "subscription", "include_samples", ),
+        "body": False,
+        "idempotent": False,
+        "auth": True,
+        "scope": "notices:read",
+        "response": "json",
+        "list": True,
+        "paginated": False,
+        "summary": "List Checkbox Notices sends",
+    },
     "retrieveNoticeSettings": {
         "operation_id": "retrieveNoticeSettings",
         "namespace": "notice_settings",
@@ -2048,7 +2065,7 @@ class SitesResource(Resource):
     def connect_billing_platform(self, site: str, params: Optional["types.ConnectBillingPlatformParams"] = None, /, *, request_options: Optional[RequestOptions] = None, **kwargs: Any) -> "types.Integration":
         """Connect a billing platform.
 
-        Connects the site's billing platform with the one restricted key (a Stripe restricted key, a Recharge token, a Shopify Admin API token, a Chargebee read-only API key, a Recurly private API key or a Paddle API key with read permissions), so Checkbox reads the customer-portal and reminder settings. Stripe: One Stripe restricted key per site: Read permissions for the checks, and Write permissions that Checkbox uses only after you click Approve on a fix, or in test mode (the one exception: Webhook Endpoints, used once to add Checkbox's webhook endpoint when you connect the key) (checklist: https://checkbox.site/docs/guides/stripe-key). API keys and AI agents may connect TEST-mode keys (rk_test_…) only; a live key (rk_live_ / sk_live_) is refused with live_key_requires_dashboard, because only a person signed in to the Checkbox dashboard can connect one. The credentials are validated by reading the settings once and stored encrypted. When the key's Stripe account looks like another site's (the site's prices or Payment Links are not in it, or it is already connected in another workspace), nothing is connected and the error billing_account_mismatch asks the human to confirm; retry with confirm_account_mismatch: true only after they said yes. The account owner is emailed about every key connected.
+        Connects the site's billing platform with the one restricted key (a Stripe restricted key, a Recharge token, a Shopify Admin API token, a Chargebee read-only API key, a Recurly private API key or a Paddle API key with read permissions), so Checkbox reads the customer-portal and reminder settings. Stripe: One Stripe restricted key per site: Read permissions for the checks, and Write permissions that Checkbox uses only after you click Approve on a fix, or in test mode (the one exception: Webhook Endpoints, used once to add Checkbox's webhook endpoint when you connect the key) (checklist: https://checkbox.site/docs/guides/stripe-key). A full secret key (sk_test_ / sk_live_) is refused on every path with test_key_not_restricted: use a restricted key. API keys and AI agents may connect TEST-mode keys (rk_test_…) only; a live key (rk_live_ / sk_live_) is refused with live_key_requires_dashboard, because only a person signed in to the Checkbox dashboard can connect one. The credentials are validated by reading the settings once and stored encrypted. When the key's Stripe account looks like another site's (the site's prices or Payment Links are not in it, or it is already connected in another workspace), nothing is connected and the error billing_account_mismatch asks the human to confirm; retry with confirm_account_mismatch: true only after they said yes. The account owner is emailed about every key connected.
 
         Parameters can be given as a dict (positional) or as keyword arguments.
 
@@ -2440,6 +2457,21 @@ class CertificatesResource(Resource):
         return self._call("revokeCertificate", (certificate, ), params, kwargs, request_options)  # type: ignore[no-any-return]
 
 
+class NoticeSendsResource(Resource):
+    """``checkbox.notice_sends``"""
+
+    def list(self, site: str, params: Optional["types.ListNoticeSendsParams"] = None, /, *, request_options: Optional[RequestOptions] = None, **kwargs: Any) -> "types.NoticeSendList":
+        """List Checkbox Notices sends.
+
+        Read-only: the emails Checkbox Notices sent, or tried to send, for this site (newest first), with status and, for a failed or skipped send, why. A test run's email steps name these rows (notices_send_log). Samples ("Send a test") are left out unless include_samples=true.
+
+        Parameters can be given as a dict (positional) or as keyword arguments.
+
+        ``GET /v1/sites/{site}/notice_sends`` (operation ``listNoticeSends``, scope ``notices:read``).
+        """
+        return self._call("listNoticeSends", (site, ), params, kwargs, request_options)  # type: ignore[no-any-return]
+
+
 class NoticeSettingsResource(Resource):
     """``checkbox.notice_settings``"""
 
@@ -2595,7 +2627,7 @@ class ChecksResource(Resource):
     def email(self, params: Optional["types.EmailCheckParams"] = None, /, *, request_options: Optional[RequestOptions] = None, **kwargs: Any) -> "types.EmailCheckResult":
         """Check a subscription lifecycle email.
 
-        Checks the content of an acknowledgment (welcome) email, trial-ending reminder, renewal reminder, price-change notice, yearly terms reminder or cancellation confirmation against the requirements for that notice (renewal terms, amount, frequency, how to cancel, trial cancellation). The email is modelled as sent on time, so the verdict is about content; get send dates from checkNoticeSchedule. Prices are judged against what Stripe charges: with `site` (or, without it, the account's one site with Stripe connected) the plan fields come from the site's plans and the email is matched to the plan it names ("Annual") first; a price that contradicts it fails, and `warnings` say which site and plan were used. Returns `required_by` (requirements that make the email mandatory for this plan) and a `template` that passes the checks, with {{merge_tags}}, verified by the engine. Stateless and deterministic: nothing is stored, the same input on the same as_of date gives the same verdicts. Every verdict comes from the Checkbox rules engine over the legal catalog (federal ROSCA / EFTA plus the state automatic-renewal laws); the response carries rules_version, catalog_version and a disclaimer (not legal advice). Read `verdict`, then `next_action`: it tells you exactly what to change and to call the check again until verdict is pass.
+        Checks the content of an acknowledgment (welcome) email, trial-ending reminder, renewal reminder, price-change notice, yearly terms reminder or cancellation confirmation against the requirements for that notice (renewal terms, amount, frequency, how to cancel, trial cancellation). The email is modelled as sent on time, so the verdict is about content; get send dates from checkNoticeSchedule. Prices are judged against what Stripe charges: with `site` (or, without it and without a price in terms, the account's one site with Stripe connected) the plan fields come from the site's plans and the email is matched to the plan it names ("Annual") first; a price that contradicts it fails, and `warnings` say which site and plan were used. Without `site`, a price you send in terms is judged as sent; when it differs from every plan of that site, the result is at most needs_review and Next is update_setup (update the site's plans first). Returns `required_by` (requirements that make the email mandatory for this plan) and a `template` that passes the checks, with {{merge_tags}}, verified by the engine. Stateless and deterministic: nothing is stored, the same input on the same as_of date gives the same verdicts. Every verdict comes from the Checkbox rules engine over the legal catalog (federal ROSCA / EFTA plus the state automatic-renewal laws); the response carries rules_version, catalog_version and a disclaimer (not legal advice). Read `verdict`, then `next_action`: it tells you exactly what to change and to call the check again until verdict is pass.
 
         Parameters can be given as a dict (positional) or as keyword arguments.
 
@@ -3139,6 +3171,7 @@ class ResourceNamespaces:
     fixes: FixesResource
     evidence: EvidenceResource
     certificates: CertificatesResource
+    notice_sends: NoticeSendsResource
     notice_settings: NoticeSettingsResource
     notices: NoticesResource
     law_updates: LawUpdatesResource
@@ -3177,6 +3210,7 @@ RESOURCES = {
     "fixes": FixesResource,
     "evidence": EvidenceResource,
     "certificates": CertificatesResource,
+    "notice_sends": NoticeSendsResource,
     "notice_settings": NoticeSettingsResource,
     "notices": NoticesResource,
     "law_updates": LawUpdatesResource,

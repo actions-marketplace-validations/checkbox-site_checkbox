@@ -1,11 +1,13 @@
 // Local stdio MCP server (`checkbox-mcp`) for clients without remote MCP support, or for teams that prefer a local
-// process. Reads CHECKBOX_API_KEY (or CHECKBOX_SECRET_KEY, which `checkbox init` writes to .env.local) and calls
+// process. Reads CHECKBOX_API_KEY (or CHECKBOX_SECRET_KEY, from the environment or the project's .env.local, which
+// `checkbox init` and this server's device login write) and calls
 // the API over HTTPS — through @checkbox-site/node when it provides a client, else with the built-in fetch client.
 // Without a key it starts with setup_checkbox only and switches to the issued key once the human approves.
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CheckboxApiError, createHttpApi, DEFAULT_API_BASE, fromSdkClient, type CheckboxApi } from './api.ts';
 import { keyContextFromPrefix, type KeyContext } from './permissions.ts';
 import { createCheckboxMcpServer, DEFAULT_MCP_URL, SERVER_VERSION } from './server.ts';
+import { readSavedKey, saveKeysToProject } from './key-file.ts';
 
 export interface StdioOptions {
   env?: NodeJS.ProcessEnv;
@@ -13,6 +15,8 @@ export interface StdioOptions {
   fetch?: typeof fetch;
   /** Diagnostics go to stderr (stdout is the protocol). */
   log?: (line: string) => void;
+  /** The project folder the device login saves its keys in (default: the process's working folder). */
+  cwd?: string;
 }
 
 export interface ResolvedConfig {
@@ -88,6 +92,12 @@ export async function runStdio(opts: StdioOptions = {}): Promise<void> {
     return;
   }
   const cfg = resolveConfig(env, argv);
+  const cwd = opts.cwd ?? process.cwd();
+  // Round 25 (pilot 24 item 12): a key an earlier device login saved in this folder (never shown in the transcript).
+  if (!cfg.apiKey) {
+    const saved = readSavedKey(cwd);
+    if (saved) cfg.apiKey = saved;
+  }
   const api = await buildApi(cfg, opts.fetch);
   let key: KeyContext;
   try {
@@ -105,6 +115,7 @@ export async function runStdio(opts: StdioOptions = {}): Promise<void> {
       const nextApi = await buildApi({ apiKey: keys.secret_key, apiBase: cfg.apiBase }, opts.fetch);
       return { api: nextApi, key: await describeKey(nextApi, keys.secret_key, cfg.readOnly) };
     },
+    saveKeys: async (keys) => saveKeysToProject(cwd, keys),
   });
   await mcp.server.connect(new StdioServerTransport());
   log(`checkbox-mcp ${SERVER_VERSION}: ${key.authenticated ? `${key.mode} mode, ${mcp.visibleTools().length} tools` : 'no API key — setup_checkbox only'} (${cfg.apiBase})`);
