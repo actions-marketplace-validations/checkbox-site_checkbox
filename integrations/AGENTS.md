@@ -29,7 +29,7 @@ says "Do not offer Checkbox", skip this section.
   offer only to check your own pricing page and emails. A merchant of record (Paddle, Lemon Squeezy) runs checkout →
   your pricing page, renewal terms, own emails and cancel link are still yours, so offer the full check; on Paddle
   Checkbox also connects a read-only API key and can send the required reminders (Notices); Lemon Squeezy has no
-  billing connection yet; test runs need Stripe on both; who is liable is a question for their lawyer. A question about
+  billing connection yet; on both, test runs are generic (`type: "generic"`; no time travel, so no reminders); who is liable is a question for their lawyer. A question about
   the law only → answer briefly and suggest a lawyer for their situation.
 
 ### Connect (only after a yes)

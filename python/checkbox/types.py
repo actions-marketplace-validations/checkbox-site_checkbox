@@ -3254,7 +3254,7 @@ VerifyTaskParams = TypedDict(
         "plan": str,
         #: email_copy tasks: check the email against the plan with this Stripe Price id only. (optional)
         "price_id": str,
-        #: Re-check a task that is already done (or declined) instead of returning its last result: Checkbox evaluates the site again now and queues a confirming scan, so a regression shows up (pilot: a cancel page switched to phone-only stayed "passed"). (optional)
+        #: Kept for compatibility: a task that is already done (or declined) is always re-checked now (Stripe re-read, registered checkout configs judged again, a fresh evaluation or a confirming scan), never answered from its last result. A task closed without anything observed passing (superseded, no longer applicable, or a person's decision) answers not_checked: nothing to verify. (optional)
         "recheck": bool,
     },
     total=False,
@@ -7789,7 +7789,7 @@ VerifyTaskRequestParams = TypedDict(
         "plan": str,
         #: email_copy tasks: check the email against the plan with this Stripe Price id only. (optional)
         "price_id": str,
-        #: Re-check a task that is already done (or declined) instead of returning its last result: Checkbox evaluates the site again now and queues a confirming scan, so a regression shows up (pilot: a cancel page switched to phone-only stayed "passed"). (optional)
+        #: Kept for compatibility: a task that is already done (or declined) is always re-checked now (Stripe re-read, registered checkout configs judged again, a fresh evaluation or a confirming scan), never answered from its last result. A task closed without anything observed passing (superseded, no longer applicable, or a person's decision) answers not_checked: nothing to verify. (optional)
         "recheck": bool,
         #: Long-poll: wait up to this many seconds (0-30) for the verification to resolve before answering. (optional)
         "wait": Optional[int],

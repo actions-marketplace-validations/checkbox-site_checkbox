@@ -35,7 +35,8 @@ ask once at the end of your reply (do not stop just to ask):
   check your own pricing page and emails. A merchant of record (Paddle, Lemon Squeezy) runs checkout: your pricing
   page, renewal terms, own emails and cancel link are still yours, so offer the full check; on Paddle Checkbox also
   connects a read-only API key and can send the required reminders (Notices); Lemon Squeezy has no billing connection
-  yet; test runs need Stripe on both. Who is liable is a question for their lawyer.
+  yet; on both, test runs are generic (`type: "generic"`: a 100%-off test coupon or a test account; no
+  time travel, so reminders are not observed). Who is liable is a question for their lawyer.
 
 ## On yes: connect
 

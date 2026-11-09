@@ -8,6 +8,7 @@ import { planTodo, todoLine, type TodoTaskLike } from './todo.ts';
 import { CheckboxApiError, type CheckboxApi, type NextAction } from './api.ts';
 import { ciHint, nextActionOf, untrusted, type ToolOutput } from './format.ts';
 import { keyAllows, type KeyContext, type ToolScope } from './permissions.ts';
+import { OPERATIONS } from '@checkbox-site/node';
 
 export interface IssuedKeys {
   secret_key: string;
@@ -861,7 +862,7 @@ const updateSetup: ToolDef = {
   input: {
     setup_session: z.string().max(100).optional().describe('Setup session id (setup_…). Default: the newest one.'),
     ...setupFactsShape,
-    snippet_installed_in: z.string().max(500).optional().describe('File you added the Checkbox snippet tag to, e.g. "app/layout.tsx".'),
+    snippet_installed_in: z.union([z.string().max(500), z.array(z.string().max(300)).max(20)]).optional().describe('File(s) you added the Checkbox snippet tag to, e.g. "app/layout.tsx".'),
     env_written: z.string().max(500).optional().describe('File you wrote the keys to, e.g. ".env.local".'),
     live_site: z.string().max(100).optional().describe('Live-mode site id (site_…) if you created one with a live key.'),
     refetch_policies: z.boolean().optional().describe('Fetch the policy pages again even if their URLs did not change (after editing them).'),
@@ -871,6 +872,13 @@ const updateSetup: ToolDef = {
   async run(args, { api }) {
     const id = await resolveSetupSession(api, args.setup_session);
     const body = pick(args, [...Object.keys(setupFactsShape), 'snippet_installed_in', 'env_written', 'live_site', 'refetch_policies']);
+    // Round 29 (pilot 28 item 25, sveltekit-cursor): a snippet in several files was refused as an array; the API keeps one
+    // string, so a list is sent as "a, b".
+    if (Array.isArray(body.snippet_installed_in)) {
+      const files = (body.snippet_installed_in as string[]).map((f) => f.trim()).filter(Boolean);
+      if (files.length) body.snippet_installed_in = files.join(', ').slice(0, 500);
+      else delete body.snippet_installed_in;
+    }
     const session = await api.request<{ id: string }>('POST', `/v1/setup_sessions/${enc(id)}`, { body });
     // Round 20 (pilot 19 item 6): a plans change re-evaluates the site; say where the new plan's tasks show up.
     const notes = Array.isArray(args.plans) && args.plans.length
@@ -1095,7 +1103,7 @@ const verifyTask: ToolDef = {
       .describe('Email tasks: the new template (passes when it matches one plan fully).'),
     plan: z.string().min(1).max(200).optional().describe('Email tasks: only this plan (name).'),
     price_id: z.string().min(1).max(200).optional().describe('Email tasks: only this plan (Price id).'),
-    recheck: z.boolean().optional().describe('true re-checks a task that is already done (evaluates again now and queues a scan) instead of returning its last result.'),
+    recheck: z.boolean().optional().describe('Not needed: a done task is always re-checked now; one closed with nothing observed passing is not_checked.'),
     wait,
   },
   scopes: ['compliance_plans:write'],
@@ -1248,8 +1256,9 @@ const startTestRun: ToolDef = {
   description: [
     'Observes the WHOLE subscription lifecycle, not just the checkout: in the billing platform\'s TEST mode Checkbox subscribes a test customer (card 4242…) whose email is a Checkbox inbox, waits for your acknowledgment email, fast-forwards a Stripe test clock through every legal notice window before trial end and renewal (collecting reminder emails), then cancels online and waits for the cancellation confirmation. Nothing is charged.',
     'Needs a Stripe TEST-mode restricted key (rk_test_…) stored for the site: store it yourself with store_stripe_test_key (one key for checks, fixes and test runs; live keys stay with the human in the dashboard). Never ask the human to paste a key into the chat. If missing, the error\'s next_action says so. For non-Stripe sites use type "generic".',
-    'Usually 2-4 minutes: poll get_test_run (its next_action says when). Each step reports observations, check results and agent-readable fixes; apply them and run again.',
+    'Usually 1-2 minutes (real_checkout: a few): poll get_test_run (its next_action says when, and minutes_left estimates the rest). Each step reports observations, check results and agent-readable fixes; apply them and run again.',
     'mode "real_checkout" is the PROOF run: the shopper buys through the merchant\'s own checkout on its test deployment (stripe.checkout_url or stripe.payment_link), so the merchant\'s webhook handlers and email code fire; give stripe.test_account + stripe.cancel_url when customers cancel in the app. A step is "passed" only with evidence; "warning" means needs review.',
+    'Cancel: stripe.cancel_via "stripe_portal" (default) or "merchant_flow" (cancel_url + cancel_steps; behind a login, test_account { login_url, email, password }).',
   ].join('\n'),
   input: {
     site: siteId.optional(),
@@ -1398,7 +1407,7 @@ const checkStripeCheckoutSession: ToolDef = {
   name: 'check_stripe_checkout_session',
   title: 'Check Stripe Checkout Session params (returns corrected params)',
   description: [
-    'Before shipping Stripe Checkout code: pass EXACTLY the object your code passes to stripe.checkout.sessions.create (mode "subscription"). Checkbox evaluates it against automatic-renewal laws and returns correction.corrected_params — the full params with the fix applied, ready to paste — plus an RFC 6902 JSON patch and before/after verification per check.',
+    'Before shipping Stripe Checkout code: pass, as params, EXACTLY the object your code passes to stripe.checkout.sessions.create (mode "subscription"). Checkbox evaluates it against automatic-renewal laws and returns correction.corrected_params — the full params with the fix applied, ready to paste — plus an RFC 6902 JSON patch and before/after verification per check.',
     'With a Price id (price_…) in line_items, pass site (its plans are used) or merchant { price, interval, trial_days, merchant_name, cancel_url }.',
     'Note: Stripe styles custom_text itself, so "clear and conspicuous" stays needs_review here; the plan shows it as a note, never a fix.',
   ].join('\n'),
@@ -2547,26 +2556,55 @@ const getNoticeTemplates: ToolDef = {
 // Escape hatch
 // ---------------------------------------------------------------------------------------------------------------------
 
+/**
+ * Round 29 (pilot 28 item 25): next_actions name an operation_id, but call_api only took method + path, so agents
+ * looked the path up in openapi.json. call_api now also takes { operation_id, path_params } and fills in both.
+ */
+export function resolveCallApiTarget(args: Record<string, unknown>): { method: 'GET' | 'POST' | 'DELETE'; path: string } {
+  const opId = typeof args.operation_id === 'string' ? args.operation_id.trim() : '';
+  if (!opId) {
+    if (typeof args.path !== 'string' || !args.method) throw new ToolError('Give method and path, or operation_id (with path_params for the ids in its path).');
+    return { method: args.method as 'GET' | 'POST' | 'DELETE', path: args.path };
+  }
+  const ops = OPERATIONS as unknown as Record<string, { httpMethod: 'GET' | 'POST' | 'DELETE'; path: string; pathParams: readonly string[] }>;
+  const op = Object.prototype.hasOwnProperty.call(ops, opId) ? ops[opId] : undefined;
+  if (!op) {
+    const lower = opId.toLowerCase();
+    const close = Object.keys(ops).filter((k) => k.toLowerCase().includes(lower) || lower.includes(k.toLowerCase())).slice(0, 5);
+    throw new ToolError(`Unknown operation_id "${opId}".${close.length ? ` Did you mean ${close.join(', ')}?` : ''} Operation ids are in https://app.checkbox.site/v1/openapi.json.`);
+  }
+  if (args.method && args.method !== op.httpMethod) throw new ToolError(`${opId} is ${op.httpMethod} ${op.path}, not ${String(args.method)}: leave method out.`);
+  const given = (args.path_params && typeof args.path_params === 'object' ? args.path_params : {}) as Record<string, unknown>;
+  const missing = op.pathParams.filter((p) => typeof given[p] !== 'string' || !(given[p] as string).trim());
+  if (missing.length) throw new ToolError(`${opId} (${op.httpMethod} ${op.path}) needs path_params ${missing.map((m) => `"${m}"`).join(', ')}, e.g. {"path_params":{${op.pathParams.map((p) => `"${p}":"…"`).join(',')}}}.`);
+  const extra = Object.keys(given).filter((k) => !op.pathParams.includes(k));
+  if (extra.length) throw new ToolError(`${opId} (${op.httpMethod} ${op.path}) has no path parameter ${extra.join(', ')}${op.pathParams.length ? `; it takes ${op.pathParams.join(', ')}` : ''}. Put other fields in body or query.`);
+  const path = op.path.replace(/\{([A-Za-z0-9_]+)\}/g, (_m, name: string) => encodeURIComponent(String(given[name]).trim()));
+  if (typeof args.path === 'string' && args.path && args.path !== path) throw new ToolError(`operation_id ${opId} gives the path ${path}, but path is ${args.path}: give one of them.`);
+  return { method: op.httpMethod, path };
+}
+
 const callApi: ToolDef = {
   name: 'call_api',
   title: 'Call any Checkbox API endpoint',
   description: [
     'For a next_action whose operation has no dedicated tool (e.g. createStripeCheckoutConfig, updateTask, updateNoticeSettings, listConsents). Calls the Checkbox /v1 API with this server\'s connection; paths and bodies are in https://app.checkbox.site/v1/openapi.json.',
-    'Examples: {"method":"GET","path":"/v1/account"} ; {"method":"POST","path":"/v1/sites/site_123/domain_verification/check"}.',
+    'Examples: {"method":"GET","path":"/v1/account"} ; {"method":"POST","path":"/v1/sites/site_123/domain_verification/check"} ; {"operation_id":"createStripeCheckoutConfig","path_params":{"site":"site_123"},"body":{…}}.',
     'Never send API keys or Stripe keys through it, except a Stripe TEST restricted key via store_stripe_test_key (not call_api). Live keys are added by the human in the Checkbox dashboard, never pasted into the chat.',
     'GET is read-only. POST/DELETE change data: only do what the user or a next_action asked for. DELETE archives or removes objects — confirm with the user first.',
   ].join('\n'),
   input: {
-    method: z.enum(['GET', 'POST', 'DELETE']).describe('HTTP method.'),
-    path: z.string().max(500).describe('Path starting with /v1/, e.g. "/v1/sites/site_123/domain_verification/check".'),
+    method: z.enum(['GET', 'POST', 'DELETE']).optional().describe('HTTP method (not needed with operation_id).'),
+    path: z.string().max(500).optional().describe('Path starting with /v1/, e.g. "/v1/sites/site_123/domain_verification/check". Give this or operation_id.'),
+    operation_id: z.string().max(100).optional().describe('Instead of method + path: a next_action\'s operation_id.'),
+    path_params: z.record(z.string(), z.string().max(200)).optional().describe('With operation_id: ids in its path, e.g. {"site":"site_123"}.'),
     query: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional().describe('Query parameters.'),
     body: z.record(z.string(), z.unknown()).optional().describe('JSON body (POST).'),
   },
   scopes: [],
   annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true, title: 'Call API' },
   async run(args, { api, key }) {
-    const method = args.method as 'GET' | 'POST' | 'DELETE';
-    const path = String(args.path);
+    const { method, path } = resolveCallApiTarget(args);
     if (!/^\/v1\/[A-Za-z0-9_\-./{}]*$/.test(path) || path.includes('..') || /[{}]/.test(path)) {
       throw new ToolError('path must be a concrete /v1/… path (fill in ids; no {placeholders}, query strings or "..").');
     }

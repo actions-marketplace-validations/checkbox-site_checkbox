@@ -2069,7 +2069,7 @@ export interface VerifyTaskParams {
   plan?: string;
   /** email_copy tasks: check the email against the plan with this Stripe Price id only. */
   price_id?: string;
-  /** Re-check a task that is already done (or declined) instead of returning its last result: Checkbox evaluates the site again now and queues a confirming scan, so a regression shows up (pilot: a cancel page switched to phone-only stayed "passed"). */
+  /** Kept for compatibility: a task that is already done (or declined) is always re-checked now (Stripe re-read, registered checkout configs judged again, a fresh evaluation or a confirming scan), never answered from its last result. A task closed without anything observed passing (superseded, no longer applicable, or a person's decision) answers not_checked: nothing to verify. */
   recheck?: boolean;
 }
 

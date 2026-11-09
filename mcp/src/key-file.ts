@@ -53,8 +53,9 @@ function upsertLines(existing: string | null, entries: Array<[string, string]>, 
   let text = existing ?? '';
   const missing: Array<[string, string]> = [];
   for (const [k, v] of entries) {
-    const re = new RegExp(`^${k}=.*$`, 'm');
-    if (re.test(text)) text = text.replace(re, `${k}=${v}`);
+    const re = new RegExp(`^[ \\t]*(?:export[ \\t]+)?${k}[ \\t]*=.*$`, 'gm');
+    // A function replacement: a value is never read as a "$&" pattern. Every earlier assignment gets the new value.
+    if (re.test(text)) text = text.replace(re, () => `${k}=${v}`);
     else missing.push([k, v]);
   }
   if (missing.length) {
@@ -109,12 +110,41 @@ export function saveKeysToProject(root: string, keys: KeysToSave): SavedKeys {
   }
 }
 
-/** The CHECKBOX_SECRET_KEY saved by an earlier device login in this folder (.env.local, then .checkbox/keys.env). */
-export function readSavedKey(root: string): string | undefined {
+/**
+ * The value of NAME in a dotenv-style text: `NAME=value`, `export NAME=value`, quoted or not, with an optional trailing
+ * comment; the last assignment wins, as in dotenv loaders.
+ *
+ * Round 29 (pilot 28 item 10, security-reviewer): the reader only accepted [A-Za-z0-9_], but keys are base64url
+ * (packages/db/src/repos/api-v1.ts newKeyString), so about half contain "-". Those keys were saved and then never read
+ * back: each restart of checkbox-mcp started without a key and asked for a new device login.
+ */
+export function readEnvValue(text: string, name: string): string | undefined {
+  const re = new RegExp(`^[ \\t]*(?:export[ \\t]+)?${name}[ \\t]*=[ \\t]*(?:"([^"\\r\\n]*)"|'([^'\\r\\n]*)'|([^\\s#]*))[ \\t]*(?:#.*)?$`, 'gm');
+  let found: string | undefined;
+  for (let m = re.exec(text); m; m = re.exec(text)) found = (m[1] ?? m[2] ?? m[3] ?? '').trim();
+  return found || undefined;
+}
+
+/** Every key an earlier device login saved in this folder (.env.local, then .checkbox/keys.env), per variable. */
+export function readSavedKeys(root: string): Partial<KeysToSave> & { file?: string } {
   for (const file of [ENV_FILE, FALLBACK_FILE]) {
     const text = read(join(root, file));
-    const m = text ? /^CHECKBOX_SECRET_KEY=["']?([A-Za-z0-9_]+)["']?\s*$/m.exec(text) : null;
-    if (m?.[1]) return m[1];
+    if (!text) continue;
+    const secret = readEnvValue(text, 'CHECKBOX_SECRET_KEY');
+    if (!secret) continue;
+    const out: Partial<KeysToSave> & { file?: string } = { secret_key: secret, file };
+    const pk = readEnvValue(text, 'CHECKBOX_PUBLISHABLE_KEY');
+    const live = readEnvValue(text, 'CHECKBOX_LIVE_SECRET_KEY');
+    const livePk = readEnvValue(text, 'CHECKBOX_LIVE_PUBLISHABLE_KEY');
+    if (pk) out.publishable_key = pk;
+    if (live) out.live_secret_key = live;
+    if (livePk) out.live_publishable_key = livePk;
+    return out;
   }
-  return undefined;
+  return {};
+}
+
+/** The CHECKBOX_SECRET_KEY saved by an earlier device login in this folder (.env.local, then .checkbox/keys.env). */
+export function readSavedKey(root: string): string | undefined {
+  return readSavedKeys(root).secret_key;
 }

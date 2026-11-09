@@ -75,6 +75,46 @@ export async function describeKey(api: CheckboxApi, apiKey: string | undefined, 
   }
 }
 
+/**
+ * The key this server starts with: the configured one (flag / env), else the one an earlier device login saved in this
+ * project. Round 29 (pilot 28 item 18): a rejected configured key falls back to the project's saved key before the
+ * server starts without a key (which sends the agent to device login).
+ */
+export async function startupKey(cfg: ResolvedConfig, cwd: string, log: (line: string) => void, f?: typeof fetch): Promise<{ api: CheckboxApi; key: KeyContext }> {
+  // Round 25 (pilot 24 item 12): a key an earlier device login saved in this folder (never shown in the transcript).
+  if (!cfg.apiKey) {
+    const saved = readSavedKey(cwd);
+    if (saved) cfg.apiKey = saved;
+  }
+  let api = await buildApi(cfg, f);
+  let key: KeyContext;
+  try {
+    key = await describeKey(api, cfg.apiKey, cfg.readOnly);
+  } catch (err) {
+    // Round 29 (pilot 28 item 18): a rejected configured key falls back to the key saved in this project before any
+    // device login.
+    const saved = readSavedKey(cwd);
+    let adopted: KeyContext | undefined;
+    if (saved && saved !== cfg.apiKey) {
+      try {
+        const savedApi = await buildApi({ ...cfg, apiKey: saved }, f);
+        adopted = await describeKey(savedApi, saved, cfg.readOnly);
+        api = savedApi;
+        cfg.apiKey = saved;
+        log(`checkbox-mcp: the configured API key was rejected (${(err as Error).message}); using the key saved in this project instead.`);
+      } catch {
+        adopted = undefined;
+      }
+    }
+    if (adopted) key = adopted;
+    else {
+      log(`checkbox-mcp: the API key was rejected (${(err as Error).message}). Starting without a key: use setup_checkbox to get a new one.`);
+      key = keyContextFromPrefix(undefined, cfg.readOnly);
+    }
+  }
+  return { api, key };
+}
+
 /** Round 27 (pilot 26 item 22): the stderr note when --read-only is on but the key itself can still write. */
 export function readOnlyNote(readOnly: boolean, key: KeyContext): string | null {
   if (!readOnly || !key.authenticated || key.kind !== 'secret' || key.role === 'viewer') return null;
@@ -99,19 +139,7 @@ export async function runStdio(opts: StdioOptions = {}): Promise<void> {
   }
   const cfg = resolveConfig(env, argv);
   const cwd = opts.cwd ?? process.cwd();
-  // Round 25 (pilot 24 item 12): a key an earlier device login saved in this folder (never shown in the transcript).
-  if (!cfg.apiKey) {
-    const saved = readSavedKey(cwd);
-    if (saved) cfg.apiKey = saved;
-  }
-  const api = await buildApi(cfg, opts.fetch);
-  let key: KeyContext;
-  try {
-    key = await describeKey(api, cfg.apiKey, cfg.readOnly);
-  } catch (err) {
-    log(`checkbox-mcp: the API key was rejected (${(err as Error).message}). Starting without a key: use setup_checkbox to get a new one.`);
-    key = keyContextFromPrefix(undefined, cfg.readOnly);
-  }
+  const { api, key } = await startupKey(cfg, cwd, log, opts.fetch);
   // Round 27 (pilot 26 item 22, security-reviewer): --read-only only hides tools in this server. Say so when the key can
   // still write, so nobody mistakes it for a limit on the key.
   const note = readOnlyNote(cfg.readOnly, key);
