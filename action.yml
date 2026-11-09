@@ -34,7 +34,7 @@ inputs:
   version:
     description: Version of @checkbox-site/cli to run.
     required: false
-    default: "0.4.1"
+    default: "0.4.2"
   node-version:
     description: Node.js version (22+ runs TypeScript "module" entries without tsx).
     required: false

@@ -9,7 +9,7 @@ npx @checkbox-site/cli check disclosure --offline \
 ```
 
 ```text
-FAIL  disclosure · all jurisdictions · rules 1.4.0 · catalog 2026.11.09.1 · offline
+FAIL  disclosure · all jurisdictions · rules 1.4.0 · catalog 2026.11.10.1 · offline
   ✗ signup.disclosure.autorenew_language (critical)
   ✓ signup.disclosure.price (critical)
   ✓ signup.disclosure.frequency (critical)
@@ -21,16 +21,14 @@ FAIL  disclosure · all jurisdictions · rules 1.4.0 · catalog 2026.11.09.1 · 
   ✓ signup.consent.not_prechecked (critical)
 
 Suggested replacement (passes the checks) (verified by the rules engine)
-  disclosure: Your Acme subscription automatically renews every month at $19.99 (plus applicable taxes) until you cancel.
-              You can cancel anytime online at https://acme.example/cancel; cancellation takes effect at the
-              end of your current billing period. To avoid the next charge, cancel before your next billing
-              date (every month).
-  checkbox:   I agree that my Acme subscription renews automatically every month at $19.99 (plus applicable taxes) until I
-              cancel, and I understand I can cancel anytime online at https://acme.example/cancel.
+  disclosure:     Renews automatically every month at $19.99 until you cancel. Cancel anytime online at
+                  https://acme.example/cancel.
+  checkbox:       I agree that my Acme subscription renews automatically every month at $19.99 (plus applicable taxes) until I
+                  cancel, and I understand I can cancel anytime online at https://acme.example/cancel.
 ```
 
-The output is abridged: the full run also prints each failing check's reason and fix. ✓ passes · ✗ fails · ? needs
-review. More offline checks: https://checkbox.site/docs/cli#offline
+The output is abridged: the full run also prints each failing check's reason and fix, and a fuller version of the
+line. ✓ passes · ✗ fails · ? needs review. More offline checks: https://checkbox.site/docs/cli#offline
 
 ## What it is
 

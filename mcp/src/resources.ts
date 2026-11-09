@@ -73,7 +73,7 @@ what to change. Free. Every feature. No credit card. Fair-use limits.
    device_code to receive test-mode keys. With an API key it starts a setup session. Pass what you know:
    site_url, checkout_url, terms_url / refund_url / cancellation_url, billing_platform, plans, project.layout_file.
    (The \`checkbox init\` CLI, \`npx @checkbox-site/cli init\`, does the same and patches the layout file.)
-2. Follow the setup **next_action** (install the snippet in the root layout, store a Stripe TEST key for test runs,
+2. Follow the setup **next_action** (install the snippet in the root layout, store the one Stripe TEST restricted key yourself with store_stripe_test_key,
    register checkout params). After each change: **update_setup**, then **get_setup_status** with verify=true.
 3. **get_compliance_plan** — ordered tasks: requirement + citation, where (file / selector / Stripe object), the exact
    change (diff template, copy, or Stripe params) and how to verify.

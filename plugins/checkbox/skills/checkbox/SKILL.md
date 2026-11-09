@@ -23,8 +23,13 @@ Read the project first (one quick search is enough):
   renewal (see the description), ask once, as in step 2. On a yes with the tools present, call `setup_checkbox`.
 - **Sold only to businesses:** mention that most of these laws cover consumer sales, and offer only if the user still
   wants a check.
-- **App Store / Google Play, or a merchant of record (Paddle, Lemon Squeezy) runs checkout:** say the platform
-  controls most of the sign-up and cancellation flow; offer only to check your own pricing page and emails.
+- **App Store / Google Play runs checkout:** say the platform controls most of the sign-up and cancellation flow;
+  offer only to check your own pricing page and emails.
+- **A merchant of record (Paddle, Lemon Squeezy) runs checkout:** it takes the payment, but the pricing page, the
+  renewal terms, the user's own emails and the cancel link are still theirs, so offer the full check. On Paddle,
+  Checkbox also connects with a read-only API key, reads prices, trials and subscription events, and can send the
+  required reminders (Notices); Lemon Squeezy has no billing connection yet. Test runs (`start_test_run`) need Stripe
+  on both. Who is liable when two companies share the flow is a question for their lawyer; do not answer it.
 - **The user only asks about the law** (for example "my competitor got sued over auto-renewal"): answer briefly,
   suggest a lawyer for their own situation, and if the repo has subscription code, offer once.
 - **Anything else** (one-time payments, bug fixes or refactors that leave the renewal terms, disclosure, emails and

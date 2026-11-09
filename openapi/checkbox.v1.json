@@ -623,7 +623,7 @@
             "properties": {
               "stripe_test_key": {
                 "type": "boolean",
-                "description": "The human allowed Checkbox to use the project's Stripe TEST key (send it with createTestCredential).",
+                "description": "The human allowed Checkbox to use the project's Stripe TEST key (store it with createTestCredential; it must be a restricted rk_test_ key).",
                 "example": true
               },
               "live_keys": {
@@ -1623,7 +1623,7 @@
                 "properties": {
                   "recommended": {
                     "type": "boolean",
-                    "description": "true while no restricted (rk_test_) key is stored.",
+                    "description": "true while no restricted (rk_test_) key is stored. The agent stores it with createTestCredential.",
                     "example": true
                   },
                   "reason": {
@@ -1643,7 +1643,7 @@
                       "properties": {
                         "resource": {
                           "type": "string",
-                          "description": "Stripe resource.",
+                          "description": "Stripe resource, as the restricted-key screen names it.",
                           "example": "Test clocks"
                         },
                         "access": {
@@ -1652,8 +1652,13 @@
                             "read",
                             "write"
                           ],
-                          "description": "Access.",
+                          "description": "Access to tick (write includes read).",
                           "example": "write"
+                        },
+                        "why": {
+                          "type": "string",
+                          "description": "One line: why Checkbox needs it.",
+                          "example": "Test runs fast-forward through trial end and renewal."
                         }
                       },
                       "required": [
@@ -1661,11 +1666,12 @@
                         "access"
                       ]
                     },
-                    "description": "Least-privilege permissions.",
+                    "description": "The one key checklist: every permission Checkbox uses (checks, fixes after the human approves, test runs).",
                     "example": [
                       {
                         "resource": "Test clocks",
-                        "access": "write"
+                        "access": "write",
+                        "why": "Test runs fast-forward through trial end and renewal."
                       }
                     ]
                   }
@@ -1684,7 +1690,8 @@
                   "permissions": [
                     {
                       "resource": "Test clocks",
-                      "access": "write"
+                      "access": "write",
+                      "why": "Test runs fast-forward through trial end and renewal."
                     }
                   ]
                 }
@@ -1710,7 +1717,8 @@
                 "permissions": [
                   {
                     "resource": "Test clocks",
-                    "access": "write"
+                    "access": "write",
+                    "why": "Test runs fast-forward through trial end and renewal."
                   }
                 ]
               }
@@ -2502,7 +2510,8 @@
                     "permissions": [
                       {
                         "resource": "Test clocks",
-                        "access": "write"
+                        "access": "write",
+                        "why": "Test runs fast-forward through trial end and renewal."
                       }
                     ]
                   }
@@ -2711,7 +2720,7 @@
                   "string",
                   "null"
                 ],
-                "description": "The queued scan (scan_…); with reason \"already scanned\", the newest scan (read it with retrieveScan).",
+                "description": "The queued scan (scan_…); with a reason, the scan still in progress (\"a scan is running/queued\": wait for it) or, with \"already scanned\", the newest scan (read it with retrieveScan).",
                 "example": "scan_3f9a1c2e7b4d4e0f9a8b7c6d5e4f3a2b"
               },
               "reason": {
@@ -3217,6 +3226,47 @@
         ],
         "description": "Account-wide legal hold: suspends every deletion of the account's records until turned off."
       },
+      "SiteIntroOffer": {
+        "type": "object",
+        "properties": {
+          "price_id": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "The billing-platform price the intro applies to (e.g. a Stripe price id).",
+            "example": "price_1Pabc"
+          },
+          "intro_amount": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "The intro price per billing period, in minor units (900 = $9.00). Give exactly one of intro_amount, intro_percent_off or intro_amount_off.",
+            "example": 900
+          },
+          "intro_percent_off": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 99,
+            "description": "A coupon: percent off the regular price.",
+            "example": 20
+          },
+          "intro_amount_off": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "A coupon: amount off per billing period, in minor units.",
+            "example": 4000
+          },
+          "intro_periods": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 36,
+            "description": "How many billing periods the intro price lasts (default 1).",
+            "example": 1
+          }
+        },
+        "required": [
+          "price_id"
+        ],
+        "description": "An introductory price or coupon for one billing price (the same as Site settings → Your offer → Introductory price or coupon)."
+      },
       "SiteFacts": {
         "type": "object",
         "properties": {
@@ -3291,6 +3341,21 @@
             ],
             "description": "Where shoppers pay and consent. stripe_checkout / payment_link: your pages redirect to a Stripe-hosted page, so consent is checked on Stripe (consent_collection and custom_text of your registered Checkout configs or Payment Links), and your pricing page needs no checkbox of its own. Unset: detected from pay buttons that link to checkout.stripe.com / buy.stripe.com.",
             "example": "payment_link"
+          },
+          "intro_offers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SiteIntroOffer"
+            },
+            "maxItems": 20,
+            "description": "Introductory prices or coupons per billing price (Site settings → Your offer). Every check, the plan, the Emails-tab templates and generated disclosures compare stated promos with them. Omit to keep the stored ones; [] clears them. A coupon must also exist in your live Stripe account before live sales.",
+            "example": [
+              {
+                "price_id": "price_1Pabc",
+                "intro_amount_off": 4000,
+                "intro_periods": 1
+              }
+            ]
           }
         },
         "description": "Business facts that decide which legal requirements apply."
@@ -4831,7 +4896,14 @@
                   "payment_methods": [
                     "card"
                   ],
-                  "checkout_type": "payment_link"
+                  "checkout_type": "payment_link",
+                  "intro_offers": [
+                    {
+                      "price_id": "price_1Pabc",
+                      "intro_amount_off": 4000,
+                      "intro_periods": 1
+                    }
+                  ]
                 },
                 "checkout": {
                   "url": "https://acme.example/pricing",
@@ -6062,10 +6134,15 @@
               "type": "string",
               "maxLength": 4096
             },
-            "description": "Read-only credentials, in snake_case like the rest of the API (the camelCase spellings, secretKey / apiToken / accessToken / apiKey, are accepted too). Stripe: { \"secret_key\": \"rk_test_…\" } (a restricted key with read access; rk_test_ in test mode). Recharge: { \"api_token\": \"…\" }. Shopify: { \"shop\": \"store.myshopify.com\", \"access_token\": \"shpat_…\" }. Chargebee: { \"site\": \"acme\", \"api_key\": \"live_…\" } (the site name before .chargebee.com and a read-only API key). Recurly: { \"api_key\": \"…\", \"region\": \"us\" } (a private API key of the site; region \"eu\" for sites hosted in Recurly’s EU data centre, default \"us\"). Paddle: { \"api_key\": \"pdl_live_apikey_…\" } (a Paddle Billing API key with read permissions; sandbox keys, pdl_sdbx_…, read the sandbox; \"environment\": \"live\" or \"sandbox\" only for older keys without that prefix). Checkbox only reads.",
+            "description": "Credentials, in snake_case like the rest of the API (the camelCase spellings, secretKey / apiToken / accessToken / apiKey, are accepted too). Stripe: { \"secret_key\": \"rk_test_…\" } (rk_test_ in test mode). One Stripe restricted key per site: Read permissions for the checks, and Write permissions that Checkbox uses only after you click Approve on a fix, or in test mode (the one exception: Webhook Endpoints, used once to add Checkbox's webhook endpoint when you connect the key). The checklist: Customers: Write, Products: Read, Prices: Read, Coupons: Read, Subscriptions: Write, Test clocks: Write, Customer portal: Write, Checkout Sessions: Write, Payment Links: Write, Webhook Endpoints: Write (https://checkbox.site/docs/guides/stripe-key). Recharge: { \"api_token\": \"…\" }. Shopify: { \"shop\": \"store.myshopify.com\", \"access_token\": \"shpat_…\" }. Chargebee: { \"site\": \"acme\", \"api_key\": \"live_…\" } (the site name before .chargebee.com and a read-only API key). Recurly: { \"api_key\": \"…\", \"region\": \"us\" } (a private API key of the site; region \"eu\" for sites hosted in Recurly’s EU data centre, default \"us\"). Paddle: { \"api_key\": \"pdl_live_apikey_…\" } (a Paddle Billing API key with read permissions; sandbox keys, pdl_sdbx_…, read the sandbox; \"environment\": \"live\" or \"sandbox\" only for older keys without that prefix). For the platforms other than Stripe, Checkbox only reads.",
             "example": {
               "secret_key": "rk_test_51H…"
             }
+          },
+          "confirm_account_mismatch": {
+            "type": "boolean",
+            "description": "Set true only after the human confirmed it: connect the key even though its Stripe account looks like another site’s (the billing_account_mismatch error asks \"This looks like <other site>’s Stripe account. Use it anyway?\"). Default false: such a key is not connected and nothing is evaluated.",
+            "example": false
           }
         },
         "required": [
@@ -7556,7 +7633,7 @@
         "properties": {
           "type": {
             "type": "string",
-            "description": "Stable action type: apply_task, provide_facts, verify_task, answer_question, ask_human_to_confirm, connect_billing_in_dashboard, wait_for_verification, run_first_check, review_wont_fix, done.",
+            "description": "Stable action type: apply_task, provide_facts, verify_task, answer_question, ask_human_to_confirm, connect_billing_in_dashboard, store_stripe_test_key, wait_for_verification, run_first_check, review_wont_fix, done_for_now (nothing left an agent can do in code now: the rest waits for a deploy / real send, and maybe the owner; the description lists both; finish the change), done.",
             "example": "apply_task"
           },
           "description": {
@@ -8383,7 +8460,7 @@
           },
           "status_label": {
             "type": "string",
-            "description": "The plan status in words to show a person: action_required \"Fixes needed\", verifying \"Checking your changes\", compliant \"Checks pass\", blocked \"Your call\". Show this, never the machine value (`compliant` is a status name, not a legal conclusion).",
+            "description": "The plan status in words to show a person: action_required \"Fixes needed\", verifying \"Checking your changes\", compliant \"Checks pass\", blocked \"Your call\"; while an agent works the site and everything left waits for a deploy or the owner (next_action done_for_now): \"Waiting on deploy and you\" or \"Waiting on deploy\". Show this, never the machine value (`compliant` is a status name, not a legal conclusion).",
             "example": "Fixes needed"
           },
           "evaluation": {
@@ -8772,6 +8849,109 @@
           },
           "next_action": {
             "$ref": "#/components/schemas/PlanNextAction"
+          },
+          "owner_questions": {
+            "type": "object",
+            "properties": {
+              "description": {
+                "type": "string",
+                "description": "How to ask them: once, in one message, while the fixes go on.",
+                "example": "Ask the human once, now, in one message, every question below (numbered)…"
+              },
+              "questions": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "description": "\"email_sender\" (who sends the required emails), or the id of the task whose question it is.",
+                      "example": "email_sender"
+                    },
+                    "text": {
+                      "type": "string",
+                      "description": "The question, in plain words for the owner.",
+                      "example": "Who sends the required emails (renewal reminder, charge notice): you (your code), or Checkbox Notices?"
+                    },
+                    "options": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "The answers.",
+                      "example": [
+                        "me",
+                        "checkbox"
+                      ]
+                    },
+                    "tasks": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "description": "Unique identifier of the task (task_…).",
+                        "example": "task_3f9a1c2e7b4d4e0f9a8b7c6d5e4f3a2b"
+                      },
+                      "description": "The tasks the answer settles.",
+                      "example": []
+                    },
+                    "on_answer": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "string"
+                      },
+                      "description": "What the agent does with each answer.",
+                      "example": {
+                        "checkbox": "One call: updateNoticeSettings { mode: \"checkbox\", add_kinds: [\"renewal_reminder\"] }."
+                      }
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "text",
+                    "options",
+                    "tasks",
+                    "on_answer"
+                  ]
+                },
+                "description": "Every choice only the owner makes, together.",
+                "example": [
+                  {
+                    "id": "email_sender",
+                    "text": "Who sends the required emails (renewal reminder, charge notice): you (your code), or Checkbox Notices?",
+                    "options": [
+                      "me",
+                      "checkbox"
+                    ],
+                    "tasks": [],
+                    "on_answer": {
+                      "checkbox": "One call: updateNoticeSettings { mode: \"checkbox\", add_kinds: [\"renewal_reminder\"] }."
+                    }
+                  }
+                ]
+              }
+            },
+            "required": [
+              "description",
+              "questions"
+            ],
+            "description": "Every open owner choice as ONE batched question (who sends the required emails, plus each question task such as the New York notice channel). Ask it once, early, in one message; the plan's next_action says the same. Absent when there is none.",
+            "example": {
+              "description": "Ask the human once, now, in one message, every question below (numbered)…",
+              "questions": [
+                {
+                  "id": "email_sender",
+                  "text": "Who sends the required emails (renewal reminder, charge notice): you (your code), or Checkbox Notices?",
+                  "options": [
+                    "me",
+                    "checkbox"
+                  ],
+                  "tasks": [],
+                  "on_answer": {
+                    "checkbox": "One call: updateNoticeSettings { mode: \"checkbox\", add_kinds: [\"renewal_reminder\"] }."
+                  }
+                }
+              ]
+            }
           },
           "email_verification": {
             "type": "array",
@@ -9380,7 +9560,7 @@
               "string",
               "null"
             ],
-            "description": "The plan status in words to show a person: action_required \"Fixes needed\", verifying \"Checking your changes\", compliant \"Checks pass\", blocked \"Your call\". Show this, never the machine value (`compliant` is a status name, not a legal conclusion).",
+            "description": "The plan status in words to show a person: action_required \"Fixes needed\", verifying \"Checking your changes\", compliant \"Checks pass\", blocked \"Your call\"; while an agent works the site and everything left waits for a deploy or the owner (next_action done_for_now): \"Waiting on deploy and you\" or \"Waiting on deploy\". Show this, never the machine value (`compliant` is a status name, not a legal conclusion).",
             "example": "Fixes needed"
           },
           "next_action": {
@@ -10574,8 +10754,27 @@
               "string",
               "null"
             ],
-            "description": "Reply-to / support address.",
+            "description": "Reply-to / support address every notice names as the business's contact. null until one is set (or while support_email_to_confirm waits for a person).",
             "example": "help@acme.example"
+          },
+          "support_email_to_confirm": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The Checkbox account's login address (the owner's), offered as the support email but not used: Checkbox sends nothing with it, and does not save it, until a person confirms it once in the dashboard (Notices › Branding). Agents cannot confirm it; ask the human, or set a different support_email they chose. The Stripe account's public support email is used without asking.",
+            "example": null
+          },
+          "real_sends": {
+            "type": "string",
+            "enum": [
+              "test_mode",
+              "confirmed",
+              "needs_confirmation",
+              "off"
+            ],
+            "description": "Whether Checkbox Notices emails the site's real subscribers. test_mode: never (test-mode sites email only test-run inboxes and send the owner marked test copies). needs_confirmation: Notices are on, but nothing goes to real subscribers until a person confirms it once in the dashboard (Notices tab, after a preview); an API key or agent cannot confirm it. confirmed: they are emailed. off: Checkbox sends nothing.",
+            "example": "needs_confirmation"
           },
           "cancel_url": {
             "type": [
@@ -10824,6 +11023,8 @@
           "product_name",
           "logo_url",
           "support_email",
+          "support_email_to_confirm",
+          "real_sends",
           "cancel_url",
           "brand_color",
           "from_local_part",
@@ -10944,7 +11145,7 @@
               "null"
             ],
             "maxLength": 320,
-            "description": "Support address.",
+            "description": "Support address every notice names (required before Checkbox sends). Turning a notice on without one uses the Checkbox cancellation page's or the Stripe account's public support email. The Checkbox account's login address is never used without a person: setting it here answers resource_conflict (next_action confirm_support_email) until the human confirms it once in the dashboard (Notices › Branding).",
             "example": "help@acme.example"
           },
           "cancel_url": {
@@ -12670,6 +12871,11 @@
             "description": "Disclosure generated from the plan terms that passes the checks (locked wording).",
             "example": "Your Acme subscription automatically renews every month at $19.99 …"
           },
+          "short_disclosure_text": {
+            "type": "string",
+            "description": "The same terms as one short line, verified by the engine like disclosure_text (present only when it passes every targeted check); disclosure_text is then the fuller version.",
+            "example": "Renews automatically every month at $19.99 until you cancel. Cancel anytime online at https://acme.example/cancel."
+          },
           "consent_label": {
             "type": "string",
             "description": "Label for the unchecked, required consent checkbox.",
@@ -13137,7 +13343,7 @@
           "interval": {
             "type": "string",
             "maxLength": 20,
-            "description": "Billing interval: day, week, month or year (required).",
+            "description": "Billing interval: day, week, month or year (required unless `site` gives the plan).",
             "example": "month"
           },
           "interval_count": {
@@ -13343,11 +13549,22 @@
             "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
             "description": "Evaluate the law as of this date (YYYY-MM-DD, default today).",
             "example": "2026-10-30"
+          },
+          "site": {
+            "type": "string",
+            "maxLength": 100,
+            "description": "Round 23: a site of yours (site_…): the disclosure is judged against the plan it states among the site's plans (the connected Stripe Prices win over plans typed in setup), with the site's merchant name, cancellation URL and jurisdictions, as verifyTask judges it. Plan fields you send are replaced by the plan's. \"none\" judges only what you send.",
+            "example": "site_4b35bd074dca41e498ea4bc02b3744d8"
+          },
+          "plan": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "With a site: judge the disclosure against this plan (name or Stripe Price id). An unknown plan is refused with the list of plans.",
+            "example": "Annual"
           }
         },
         "required": [
-          "text",
-          "interval"
+          "text"
         ],
         "description": "A checkout disclosure to check before it ships. The plan fields (price, interval, cancel_url…) may also be nested under `terms` or `merchant`, as in the other checks."
       },
@@ -15652,6 +15869,7 @@
             "example": [
               {
                 "disclosure_text": "Your Acme subscription automatically renews every month at $19.99 …",
+                "short_disclosure_text": "Renews automatically every month at $19.99 until you cancel. Cancel anytime online at https://acme.example/cancel.",
                 "consent_label": "I agree that my Acme subscription renews automatically …",
                 "button_text": "Subscribe — $19.99/month, renews automatically",
                 "html": "<div class=\"checkbox-renewal-terms\">…</div>",
@@ -17582,12 +17800,12 @@
           "version": {
             "type": "string",
             "description": "Semver of the bundle.",
-            "example": "1.5.5"
+            "example": "1.5.6"
           },
           "url": {
             "type": "string",
             "description": "Immutable URL of this version.",
-            "example": "https://app.checkbox.site/v1/elements/1.5.5/elements.js"
+            "example": "https://app.checkbox.site/v1/elements/1.5.6/elements.js"
           },
           "integrity": {
             "type": "string",
@@ -17629,8 +17847,8 @@
             "description": "Every released version, newest first.",
             "example": [
               {
-                "version": "1.5.5",
-                "url": "https://app.checkbox.site/v1/elements/1.5.5/elements.js",
+                "version": "1.5.6",
+                "url": "https://app.checkbox.site/v1/elements/1.5.6/elements.js",
                 "integrity": "sha384-…",
                 "size": 33000
               }
@@ -18120,7 +18338,7 @@
               "null"
             ],
             "description": "elements.js version.",
-            "example": "1.5.5"
+            "example": "1.5.6"
           },
           "client_timestamp": {
             "type": [
@@ -18637,7 +18855,7 @@
             "type": "string",
             "maxLength": 20,
             "description": "elements.js version that rendered the disclosure.",
-            "example": "1.5.5"
+            "example": "1.5.6"
           },
           "presentation": {
             "$ref": "#/components/schemas/ConsentPresentationInput"
@@ -18762,7 +18980,7 @@
                 "customer_reference": "cs_test_a1b2c3",
                 "client_reference": null,
                 "source": "elements",
-                "element_version": "1.5.5",
+                "element_version": "1.5.6",
                 "client_timestamp": null,
                 "presentation": {
                   "violations": [],
@@ -20290,6 +20508,24 @@
             "type": "integer",
             "description": "When the key was stored. Unix timestamp in seconds.",
             "example": 1793318400
+          },
+          "next_action": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/NextAction"
+              },
+              {
+                "description": "Round 23: on store, what to do next (start a test run; on a site still being set up, the setup status)."
+              }
+            ],
+            "example": {
+              "type": "verify_domain",
+              "message": "Verify your site domain to turn on live mode.",
+              "operation_id": "createDomainVerification",
+              "mcp_tool": "call_api",
+              "endpoint": "POST /v1/sites/{site}/domain_verification",
+              "url": "https://checkbox.site/docs/concepts/activation#verify"
+            }
           }
         },
         "required": [
@@ -20334,7 +20570,15 @@
                 "verified": true,
                 "last_used": 1793318400,
                 "last_error": null,
-                "created": 1793318400
+                "created": 1793318400,
+                "next_action": {
+                  "type": "verify_domain",
+                  "message": "Verify your site domain to turn on live mode.",
+                  "operation_id": "createDomainVerification",
+                  "mcp_tool": "call_api",
+                  "endpoint": "POST /v1/sites/{site}/domain_verification",
+                  "url": "https://checkbox.site/docs/concepts/activation#verify"
+                }
               }
             ]
           },
@@ -20494,6 +20738,24 @@
             "type": "integer",
             "description": "When the config was registered. Unix timestamp in seconds.",
             "example": 1793318400
+          },
+          "next_action": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/NextAction"
+              },
+              {
+                "description": "Round 23: on registration, what to do next (re-check the Stripe task, or start a test run that mirrors this config)."
+              }
+            ],
+            "example": {
+              "type": "verify_domain",
+              "message": "Verify your site domain to turn on live mode.",
+              "operation_id": "createDomainVerification",
+              "mcp_tool": "call_api",
+              "endpoint": "POST /v1/sites/{site}/domain_verification",
+              "url": "https://checkbox.site/docs/concepts/activation#verify"
+            }
           }
         },
         "required": [
@@ -20564,7 +20826,15 @@
                 "metadata": {
                   "order_ref": "A-1001"
                 },
-                "created": 1793318400
+                "created": 1793318400,
+                "next_action": {
+                  "type": "verify_domain",
+                  "message": "Verify your site domain to turn on live mode.",
+                  "operation_id": "createDomainVerification",
+                  "mcp_tool": "call_api",
+                  "endpoint": "POST /v1/sites/{site}/domain_verification",
+                  "url": "https://checkbox.site/docs/concepts/activation#verify"
+                }
               }
             ]
           },
@@ -21574,9 +21844,12 @@
                     ],
                     "enum": [
                       "site_portal_link",
-                      "registered_url"
+                      "registered_url",
+                      "site_cancel_control",
+                      "portal_default",
+                      "site_setting"
                     ],
-                    "description": "site_portal_link: no cancel_via was given, Stripe has cancellation on in the customer portal and your site links to it, so the portal was used as declared. registered_url: no cancel_via was given and the account or cancellation page you registered (account_url / cancellation_url) redirects or links to the Stripe customer portal, so the portal was used as declared.",
+                    "description": "How the cancel path was chosen when none was passed. site_portal_link: Stripe has cancellation on in the customer portal and your site links to it, so the portal was used as declared. registered_url: the account or cancellation page you registered (account_url / cancellation_url) redirects or links to the Stripe customer portal. site_cancel_control: the cancel button or link the last scan found on a public page of your site was used. portal_default: no test account and no other cancel flow is set, and Stripe has cancellation on in the customer portal, so the portal was used (and remembered for this site). site_setting: an earlier run remembered the portal for this site.",
                     "example": null
                   },
                   "confirmed_in_stripe": {
@@ -22501,7 +22774,7 @@
           },
           "status_label": {
             "type": "string",
-            "description": "The plan status in words to show a person: action_required \"Fixes needed\", verifying \"Checking your changes\", compliant \"Checks pass\", blocked \"Your call\". Show this, never the machine value (`compliant` is a status name, not a legal conclusion).",
+            "description": "The plan status in words to show a person: action_required \"Fixes needed\", verifying \"Checking your changes\", compliant \"Checks pass\", blocked \"Your call\"; while an agent works the site and everything left waits for a deploy or the owner (next_action done_for_now): \"Waiting on deploy and you\" or \"Waiting on deploy\". Show this, never the machine value (`compliant` is a status name, not a legal conclusion).",
             "example": "Fixes needed"
           },
           "summary": {
@@ -24199,7 +24472,7 @@
       "post": {
         "operationId": "connectBillingPlatform",
         "summary": "Connect a billing platform",
-        "description": "Connects the site's billing platform with read-only credentials (a Stripe restricted key, a Recharge token, a Shopify Admin API token, a Chargebee read-only API key, a Recurly private API key or a Paddle API key with read permissions), so Checkbox reads the customer-portal and reminder settings. Works for test-mode sites too (use an rk_test_ key). The credentials are validated by reading the settings once and stored encrypted.",
+        "description": "Connects the site's billing platform with the one restricted key (a Stripe restricted key, a Recharge token, a Shopify Admin API token, a Chargebee read-only API key, a Recurly private API key or a Paddle API key with read permissions), so Checkbox reads the customer-portal and reminder settings. Stripe: One Stripe restricted key per site: Read permissions for the checks, and Write permissions that Checkbox uses only after you click Approve on a fix, or in test mode (the one exception: Webhook Endpoints, used once to add Checkbox's webhook endpoint when you connect the key) (checklist: https://checkbox.site/docs/guides/stripe-key). API keys and AI agents may connect TEST-mode keys (rk_test_…) only; a live key (rk_live_ / sk_live_) is refused with live_key_requires_dashboard, because only a person signed in to the Checkbox dashboard can connect one. The credentials are validated by reading the settings once and stored encrypted. When the key's Stripe account looks like another site's (the site's prices or Payment Links are not in it, or it is already connected in another workspace), nothing is connected and the error billing_account_mismatch asks the human to confirm; retry with confirm_account_mismatch: true only after they said yes. The account owner is emailed about every key connected.",
         "tags": [
           "Sites"
         ],
@@ -27585,7 +27858,7 @@
       "post": {
         "operationId": "updateNoticeSettings",
         "summary": "Update notice settings",
-        "description": "Chooses who sends the required emails (mode: merchant = you send them and Checkbox tracks them, the default; checkbox = Checkbox sends them), and sets branding, cancel_url and the confirmed cancellation policy. add_kinds / remove_kinds turn single notices on or off and leave the others as they are; enabled_kinds replaces the whole list. In checkbox mode, turning a notice on requires cancel_url, a confirmed policy, a connected Stripe, Recharge, Chargebee, Recurly or Paddle account and a sending address; otherwise resource_conflict explains what is missing.",
+        "description": "Chooses who sends the required emails (mode: merchant = you send them and Checkbox tracks them, the default; checkbox = Checkbox sends them), and sets branding, cancel_url and the confirmed cancellation policy. add_kinds / remove_kinds turn single notices on or off and leave the others as they are; enabled_kinds replaces the whole list. In checkbox mode, turning a notice on requires cancel_url, a confirmed policy, a support email, a connected Stripe, Recharge, Chargebee, Recurly or Paddle account and a sending address; otherwise resource_conflict explains what is missing. The support email may be the Stripe account's public one (used automatically); the account owner's login address only after the human confirms it in the dashboard (support_email_to_confirm; an agent cannot confirm it). Turning notices on through the API never emails a real subscriber: on a test-mode site only test-run inboxes (and marked test copies to the owner) are emailed, and on a live site real subscribers are emailed only after a person confirms it once in the dashboard, after a preview (real_sends). The account owner is emailed when an agent turns notices on.",
         "tags": [
           "Notices"
         ],
@@ -29142,7 +29415,7 @@
             "schema": {
               "type": "string",
               "description": "Semver, e.g. 1.0.0.",
-              "example": "1.5.5"
+              "example": "1.5.6"
             },
             "required": true,
             "name": "version",
@@ -30663,7 +30936,7 @@
       "post": {
         "operationId": "createTestCredential",
         "summary": "Store a billing test-mode key",
-        "description": "Stores the site's Stripe TEST-mode key (rk_test_… preferred) used by test runs, after checking it with Stripe. Live keys are refused (test_key_not_test_mode). Least privilege: Write on Customers, Checkout Sessions, Subscriptions, Test clocks and Customer portal; Read on Prices, Products and Billing portal configuration. Replaces an existing key. Next: createTestRun.",
+        "description": "Stores the site's Stripe TEST-mode restricted key (rk_test_…), after checking it with Stripe the way the dashboard's Connect Stripe does. An agent may call this itself once the owner approved the setup; every store is logged on the site's setup timeline and Billing connection line, and the human can revoke it in one click. Live keys are refused (test_key_not_test_mode: a human adds live keys in the dashboard); a key whose Stripe account looks like another site's is refused with billing_account_mismatch until the human confirms (confirm_account_mismatch: true); secret keys (sk_test_…) are refused (test_key_not_restricted). On a test-mode site without a Stripe connection the key also becomes the site's Stripe connection: one key for checks, fixes (only after the human approves each) and test runs. The key's checklist: Customers: Write, Products: Read, Prices: Read, Coupons: Read, Subscriptions: Write, Test clocks: Write, Customer portal: Write, Checkout Sessions: Write, Payment Links: Write, Webhook Endpoints: Write. Replaces an existing key. Next: createTestRun.",
         "tags": [
           "Test runs"
         ],
@@ -30721,17 +30994,23 @@
                   "type": {
                     "type": "string",
                     "enum": [
-                      "stripe_test"
+                      "stripe_test",
+                      "stripe"
                     ],
-                    "description": "Kind of key. Only \"stripe_test\".",
+                    "description": "Kind of key: \"stripe_test\" (\"stripe\" is accepted as the same). Always stored as a Stripe TEST-mode key.",
                     "example": "stripe_test"
                   },
                   "secret_key": {
                     "type": "string",
                     "minLength": 10,
                     "maxLength": 255,
-                    "description": "The Stripe test-mode restricted (rk_test_…) or secret (sk_test_…) key. Stored encrypted; never returned.",
+                    "description": "The Stripe test-mode restricted key (rk_test_…). Secret keys (sk_…) and live keys are refused. Stored encrypted; never returned.",
                     "example": "rk_test_51Hx…"
+                  },
+                  "confirm_account_mismatch": {
+                    "type": "boolean",
+                    "description": "Set true only after the human confirmed it: store the key even though its Stripe account looks like another site’s (billing_account_mismatch). Default false.",
+                    "example": false
                   }
                 },
                 "required": [
@@ -31552,6 +31831,13 @@
                     "description": "State the synthetic shopper visits from (default: the site's first scan region).",
                     "example": "US-CA"
                   },
+                  "plan": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200,
+                    "description": "Round 23: which plan to run, by the name of a registered checkout config or a Price id (price_…) its line_items use: the run mirrors that config (same as stripe.checkout_config). An unknown plan is refused with the list of registered configs.",
+                    "example": "Annual"
+                  },
                   "stripe": {
                     "type": "object",
                     "properties": {
@@ -32067,7 +32353,7 @@
               ],
               "minimum": 0,
               "maximum": 30,
-              "description": "Long-poll: wait up to this many seconds (0-30) for the run to move on (status, phase or a step changes) before answering.",
+              "description": "Long-poll: wait up to this many seconds (0-30) for a meaningful change before answering: the run finishes, its status changes or a step starts or ends (not every internal phase change while the test clock moves).",
               "example": 30
             },
             "required": false,
@@ -34154,7 +34440,14 @@
                               "payment_methods": [
                                 "card"
                               ],
-                              "checkout_type": "payment_link"
+                              "checkout_type": "payment_link",
+                              "intro_offers": [
+                                {
+                                  "price_id": "price_1Pabc",
+                                  "intro_amount_off": 4000,
+                                  "intro_periods": 1
+                                }
+                              ]
                             },
                             "checkout": {
                               "url": "https://acme.example/pricing",
@@ -35409,7 +35702,7 @@
                             "customer_reference": "cs_test_a1b2c3",
                             "client_reference": null,
                             "source": "elements",
-                            "element_version": "1.5.5",
+                            "element_version": "1.5.6",
                             "client_timestamp": null,
                             "presentation": {
                               "violations": [],
@@ -35520,7 +35813,14 @@
                               "payment_methods": [
                                 "card"
                               ],
-                              "checkout_type": "payment_link"
+                              "checkout_type": "payment_link",
+                              "intro_offers": [
+                                {
+                                  "price_id": "price_1Pabc",
+                                  "intro_amount_off": 4000,
+                                  "intro_periods": 1
+                                }
+                              ]
                             },
                             "checkout": {
                               "url": "https://acme.example/pricing",
@@ -35800,7 +36100,14 @@
                               "payment_methods": [
                                 "card"
                               ],
-                              "checkout_type": "payment_link"
+                              "checkout_type": "payment_link",
+                              "intro_offers": [
+                                {
+                                  "price_id": "price_1Pabc",
+                                  "intro_amount_off": 4000,
+                                  "intro_periods": 1
+                                }
+                              ]
                             },
                             "checkout": {
                               "url": "https://acme.example/pricing",
@@ -36060,12 +36367,22 @@
     "test_key_missing": {
       "status": 400,
       "type": "invalid_request_error",
-      "description": "A Stripe test run needs a Stripe TEST-mode key stored for the site (a person adds it in the dashboard on the site's Proof page)."
+      "description": "A Stripe test run needs a Stripe TEST-mode key stored for the site: the agent stores the restricted test key (rk_test_…) with createTestCredential, or a person adds it in the dashboard."
     },
     "test_key_not_test_mode": {
       "status": 400,
       "type": "invalid_request_error",
-      "description": "The billing key is a live-mode (or malformed) key; test runs only accept test-mode keys (rk_test_… / sk_test_…)."
+      "description": "The billing key is a live-mode (or malformed) key. Agents only store TEST-mode restricted keys (rk_test_…); a human adds live keys in the Checkbox dashboard."
+    },
+    "test_key_not_restricted": {
+      "status": 400,
+      "type": "invalid_request_error",
+      "description": "The key is a Stripe secret key (sk_test_…). Store a restricted test key (rk_test_…) with the permissions on Checkbox's key checklist instead; `message` lists them."
+    },
+    "test_key_declined": {
+      "status": 403,
+      "type": "permission_error",
+      "description": "The owner did not allow the agent to use the project's Stripe TEST key when approving the setup; only a person can add it, in the dashboard."
     },
     "test_key_rejected": {
       "status": 400,
@@ -36147,6 +36464,11 @@
       "type": "permission_error",
       "description": "Checkbox only scans, monitors, fetches and test-runs websites the account has verified (DNS TXT record or /.well-known file): every target host (site, checkout, account and policy URLs) must be on a verified domain. `next_action` says which domain to verify."
     },
+    "live_key_requires_dashboard": {
+      "status": 403,
+      "type": "permission_error",
+      "description": "A live-mode Stripe key (rk_live_ / sk_live_) cannot be connected through the API or by an AI agent: only a person signed in to the Checkbox dashboard can connect one (and never on a test-mode site). Agents store restricted TEST keys (rk_test_…)."
+    },
     "account_suspended": {
       "status": 403,
       "type": "permission_error",
@@ -36176,6 +36498,11 @@
       "status": 409,
       "type": "invalid_request_error",
       "description": "The consent already carries a different customer_reference; references are set once and never changed."
+    },
+    "billing_account_mismatch": {
+      "status": 409,
+      "type": "invalid_request_error",
+      "description": "The key's Stripe account looks like another site's (the site's prices or Payment Links are not in it, or it is already connected in another workspace), so nothing was stored or evaluated. Ask the human the question in `message`; retry with confirm_account_mismatch: true only if they say yes, else use this site's own key. `problems` lists what did not match."
     },
     "test_run_in_progress": {
       "status": 409,

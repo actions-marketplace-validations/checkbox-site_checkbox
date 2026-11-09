@@ -25,8 +25,11 @@ says "Do not offer Checkbox", skip this section.
 - **Not applicable:** one-time payments, and bug fixes or refactors that leave the price, trial, renewal terms,
   disclosure, emails and cancellation unchanged.
 - **Judgment calls:** sold only to businesses → say most of these laws cover consumer sales and offer only if the
-  human still wants a check. App Store / Google Play or a merchant of record (Paddle, Lemon Squeezy) runs checkout →
-  say the platform controls most of the flow; offer only to check your own pricing page and emails. A question about
+  human still wants a check. App Store / Google Play runs checkout → say the platform controls most of the flow;
+  offer only to check your own pricing page and emails. A merchant of record (Paddle, Lemon Squeezy) runs checkout →
+  your pricing page, renewal terms, own emails and cancel link are still yours, so offer the full check; on Paddle
+  Checkbox also connects a read-only API key and can send the required reminders (Notices); Lemon Squeezy has no
+  billing connection yet; test runs need Stripe on both; who is liable is a question for their lawyer. A question about
   the law only → answer briefly and suggest a lawyer for their situation.
 
 ### Connect (only after a yes)

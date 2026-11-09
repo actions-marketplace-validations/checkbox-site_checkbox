@@ -173,7 +173,7 @@ export interface DeviceToken {
   site: string | null;
   /** What the human approved. */
   consents: {
-    /** The human allowed Checkbox to use the project's Stripe TEST key (send it with createTestCredential). */
+    /** The human allowed Checkbox to use the project's Stripe TEST key (store it with createTestCredential; it must be a restricted rk_test_ key). */
     stripe_test_key: boolean;
     /** Live keys were issued. */
     live_keys: boolean;
@@ -414,18 +414,20 @@ export interface SetupSession {
     checkout_configs: number;
     /** Restricted-key recommendation. */
     restricted_key: {
-      /** true while no restricted (rk_test_) key is stored. */
+      /** true while no restricted (rk_test_) key is stored. The agent stores it with createTestCredential. */
       recommended: boolean;
       /** Why. */
       reason: string;
       /** Where to create it. */
       create_url: string;
-      /** Least-privilege permissions. */
+      /** The one key checklist: every permission Checkbox uses (checks, fixes after the human approves, test runs). */
       permissions: Array<{
-        /** Stripe resource. */
+        /** Stripe resource, as the restricted-key screen names it. */
         resource: string;
-        /** Access. */
+        /** Access to tick (write includes read). */
         access: "read" | "write";
+        /** One line: why Checkbox needs it. */
+        why?: string;
       }>;
     };
   };
@@ -647,7 +649,7 @@ export interface SetupVerification {
   scan: {
     /** Whether a scan was queued now. */
     queued: boolean;
-    /** The queued scan (scan_…); with reason "already scanned", the newest scan (read it with retrieveScan). */
+    /** The queued scan (scan_…); with a reason, the scan still in progress ("a scan is running/queued": wait for it) or, with "already scanned", the newest scan (read it with retrieveScan). */
     scan: string | null;
     /** Why not. */
     reason: string | null;
@@ -786,6 +788,20 @@ export interface LegalHoldParams {
   reason?: string;
 }
 
+/** An introductory price or coupon for one billing price (the same as Site settings → Your offer → Introductory price or coupon). */
+export interface SiteIntroOffer {
+  /** The billing-platform price the intro applies to (e.g. a Stripe price id). */
+  price_id: string;
+  /** The intro price per billing period, in minor units (900 = $9.00). Give exactly one of intro_amount, intro_percent_off or intro_amount_off. */
+  intro_amount?: number;
+  /** A coupon: percent off the regular price. */
+  intro_percent_off?: number;
+  /** A coupon: amount off per billing period, in minor units. */
+  intro_amount_off?: number;
+  /** How many billing periods the intro price lasts (default 1). */
+  intro_periods?: number;
+}
+
 /** Business facts that decide which legal requirements apply. */
 export interface SiteFacts {
   /** The offer starts with a free trial. */
@@ -808,6 +824,8 @@ export interface SiteFacts {
   payment_methods?: Array<"card" | "debit" | "ach" | "wallet" | "other">;
   /** Where shoppers pay and consent. stripe_checkout / payment_link: your pages redirect to a Stripe-hosted page, so consent is checked on Stripe (consent_collection and custom_text of your registered Checkout configs or Payment Links), and your pricing page needs no checkbox of its own. Unset: detected from pay buttons that link to checkout.stripe.com / buy.stripe.com. */
   checkout_type?: "own_page" | "stripe_checkout" | "payment_link";
+  /** Introductory prices or coupons per billing price (Site settings → Your offer). Every check, the plan, the Emails-tab templates and generated disclosures compare stated promos with them. Omit to keep the stored ones; [] clears them. A coupon must also exist in your live Stripe account before live sales. */
+  intro_offers?: Array<SiteIntroOffer>;
 }
 
 /** Scheduled monitoring. */
@@ -1324,8 +1342,10 @@ export interface Integration {
 export interface ConnectBillingPlatformParams {
   /** Billing platform. */
   platform: "stripe" | "recharge" | "shopify" | "chargebee" | "recurly" | "paddle";
-  /** Read-only credentials, in snake_case like the rest of the API (the camelCase spellings, secretKey / apiToken / accessToken / apiKey, are accepted too). Stripe: { "secret_key": "rk_test_…" } (a restricted key with read access; rk_test_ in test mode). Recharge: { "api_token": "…" }. Shopify: { "shop": "store.myshopify.com", "access_token": "shpat_…" }. Chargebee: { "site": "acme", "api_key": "live_…" } (the site name before .chargebee.com and a read-only API key). Recurly: { "api_key": "…", "region": "us" } (a private API key of the site; region "eu" for sites hosted in Recurly’s EU data centre, default "us"). Paddle: { "api_key": "pdl_live_apikey_…" } (a Paddle Billing API key with read permissions; sandbox keys, pdl_sdbx_…, read the sandbox; "environment": "live" or "sandbox" only for older keys without that prefix). Checkbox only reads. */
+  /** Credentials, in snake_case like the rest of the API (the camelCase spellings, secretKey / apiToken / accessToken / apiKey, are accepted too). Stripe: { "secret_key": "rk_test_…" } (rk_test_ in test mode). One Stripe restricted key per site: Read permissions for the checks, and Write permissions that Checkbox uses only after you click Approve on a fix, or in test mode (the one exception: Webhook Endpoints, used once to add Checkbox's webhook endpoint when you connect the key). The checklist: Customers: Write, Products: Read, Prices: Read, Coupons: Read, Subscriptions: Write, Test clocks: Write, Customer portal: Write, Checkout Sessions: Write, Payment Links: Write, Webhook Endpoints: Write (https://checkbox.site/docs/guides/stripe-key). Recharge: { "api_token": "…" }. Shopify: { "shop": "store.myshopify.com", "access_token": "shpat_…" }. Chargebee: { "site": "acme", "api_key": "live_…" } (the site name before .chargebee.com and a read-only API key). Recurly: { "api_key": "…", "region": "us" } (a private API key of the site; region "eu" for sites hosted in Recurly’s EU data centre, default "us"). Paddle: { "api_key": "pdl_live_apikey_…" } (a Paddle Billing API key with read permissions; sandbox keys, pdl_sdbx_…, read the sandbox; "environment": "live" or "sandbox" only for older keys without that prefix). For the platforms other than Stripe, Checkbox only reads. */
   credentials: Record<string, string>;
+  /** Set true only after the human confirmed it: connect the key even though its Stripe account looks like another site’s (the billing_account_mismatch error asks "This looks like <other site>’s Stripe account. Use it anyway?"). Default false: such a key is not connected and nothing is evaluated. */
+  confirm_account_mismatch?: boolean;
 }
 
 /** A queued re-read of the site's billing-platform settings, followed by a re-evaluation. */
@@ -1630,7 +1650,7 @@ export interface PlanEdit {
 
 /** What the caller (usually an AI coding agent) should do next. */
 export interface PlanNextAction {
-  /** Stable action type: apply_task, provide_facts, verify_task, answer_question, ask_human_to_confirm, connect_billing_in_dashboard, wait_for_verification, run_first_check, review_wont_fix, done. */
+  /** Stable action type: apply_task, provide_facts, verify_task, answer_question, ask_human_to_confirm, connect_billing_in_dashboard, store_stripe_test_key, wait_for_verification, run_first_check, review_wont_fix, done_for_now (nothing left an agent can do in code now: the rest waits for a deploy / real send, and maybe the owner; the description lists both; finish the change), done. */
   type: string;
   /** One or two sentences telling the agent exactly what to do now. */
   description: string;
@@ -1808,7 +1828,7 @@ export interface CompliancePlan {
   site: string;
   /** action_required (an agent can apply open tasks now), verifying (changes applied; waiting for confirming observations), compliant (every required check passes or only waits for a live check — an automated assessment, not a legal determination; see compliance.pending_live_checks and coverage), blocked (only human answers ("Your call") or declined critical tasks remain). */
   status: "action_required" | "verifying" | "compliant" | "blocked";
-  /** The plan status in words to show a person: action_required "Fixes needed", verifying "Checking your changes", compliant "Checks pass", blocked "Your call". Show this, never the machine value (`compliant` is a status name, not a legal conclusion). */
+  /** The plan status in words to show a person: action_required "Fixes needed", verifying "Checking your changes", compliant "Checks pass", blocked "Your call"; while an agent works the site and everything left waits for a deploy or the owner (next_action done_for_now): "Waiting on deploy and you" or "Waiting on deploy". Show this, never the machine value (`compliant` is a status name, not a legal conclusion). */
   status_label?: string;
   /** The evaluation the plan was built from (null before the first check). */
   evaluation: string | null;
@@ -1861,6 +1881,24 @@ export interface CompliancePlan {
     billing_connected: boolean;
   };
   next_action: PlanNextAction;
+  /** Every open owner choice as ONE batched question (who sends the required emails, plus each question task such as the New York notice channel). Ask it once, early, in one message; the plan's next_action says the same. Absent when there is none. */
+  owner_questions?: {
+    /** How to ask them: once, in one message, while the fixes go on. */
+    description: string;
+    /** Every choice only the owner makes, together. */
+    questions: Array<{
+      /** "email_sender" (who sends the required emails), or the id of the task whose question it is. */
+      id: string;
+      /** The question, in plain words for the owner. */
+      text: string;
+      /** The answers. */
+      options: Array<string>;
+      /** The tasks the answer settles. */
+      tasks: Array<string>;
+      /** What the agent does with each answer. */
+      on_answer: Record<string, string>;
+    }>;
+  };
   /** Evidence level per required email kind. A plan never reaches status compliant on template_checked emails. */
   email_verification: Array<{
     /** Email kind (acknowledgment, trial_ending, renewal_reminder, annual_terms, charge_notice, price_change, cancellation_confirmation). */
@@ -1996,7 +2034,7 @@ export interface Verification {
   diff: Array<VerificationCheck>;
   /** Plan status after this verification (null while pending). */
   plan_status: "action_required" | "verifying" | "compliant" | "blocked" | null;
-  /** The plan status in words to show a person: action_required "Fixes needed", verifying "Checking your changes", compliant "Checks pass", blocked "Your call". Show this, never the machine value (`compliant` is a status name, not a legal conclusion). */
+  /** The plan status in words to show a person: action_required "Fixes needed", verifying "Checking your changes", compliant "Checks pass", blocked "Your call"; while an agent works the site and everything left waits for a deploy or the owner (next_action done_for_now): "Waiting on deploy and you" or "Waiting on deploy". Show this, never the machine value (`compliant` is a status name, not a legal conclusion). */
   plan_status_label?: string | null;
   next_action: PlanNextAction;
   /** When it was requested. Unix timestamp in seconds. */
@@ -2278,8 +2316,12 @@ export interface NoticeSettings {
   product_name: string | null;
   /** Logo URL (https). */
   logo_url: string | null;
-  /** Reply-to / support address. */
+  /** Reply-to / support address every notice names as the business's contact. null until one is set (or while support_email_to_confirm waits for a person). */
   support_email: string | null;
+  /** The Checkbox account's login address (the owner's), offered as the support email but not used: Checkbox sends nothing with it, and does not save it, until a person confirms it once in the dashboard (Notices › Branding). Agents cannot confirm it; ask the human, or set a different support_email they chose. The Stripe account's public support email is used without asking. */
+  support_email_to_confirm: string | null;
+  /** Whether Checkbox Notices emails the site's real subscribers. test_mode: never (test-mode sites email only test-run inboxes and send the owner marked test copies). needs_confirmation: Notices are on, but nothing goes to real subscribers until a person confirms it once in the dashboard (Notices tab, after a preview); an API key or agent cannot confirm it. confirmed: they are emailed. off: Checkbox sends nothing. */
+  real_sends: "test_mode" | "confirmed" | "needs_confirmation" | "off";
   /** Where subscribers cancel online (site domain, hosted cancellation page or billing portal). */
   cancel_url: string | null;
   /** Hex brand colour. */
@@ -2349,7 +2391,7 @@ export interface UpdateNoticeSettingsParams {
   product_name?: string | null;
   /** Logo URL (https). */
   logo_url?: string | null;
-  /** Support address. */
+  /** Support address every notice names (required before Checkbox sends). Turning a notice on without one uses the Checkbox cancellation page's or the Stripe account's public support email. The Checkbox account's login address is never used without a person: setting it here answers resource_conflict (next_action confirm_support_email) until the human confirms it once in the dashboard (Notices › Branding). */
   support_email?: string | null;
   /** Online cancellation URL. */
   cancel_url?: string | null;
@@ -2725,6 +2767,8 @@ export interface CheckWarning {
 export interface CheckReplacement {
   /** Disclosure generated from the plan terms that passes the checks (locked wording). */
   disclosure_text: string;
+  /** The same terms as one short line, verified by the engine like disclosure_text (present only when it passes every targeted check); disclosure_text is then the fuller version. */
+  short_disclosure_text?: string;
   /** Label for the unchecked, required consent checkbox. */
   consent_label: string;
   /** Purchase button label that itself states the renewal. */
@@ -2813,8 +2857,8 @@ export interface DisclosureCheckParams {
   amount?: number;
   /** Three-letter ISO currency (default usd). */
   currency?: string;
-  /** Billing interval: day, week, month or year (required). */
-  interval: string;
+  /** Billing interval: day, week, month or year (required unless `site` gives the plan). */
+  interval?: string;
   /** Number of intervals between charges (default 1). */
   interval_count?: number;
   /** Free-trial length in days (0 or absent = no trial). */
@@ -2869,6 +2913,10 @@ export interface DisclosureCheckParams {
   };
   /** Evaluate the law as of this date (YYYY-MM-DD, default today). */
   as_of?: string;
+  /** Round 23: a site of yours (site_…): the disclosure is judged against the plan it states among the site's plans (the connected Stripe Prices win over plans typed in setup), with the site's merchant name, cancellation URL and jurisdictions, as verifyTask judges it. Plan fields you send are replaced by the plan's. "none" judges only what you send. */
+  site?: string;
+  /** With a site: judge the disclosure against this plan (name or Stripe Price id). An unknown plan is refused with the list of plans. */
+  plan?: string;
 }
 
 /** RFC 6902 operation. */
@@ -4332,6 +4380,7 @@ export interface TestCredential {
   last_error: string | null;
   /** When the key was stored. Unix timestamp in seconds. */
   created: number;
+  next_action?: NextAction;
 }
 
 /** A page of stored test-mode keys. */
@@ -4382,6 +4431,7 @@ export interface StripeCheckoutConfig {
   metadata: Record<string, string>;
   /** When the config was registered. Unix timestamp in seconds. */
   created: number;
+  next_action?: NextAction;
 }
 
 /** A page of registered checkout configs, newest first. */
@@ -4632,8 +4682,8 @@ export interface TestRun {
       via: "merchant_flow" | "stripe_portal" | "cancel_url";
       /** false: nothing told Checkbox how customers cancel, so it used the Stripe portal (step warning cancel_flow_not_configured: the cancel itself worked). true also when inferred (inferred_from). */
       declared_by_merchant: boolean;
-      /** site_portal_link: no cancel_via was given, Stripe has cancellation on in the customer portal and your site links to it, so the portal was used as declared. registered_url: no cancel_via was given and the account or cancellation page you registered (account_url / cancellation_url) redirects or links to the Stripe customer portal, so the portal was used as declared. */
-      inferred_from?: "site_portal_link" | "registered_url" | null;
+      /** How the cancel path was chosen when none was passed. site_portal_link: Stripe has cancellation on in the customer portal and your site links to it, so the portal was used as declared. registered_url: the account or cancellation page you registered (account_url / cancellation_url) redirects or links to the Stripe customer portal. site_cancel_control: the cancel button or link the last scan found on a public page of your site was used. portal_default: no test account and no other cancel flow is set, and Stripe has cancellation on in the customer portal, so the portal was used (and remembered for this site). site_setting: an earlier run remembered the portal for this site. */
+      inferred_from?: "site_portal_link" | "registered_url" | "site_cancel_control" | "portal_default" | "site_setting" | null;
       /** Stripe showed a subscription set to cancel after the shopper's flow. */
       confirmed_in_stripe: boolean;
       /** The subscription Stripe showed canceled. */
@@ -4828,7 +4878,7 @@ export interface CompliancePlanSummary {
   site: string;
   /** action_required (an agent can apply open tasks now), verifying (changes applied; waiting for confirming observations), compliant (every required check passes or only waits for a live check — an automated assessment, not a legal determination; see compliance.pending_live_checks and coverage), blocked (only human answers ("Your call") or declined critical tasks remain). */
   status: "action_required" | "verifying" | "compliant" | "blocked";
-  /** The plan status in words to show a person: action_required "Fixes needed", verifying "Checking your changes", compliant "Checks pass", blocked "Your call". Show this, never the machine value (`compliant` is a status name, not a legal conclusion). */
+  /** The plan status in words to show a person: action_required "Fixes needed", verifying "Checking your changes", compliant "Checks pass", blocked "Your call"; while an agent works the site and everything left waits for a deploy or the owner (next_action done_for_now): "Waiting on deploy and you" or "Waiting on deploy". Show this, never the machine value (`compliant` is a status name, not a legal conclusion). */
   status_label?: string;
   /** Two or three sentences for an LLM: where the site stands and what comes next. */
   summary: string;
@@ -5193,10 +5243,12 @@ export interface ListReceiptsParams {
 
 /** Parameters of `testCredentials.create()` (createTestCredential). */
 export interface CreateTestCredentialParams {
-  /** Kind of key. Only "stripe_test". */
-  type: "stripe_test";
-  /** The Stripe test-mode restricted (rk_test_…) or secret (sk_test_…) key. Stored encrypted; never returned. */
+  /** Kind of key: "stripe_test" ("stripe" is accepted as the same). Always stored as a Stripe TEST-mode key. */
+  type: "stripe_test" | "stripe";
+  /** The Stripe test-mode restricted key (rk_test_…). Secret keys (sk_…) and live keys are refused. Stored encrypted; never returned. */
   secret_key: string;
+  /** Set true only after the human confirmed it: store the key even though its Stripe account looks like another site’s (billing_account_mismatch). Default false. */
+  confirm_account_mismatch?: boolean;
 }
 
 /** Parameters of `stripeCheckoutConfigs.create()` (createStripeCheckoutConfig). */
@@ -5233,6 +5285,8 @@ export interface CreateTestRunParams {
   cancel?: boolean;
   /** State the synthetic shopper visits from (default: the site's first scan region). */
   region?: "US-FED" | "US-AL" | "US-AK" | "US-AZ" | "US-AR" | "US-CA" | "US-CO" | "US-CT" | "US-DE" | "US-DC" | "US-FL" | "US-GA" | "US-HI" | "US-ID" | "US-IL" | "US-IN" | "US-IA" | "US-KS" | "US-KY" | "US-LA" | "US-ME" | "US-MD" | "US-MA" | "US-MI" | "US-MN" | "US-MS" | "US-MO" | "US-MT" | "US-NE" | "US-NV" | "US-NH" | "US-NJ" | "US-NM" | "US-NY" | "US-NC" | "US-ND" | "US-OH" | "US-OK" | "US-OR" | "US-PA" | "US-RI" | "US-SC" | "US-SD" | "US-TN" | "US-TX" | "US-UT" | "US-VT" | "US-VA" | "US-WA" | "US-WV" | "US-WI" | "US-WY";
+  /** Round 23: which plan to run, by the name of a registered checkout config or a Price id (price_…) its line_items use: the run mirrors that config (same as stripe.checkout_config). An unknown plan is refused with the list of registered configs. */
+  plan?: string;
   /** Stripe options. */
   stripe?: {
     /** Registered checkout config (scc_…) to mirror; default: the newest one, else your latest live Checkout Session. "none" skips the registered configs (mirror your live checkout, stripe.price or stripe.payment_link instead). */
@@ -5314,7 +5368,7 @@ export interface ListTestRunsParams {
 
 /** Parameters of `testRuns.retrieve()` (retrieveTestRun). */
 export interface RetrieveTestRunParams {
-  /** Long-poll: wait up to this many seconds (0-30) for the run to move on (status, phase or a step changes) before answering. */
+  /** Long-poll: wait up to this many seconds (0-30) for a meaningful change before answering: the run finishes, its status changes or a step starts or ends (not every internal phase change while the test clock moves). */
   wait?: number | null;
 }
 
@@ -5634,8 +5688,10 @@ export const ERROR_CODES = {
   api_version_invalid: { status: 400, type: "invalid_request_error", description: "The Checkbox-Version header names an unknown API version." },
   idempotency_key_invalid: { status: 400, type: "idempotency_error", description: "The Idempotency-Key header is empty or longer than 255 characters." },
   idempotency_key_reused: { status: 400, type: "idempotency_error", description: "The Idempotency-Key was already used with different parameters within 24 hours." },
-  test_key_missing: { status: 400, type: "invalid_request_error", description: "A Stripe test run needs a Stripe TEST-mode key stored for the site (a person adds it in the dashboard on the site's Proof page)." },
-  test_key_not_test_mode: { status: 400, type: "invalid_request_error", description: "The billing key is a live-mode (or malformed) key; test runs only accept test-mode keys (rk_test_… / sk_test_…)." },
+  test_key_missing: { status: 400, type: "invalid_request_error", description: "A Stripe test run needs a Stripe TEST-mode key stored for the site: the agent stores the restricted test key (rk_test_…) with createTestCredential, or a person adds it in the dashboard." },
+  test_key_not_test_mode: { status: 400, type: "invalid_request_error", description: "The billing key is a live-mode (or malformed) key. Agents only store TEST-mode restricted keys (rk_test_…); a human adds live keys in the Checkbox dashboard." },
+  test_key_not_restricted: { status: 400, type: "invalid_request_error", description: "The key is a Stripe secret key (sk_test_…). Store a restricted test key (rk_test_…) with the permissions on Checkbox's key checklist instead; `message` lists them." },
+  test_key_declined: { status: 403, type: "permission_error", description: "The owner did not allow the agent to use the project's Stripe TEST key when approving the setup; only a person can add it, in the dashboard." },
   test_key_rejected: { status: 400, type: "invalid_request_error", description: "Stripe rejected the test-mode key or it lacks a permission test runs need; `message` names it." },
   authorization_pending: { status: 400, type: "invalid_request_error", description: "Device login: the human has not approved yet. Keep polling createDeviceToken every `interval` seconds." },
   slow_down: { status: 400, type: "rate_limit_error", description: "Device login: polling too fast. Add 5 seconds to the interval and keep polling." },
@@ -5652,12 +5708,14 @@ export const ERROR_CODES = {
   test_mode_domain_unverified: { status: 403, type: "permission_error", description: "Test mode only scans, monitors, fetches and test-runs localhost or domains the account has verified; verify the domain (createDomainVerification) or send the HTML instead." },
   test_mode_scan_budget_exhausted: { status: 429, type: "rate_limit_error", description: "No longer returned: test mode has no scan budget for unverified domains any more, they are refused with test_mode_domain_unverified. Kept so older clients still recognise the code." },
   domain_not_verified: { status: 403, type: "permission_error", description: "Checkbox only scans, monitors, fetches and test-runs websites the account has verified (DNS TXT record or /.well-known file): every target host (site, checkout, account and policy URLs) must be on a verified domain. `next_action` says which domain to verify." },
+  live_key_requires_dashboard: { status: 403, type: "permission_error", description: "A live-mode Stripe key (rk_live_ / sk_live_) cannot be connected through the API or by an AI agent: only a person signed in to the Checkbox dashboard can connect one (and never on a test-mode site). Agents store restricted TEST keys (rk_test_…)." },
   account_suspended: { status: 403, type: "permission_error", description: "The account was suspended by Checkbox staff; contact support." },
   resource_missing: { status: 404, type: "invalid_request_error", description: "No object with this id exists in this mode of the account." },
   route_not_found: { status: 404, type: "invalid_request_error", description: "No such endpoint. See /v1/openapi.json for the list." },
   resource_conflict: { status: 409, type: "invalid_request_error", description: "The object is in a state that does not allow this action." },
   scan_already_queued: { status: 409, type: "invalid_request_error", description: "A scan of this site is already queued or running." },
   consent_reference_locked: { status: 409, type: "invalid_request_error", description: "The consent already carries a different customer_reference; references are set once and never changed." },
+  billing_account_mismatch: { status: 409, type: "invalid_request_error", description: "The key's Stripe account looks like another site's (the site's prices or Payment Links are not in it, or it is already connected in another workspace), so nothing was stored or evaluated. Ask the human the question in `message`; retry with confirm_account_mismatch: true only if they say yes, else use this site's own key. `problems` lists what did not match." },
   test_run_in_progress: { status: 409, type: "invalid_request_error", description: "The site already has a queued or running test run; wait for it (retrieveTestRun) or cancel it (cancelTestRun)." },
   legal_hold_active: { status: 409, type: "invalid_request_error", description: "A legal hold is on for the account or the site: deleting data and shortening retention are refused until it is turned off (updateAccount / updateSite legal_hold)." },
   idempotency_key_in_use: { status: 409, type: "idempotency_error", description: "A request with this Idempotency-Key is still being processed; retry shortly." },

@@ -13,7 +13,7 @@ import { outdatedNotice } from './version-check.ts';
 
 export const SERVER_NAME = 'checkbox';
 /** Kept equal to packages/mcp/package.json "version" (@checkbox-site/mcp); mcp.test.ts checks it. */
-export const SERVER_VERSION = '0.2.0';
+export const SERVER_VERSION = '0.2.1';
 export const DEFAULT_MCP_URL = 'https://app.checkbox.site/mcp';
 
 /** The coverage phrase used across Checkbox (the API docs tests check the count against the rules catalog). */

@@ -1178,7 +1178,7 @@ const getVerification: ToolDef = {
 
 /** createTestRun body from the tool's arguments (top-level shortcuts merged into `stripe`). Exported for tests. */
 export function startTestRunBody(args: Record<string, unknown>): Record<string, unknown> {
-  const body = pick(args, ['mode', 'type', 'advance_time', 'cancel', 'email_wait_seconds', 'region', 'stripe', 'generic']) as Record<string, unknown>;
+  const body = pick(args, ['mode', 'type', 'advance_time', 'cancel', 'email_wait_seconds', 'region', 'plan', 'stripe', 'generic']) as Record<string, unknown>;
   const shortcuts = pick(args, ['checkout_url', 'test_account', 'checkout_steps', 'cancel_url', 'cancel_steps']) as Record<string, unknown>;
   if (Object.keys(shortcuts).length && body.type !== 'generic') {
     body.stripe = { ...shortcuts, ...((body.stripe as Record<string, unknown> | undefined) ?? {}) };
@@ -1186,12 +1186,42 @@ export function startTestRunBody(args: Record<string, unknown>): Record<string, 
   }
   return body;
 }
+/**
+ * Round 22 (founder decision 2): the agent stores the site's ONE Stripe TEST-mode restricted key itself
+ * (createTestCredential). Live keys and sk_test_ secret keys are refused by the API with what to do instead.
+ */
+const storeStripeTestKey: ToolDef = {
+  name: 'store_stripe_test_key',
+  title: 'Store the Stripe TEST restricted key (rk_test_)',
+  description:
+    'Stores the site\'s ONE Stripe key in TEST mode: a restricted key (rk_test_…) from the project\'s env. Checked with Stripe; on a test-mode site it also connects Stripe (checks, fixes after the human approves, test runs). The human sees it on the dashboard and can revoke it. Live and sk_test_ keys are refused (the error says what to do). Never ask the human to paste a key into the chat.',
+  input: {
+    site: siteId.optional(),
+    secret_key: z.string().min(10).max(255).describe('rk_test_… key. Stored encrypted; never returned.'),
+    confirm_account_mismatch: z.boolean().optional().describe('Human said yes'),
+    type: z.enum(['stripe_test', 'stripe']).optional().describe('Optional: "stripe_test" (the REST body\'s type; "stripe" is accepted too). Always stored as a Stripe TEST key.'),
+  },
+  scopes: ['test_runs:write'],
+  annotations: { ...write(true, true), title: 'Store Stripe test key' },
+  async run(args, { api }) {
+    const site = await resolveSite(api, args.site);
+    const cred = await api.request<{ id: string; key_hint: string; verified: boolean; next_action?: NextAction }>('POST', `/v1/sites/${enc(site)}/test_credentials`, {
+      body: { type: 'stripe_test', secret_key: String(args.secret_key ?? ''), ...(args.confirm_account_mismatch === true ? { confirm_account_mismatch: true } : {}) },
+    });
+    return {
+      headline: `Stripe test key ${cred.key_hint} stored for ${site} (checked with Stripe). The human sees it on the dashboard and can revoke it.`,
+      data: cred,
+      next: cred.next_action ?? { type: 'continue_setup', message: 'Call get_setup_status for the next step (start_test_run once a checkout config is registered).', operation_id: 'retrieveSetupSession' },
+    };
+  },
+};
+
 const startTestRun: ToolDef = {
   name: 'start_test_run',
   title: 'Run a synthetic test subscription (test mode)',
   description: [
     'Observes the WHOLE subscription lifecycle, not just the checkout: in the billing platform\'s TEST mode Checkbox subscribes a test customer (card 4242…) whose email is a Checkbox inbox, waits for your acknowledgment email, fast-forwards a Stripe test clock through every legal notice window before trial end and renewal (collecting reminder emails), then cancels online and waits for the cancellation confirmation. Nothing is charged.',
-    'Needs a Stripe TEST key stored for the site — the human adds it in the Checkbox dashboard (the site\'s Proof page); never ask them to paste it into the chat. If missing, the error\'s next_action says so. For non-Stripe sites use type "generic".',
+    'Needs a Stripe TEST-mode restricted key (rk_test_…) stored for the site: store it yourself with store_stripe_test_key (one key for checks, fixes and test runs; live keys stay with the human in the dashboard). Never ask the human to paste a key into the chat. If missing, the error\'s next_action says so. For non-Stripe sites use type "generic".',
     'Usually 2-4 minutes: poll get_test_run (its next_action says when). Each step reports observations, check results and agent-readable fixes; apply them and run again.',
     'mode "real_checkout" is the PROOF run: the shopper buys through the merchant\'s own checkout on its test deployment (stripe.checkout_url or stripe.payment_link), so the merchant\'s webhook handlers and email code fire; give stripe.test_account + stripe.cancel_url when customers cancel in the app. A step is "passed" only with evidence; "warning" means needs review.',
   ].join('\n'),
@@ -1203,6 +1233,7 @@ const startTestRun: ToolDef = {
     cancel: z.boolean().optional().describe('Cancel online at the end (default true).'),
     email_wait_seconds: z.number().int().min(15).max(900).optional().describe('How long to wait for each email (default 120).'),
     region: z.string().max(10).optional().describe('State the synthetic shopper visits from, e.g. "US-CA".'),
+    plan: z.string().max(200).optional().describe('Plan to run: a registered checkout config name or a price_… its line_items use.'),
     stripe: z
       .object({
         checkout_config: z.string().max(100).optional().describe('Registered checkout config (scc_…) to mirror; default the newest, else the latest live Checkout Session; "none" skips registered configs.'),
@@ -1293,9 +1324,11 @@ const checkDisclosure: ToolDef = {
   input: {
     text: z.string().min(1).max(5000).describe('The disclosure shown next to the purchase button, exactly as rendered.'),
     ...planTermsShape,
-    interval: intervalStr,
+    interval: intervalStr.optional().describe('Billing interval: day, week, month or year (optional with site).'),
     button_text: z.string().max(200).optional().describe('Purchase button label, e.g. "Start free trial".'),
     order_summary: z.string().max(1000).optional().describe('Other text next to the button (order summary), if any.'),
+    site: z.string().max(100).optional().describe('site_… whose plans judge it (as verify_task)'),
+    plan: z.string().max(200).optional().describe('With site: plan name or price_…'),
     placement: strictObject(
       {
         above_button: z.boolean().optional(),
@@ -2210,11 +2243,12 @@ const getCompliantDisclosure: ToolDef = {
     }
     // No site: generate from the terms with the stateless check (the replacement does not depend on the text checked).
     const body: Record<string, unknown> = { text: '(no disclosure yet)', ...pick(args, ['merchant_name', 'brand_name', 'plan_name', 'price', 'amount', 'currency', 'interval', 'interval_count', 'trial_days', 'intro_price', 'intro_percent_off', 'intro_periods', 'cancel_url', 'cancel_timing', 'jurisdictions']) };
-    const r = await api.request<{ replacement: Record<string, unknown> & { disclosure_text: string; consent_label: string; verified: boolean; placeholders?: string[] }; disclaimer?: string }>('POST', '/v1/checks/disclosure', { body });
+    const r = await api.request<{ replacement: Record<string, unknown> & { disclosure_text: string; short_disclosure_text?: string; consent_label: string; verified: boolean; placeholders?: string[] }; disclaimer?: string }>('POST', '/v1/checks/disclosure', { body });
     return {
       headline: `Suggested disclosure generated (${r.replacement.verified ? 'passes the checks, verified by the rules engine' : 'not fully verified by the rules engine'}).`,
       notes: [
-        `Disclosure: ${r.replacement.disclosure_text}`,
+        // Round 23 (pilot 22 item 30): the short line first when the engine passes it; the full text as the fuller version.
+        ...(r.replacement.short_disclosure_text ? [`Disclosure: ${r.replacement.short_disclosure_text}`, `Fuller version (also passes): ${r.replacement.disclosure_text}`] : [`Disclosure: ${r.replacement.disclosure_text}`]),
         `Consent label: ${r.replacement.consent_label}`,
         ...(r.replacement.placeholders?.length ? [`Fill these placeholders: ${r.replacement.placeholders.join(', ')}.`] : []),
         'Place html directly above the purchase button; never pre-check the box. For consent records as evidence, pass site to get the Elements snippet instead.',
@@ -2488,7 +2522,7 @@ const callApi: ToolDef = {
   description: [
     'For a next_action whose operation has no dedicated tool (e.g. createStripeCheckoutConfig, updateTask, updateNoticeSettings, listConsents). Calls the Checkbox /v1 API with this server\'s connection; paths and bodies are in https://app.checkbox.site/v1/openapi.json.',
     'Examples: {"method":"GET","path":"/v1/account"} ; {"method":"POST","path":"/v1/sites/site_123/domain_verification/check"}.',
-    'Never send API keys or Stripe keys through it: keys are added by the human in the Checkbox dashboard, never pasted into the chat.',
+    'Never send API keys or Stripe keys through it, except a Stripe TEST restricted key via store_stripe_test_key (not call_api). Live keys are added by the human in the Checkbox dashboard, never pasted into the chat.',
     'GET is read-only. POST/DELETE change data: only do what the user or a next_action asked for. DELETE archives or removes objects — confirm with the user first.',
   ].join('\n'),
   input: {
@@ -2585,6 +2619,7 @@ export const TOOLS: readonly ToolDef[] = [
   answerTask,
   verifySite,
   getVerification,
+  storeStripeTestKey,
   startTestRun,
   getTestRun,
   checkDisclosure,
@@ -2627,6 +2662,7 @@ export const TOOL_OPERATIONS: Record<string, string[]> = {
   answer_task: ['answerTask'],
   verify_site: ['verifySite'],
   get_verification: ['retrieveVerification'],
+  store_stripe_test_key: ['createTestCredential'],
   start_test_run: ['createTestRun'],
   get_test_run: ['listTestRuns', 'retrieveTestRun'],
   check_disclosure: ['checkDisclosure'],
