@@ -8,4 +8,4 @@ We acknowledge reports within three business days and keep you updated until a f
 reasonable time to fix the issue before disclosing it publicly. Do not run tests that degrade the service for others
 or access data that is not yours.
 
-If you find a leaked Checkbox key (`ck_live_…`, `ck_test_…`, `rk_…`), report it to the same address; we revoke it.
+If you find a leaked Checkbox key (`ck_live_…`, `ck_test_…`, restricted `ckr_live_…` / `ckr_test_…`, older restricted `rk_…`), report it to the same address; we revoke it.

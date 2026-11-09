@@ -75,6 +75,12 @@ export async function describeKey(api: CheckboxApi, apiKey: string | undefined, 
   }
 }
 
+/** Round 27 (pilot 26 item 22): the stderr note when --read-only is on but the key itself can still write. */
+export function readOnlyNote(readOnly: boolean, key: KeyContext): string | null {
+  if (!readOnly || !key.authenticated || key.kind !== 'secret' || key.role === 'viewer') return null;
+  return 'checkbox-mcp: --read-only hides the write tools in this server, but it is not a security boundary: this key can still write through the API. To limit the key itself, create a read-only key (ckr_…) in the Checkbox dashboard (Agent & API) and use it instead.';
+}
+
 export async function runStdio(opts: StdioOptions = {}): Promise<void> {
   const env = opts.env ?? process.env;
   const argv = opts.argv ?? process.argv.slice(2);
@@ -84,8 +90,8 @@ export async function runStdio(opts: StdioOptions = {}): Promise<void> {
       [
         'checkbox-mcp — Checkbox MCP server over stdio',
         '',
-        'Environment: CHECKBOX_API_KEY (or CHECKBOX_SECRET_KEY) = ck_test_… / ck_live_… / rk_…; CHECKBOX_API_BASE (default https://app.checkbox.site)',
-        'Flags: --api-key <key>  --api-base <url>  --read-only (hide every write tool)',
+        'Environment: CHECKBOX_API_KEY (or CHECKBOX_SECRET_KEY) = ck_test_… / ck_live_… / ckr_… (restricted); CHECKBOX_API_BASE (default https://app.checkbox.site)',
+        'Flags: --api-key <key>  --api-base <url>  --read-only (hide every write tool; not a security boundary: the key keeps its permissions, so use a read-only ckr_ key to limit what it can do)',
         'Without a key, only setup_checkbox is available: it returns an approval link for the human and adopts the issued key.',
       ].join('\n'),
     );
@@ -106,6 +112,10 @@ export async function runStdio(opts: StdioOptions = {}): Promise<void> {
     log(`checkbox-mcp: the API key was rejected (${(err as Error).message}). Starting without a key: use setup_checkbox to get a new one.`);
     key = keyContextFromPrefix(undefined, cfg.readOnly);
   }
+  // Round 27 (pilot 26 item 22, security-reviewer): --read-only only hides tools in this server. Say so when the key can
+  // still write, so nobody mistakes it for a limit on the key.
+  const note = readOnlyNote(cfg.readOnly, key);
+  if (note) log(note);
   const mcp = createCheckboxMcpServer({
     api: key.authenticated ? api : await buildApi({ apiBase: cfg.apiBase }, opts.fetch),
     key,

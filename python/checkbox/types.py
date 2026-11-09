@@ -469,7 +469,7 @@ SetupSessionWarningsItem = TypedDict(
 SetupSessionInstall = TypedDict(
     "SetupSessionInstall",
     {
-        #: The exact tag to put in <head> on every page.
+        #: The exact tag to put in <head> of the homepage, pricing, checkout / sign-up and account pages (not needed on every page).
         "script_tag": Optional[str],
         #: The site's public snippet key: the data-key of script_tag (and the local part of inbound_email). Use only this key in the snippet tag.
         "snippet_key": Optional[str],
@@ -578,7 +578,7 @@ SetupSessionStripeRestrictedKey = TypedDict(
 SetupSessionStripe = TypedDict(
     "SetupSessionStripe",
     {
-        #: Whether the human allowed Checkbox to use the project's Stripe TEST key for synthetic subscriptions.
+        #: Whether the human ticked “Let your agent store a Stripe test-mode key” on the approval page (device login or OAuth connection). False: the agent may not store one (createTestCredential answers test_key_declined); the human adds it in the dashboard. Sessions started with a key the human made in the dashboard: true.
         "test_key_consent": bool,
         #: Hint of the key the CLI found (never the key).
         "test_key_hint": Optional[str],
@@ -1382,7 +1382,7 @@ SiteCompliance = Optional["SiteComplianceValue"]
 SiteInstall = TypedDict(
     "SiteInstall",
     {
-        #: Paste into the <head> of every page (or let `checkbox init` do it).
+        #: Paste into the <head> of the homepage, pricing, checkout / sign-up and account pages (or let `checkbox init` do it). It sends only the renewal-relevant blocks of a page.
         "script_tag": str,
         #: Public key of the snippet (also the inbound email local part).
         "snippet_key": str,
@@ -1982,7 +1982,7 @@ ConnectBillingPlatformParams = TypedDict(
         "platform": Literal["stripe", "recharge", "shopify", "chargebee", "recurly", "paddle"],
         #: Credentials, in snake_case like the rest of the API (the camelCase spellings, secretKey / apiToken / accessToken / apiKey, are accepted too). Stripe: { "secret_key": "rk_test_…" } (rk_test_ in test mode). One Stripe restricted key per site: Read permissions for the checks, and Write permissions that Checkbox uses only after you click Approve on a fix, or in test mode (the one exception: Webhook Endpoints, used once to add Checkbox's webhook endpoint when you connect the key). The checklist: Customers: Write, Products: Read, Prices: Read, Coupons: Read, Subscriptions: Write, Test clocks: Write, Customer portal: Write, Checkout Sessions: Write, Payment Links: Write, Webhook Endpoints: Write (https://checkbox.site/docs/guides/stripe-key). Recharge: { "api_token": "…" }. Shopify: { "shop": "store.myshopify.com", "access_token": "shpat_…" }. Chargebee: { "site": "acme", "api_key": "live_…" } (the site name before .chargebee.com and a read-only API key). Recurly: { "api_key": "…", "region": "us" } (a private API key of the site; region "eu" for sites hosted in Recurly’s EU data centre, default "us"). Paddle: { "api_key": "pdl_live_apikey_…" } (a Paddle Billing API key with read permissions; sandbox keys, pdl_sdbx_…, read the sandbox; "environment": "live" or "sandbox" only for older keys without that prefix). For the platforms other than Stripe, Checkbox only reads.
         "credentials": Dict[str, str],
-        #: Set true only after the human confirmed it: connect the key even though its Stripe account looks like another site’s (the billing_account_mismatch error asks "This looks like <other site>’s Stripe account. Use it anyway?"). Default false: such a key is not connected and nothing is evaluated. (optional)
+        #: Set true only after the human said yes to the billing_account_mismatch question ("This looks like <other site>’s Stripe account. Use it anyway?"). It only proposes the account: the key is connected on hold (nothing from it is used, no test runs) until a person confirms it in the Checkbox dashboard (site Overview: “It is this site’s account: use it”). Default false: such a key is not connected and nothing is evaluated. (optional)
         "confirm_account_mismatch": bool,
     },
     total=False,
@@ -2633,8 +2633,8 @@ Task = TypedDict(
         "verify": "TaskVerify",
         #: What Checkbox needs before it can give the exact change (observation: it has not seen the page / email yet; facts: plan, price, cancel URL or merchant name). The title stays the same either way.
         "blocked_on": Optional[str],
-        #: Done / declined tasks: verified (its checks pass), no_longer_applicable (its checks no longer apply, e.g. the data source changed), superseded, declined.
-        "closed_reason": Optional[Literal["verified", "no_longer_applicable", "superseded", "declined"]],
+        #: Done / declined tasks: verified (its checks pass), no_longer_applicable (its checks no longer apply, e.g. the data source changed), superseded, declined, decided (the owner confirmed a decision, e.g. New York notices by email only: closed, but its checks are not verified).
+        "closed_reason": Optional[Literal["verified", "no_longer_applicable", "superseded", "declined", "decided"]],
         #: Tasks to finish first (their result changes this task's content).
         "depends_on": List[str],
         #: Unfinished tasks among depends_on.
@@ -2719,7 +2719,7 @@ CompliancePlanCoverage = TypedDict(
 CompliancePlanOwnerQuestionsQuestionsItem = TypedDict(
     "CompliancePlanOwnerQuestionsQuestionsItem",
     {
-        #: "email_sender" (who sends the required emails), or the id of the task whose question it is.
+        #: "email_sender" (who sends the required emails), "notices_support_email" / "notices_cancel_timing" (what Checkbox Notices needs before it sends), or the id of the task whose question it is.
         "id": str,
         #: The question, in plain words for the owner.
         "text": str,
@@ -3062,8 +3062,8 @@ AnsweredTask = TypedDict(
         "verify": "AnsweredTaskVerify",
         #: What Checkbox needs before it can give the exact change (observation: it has not seen the page / email yet; facts: plan, price, cancel URL or merchant name). The title stays the same either way.
         "blocked_on": Optional[str],
-        #: Done / declined tasks: verified (its checks pass), no_longer_applicable (its checks no longer apply, e.g. the data source changed), superseded, declined.
-        "closed_reason": Optional[Literal["verified", "no_longer_applicable", "superseded", "declined"]],
+        #: Done / declined tasks: verified (its checks pass), no_longer_applicable (its checks no longer apply, e.g. the data source changed), superseded, declined, decided (the owner confirmed a decision, e.g. New York notices by email only: closed, but its checks are not verified).
+        "closed_reason": Optional[Literal["verified", "no_longer_applicable", "superseded", "declined", "decided"]],
         #: Tasks to finish first (their result changes this task's content).
         "depends_on": List[str],
         #: Unfinished tasks among depends_on.
@@ -3703,9 +3703,9 @@ NoticeSettings = TypedDict(
         "logo_url": Optional[str],
         #: Reply-to / support address every notice names as the business's contact. null until one is set (or while support_email_to_confirm waits for a person).
         "support_email": Optional[str],
-        #: The Checkbox account's login address (the owner's), offered as the support email but not used: Checkbox sends nothing with it, and does not save it, until a person confirms it once in the dashboard (Notices › Branding). Agents cannot confirm it; ask the human, or set a different support_email they chose. The Stripe account's public support email is used without asking.
+        #: The Checkbox account's login address (the owner's), offered as the support email but not used: Checkbox sends nothing with it, and does not save it, until a person confirms it once in the dashboard (Emails › Branding). Agents cannot confirm it; ask the human, or set a different support_email they chose. The Stripe account's public support email is used without asking.
         "support_email_to_confirm": Optional[str],
-        #: Whether Checkbox Notices emails the site's real subscribers. test_mode: never (test-mode sites email only test-run inboxes and send the owner marked test copies). needs_confirmation: Notices are on, but nothing goes to real subscribers until a person confirms it once in the dashboard (Notices tab, after a preview); an API key or agent cannot confirm it. confirmed: they are emailed. off: Checkbox sends nothing.
+        #: Whether Checkbox Notices emails the site's real subscribers. test_mode: never (test-mode sites email only test-run inboxes and send the owner marked test copies). needs_confirmation: Notices are on, but nothing goes to real subscribers until a person confirms it once in the dashboard (Emails tab, after a preview); an API key or agent cannot confirm it. confirmed: they are emailed. off: Checkbox sends nothing.
         "real_sends": Literal["test_mode", "confirmed", "needs_confirmation", "off"],
         #: Where subscribers cancel online (site domain, hosted cancellation page or billing portal).
         "cancel_url": Optional[str],
@@ -3763,7 +3763,7 @@ UpdateNoticeSettingsParams = TypedDict(
         "product_name": Optional[str],
         #: Logo URL (https). (optional)
         "logo_url": Optional[str],
-        #: Support address every notice names (required before Checkbox sends). Turning a notice on without one uses the Checkbox cancellation page's or the Stripe account's public support email. The Checkbox account's login address is never used without a person: setting it here answers resource_conflict (next_action confirm_support_email) until the human confirms it once in the dashboard (Notices › Branding). (optional)
+        #: Support address every notice names (required before Checkbox sends). Turning a notice on without one uses the Checkbox cancellation page's or the Stripe account's public support email. The Checkbox account's login address is never used without a person: setting it here answers resource_conflict (next_action confirm_support_email) until the human confirms it once in the dashboard (Emails › Branding). (optional)
         "support_email": Optional[str],
         #: Online cancellation URL. (optional)
         "cancel_url": Optional[str],
@@ -3778,7 +3778,7 @@ UpdateNoticeSettingsParams = TypedDict(
 )
 
 
-#: Copy-ready email for this subscriber. It passes the preflight email check for its kind when every field is filled.
+#: The email for this subscriber, rendered from Checkbox's template. Ready to send only when missing_fields is empty; it then passes the preflight email check for its kind.
 RenderedNoticeEmail = TypedDict(
     "RenderedNoticeEmail",
     {
@@ -3790,7 +3790,7 @@ RenderedNoticeEmail = TypedDict(
         "text": str,
         #: HTML body, merge fields filled (values HTML-escaped).
         "html": str,
-        #: Merge fields Checkbox could not fill (e.g. cancel_url until you set it); fill them before sending.
+        #: Merge fields Checkbox could not fill (support_contact until a support email is confirmed, cancel_url when neither the notice settings nor the site name an account page). While this is not empty the email is NOT ready to send: fill each {{field}} first, or a check of the sent copy reopens its task naming the unfilled field.
         "missing_fields": List[str],
     },
     total=False,
@@ -3850,7 +3850,7 @@ DueNoticeMissed = TypedDict(
 )
 
 
-#: An email the merchant owes a subscriber, legally required (required: true) or recommended ("You send" mode): what, when, the copy-ready email and how to confirm it was sent.
+#: An email the merchant owes a subscriber, legally required (required: true) or recommended ("You send" mode): what, when, the email to send (ready once email.missing_fields is empty) and how to confirm it was sent.
 DueNotice = TypedDict(
     "DueNotice",
     {
@@ -8065,7 +8065,7 @@ CreateTestCredentialParams = TypedDict(
         "type": Literal["stripe_test", "stripe"],
         #: The Stripe test-mode restricted key (rk_test_…). Secret keys (sk_…) and live keys are refused. Stored encrypted; never returned.
         "secret_key": str,
-        #: Set true only after the human confirmed it: store the key even though its Stripe account looks like another site’s (billing_account_mismatch). Default false. (optional)
+        #: Set true only after the human said yes: proposes the key even though its Stripe account looks like another site’s (billing_account_mismatch). It is connected on hold, and nothing from it is used, until a person confirms the account in the Checkbox dashboard (site Overview); next to a person’s Stripe connection it is refused. Default false. (optional)
         "confirm_account_mismatch": bool,
     },
     total=False,
@@ -8129,6 +8129,10 @@ CreateTestRunParamsStripe = TypedDict(
         "price": str,
         #: Trial for `price` (registered configs carry their own). (optional)
         "trial_period_days": int,
+        #: Mirror mode: a TEST-mode coupon id applied to the test subscription, so it has the same discount as your real subscribers (an intro price, for example). Its emails are then judged against that discount. Not with promotion_code. (optional)
+        "coupon": str,
+        #: Mirror mode: a TEST-mode promotion code (promo_… id, or the code customers type) applied to the test subscription. Not with coupon. (optional)
+        "promotion_code": str,
         #: Live price id -> test-mode price id, when they differ. (optional)
         "price_map": Dict[str, str],
         #: Steps that complete your hosted checkout with card 4242 4242 4242 4242 when it differs from Stripe's default page. (optional)
@@ -8827,7 +8831,7 @@ NoticeDueEventRequest = TypedDict(
 )
 
 
-#: notice.due: An email the merchant sends itself ("You send" mode) reached its recommended send date: data.object is the due_notice with the window, send_at, the copy-ready email and its BCC address. Send it now (inside the window), then call markNoticeSent (or BCC the copy). required tells a legally required email from a recommended one.
+#: notice.due: An email the merchant sends itself ("You send" mode) reached its recommended send date: data.object is the due_notice with the window, send_at, the email (ready to send once email.missing_fields is empty) and its BCC address. Send it now (inside the window), then call markNoticeSent (or BCC the copy). required tells a legally required email from a recommended one.
 NoticeDueEvent = TypedDict(
     "NoticeDueEvent",
     {
@@ -9742,7 +9746,7 @@ ERROR_CODES: Dict[str, Dict[str, Any]] = {
     "test_key_missing": {"status": 400, "type": "invalid_request_error", "description": "A Stripe test run needs a Stripe TEST-mode key stored for the site: the agent stores the restricted test key (rk_test_…) with createTestCredential, or a person adds it in the dashboard."},
     "test_key_not_test_mode": {"status": 400, "type": "invalid_request_error", "description": "The billing key is a live-mode (or malformed) key. Agents only store TEST-mode restricted keys (rk_test_…); a human adds live keys in the Checkbox dashboard."},
     "test_key_not_restricted": {"status": 400, "type": "invalid_request_error", "description": "The key is a full Stripe secret key (sk_test_… or sk_live_…), which is refused on every connect path (createTestCredential, connectBillingPlatform, the dashboard). Use a restricted key (rk_test_…) with the permissions on Checkbox's key checklist instead; `message` lists them."},
-    "test_key_declined": {"status": 403, "type": "permission_error", "description": "The owner did not allow the agent to use the project's Stripe TEST key when approving the setup; only a person can add it, in the dashboard."},
+    "test_key_declined": {"status": 403, "type": "permission_error", "description": "The owner did not tick “Let your agent store a Stripe test-mode key” on the approval page of this agent's sign-in (device login) or connection (OAuth). Nothing was stored. Ask them to allow it on the approval page (sign in again) or to add the key themselves in the dashboard."},
     "test_key_rejected": {"status": 400, "type": "invalid_request_error", "description": "Stripe rejected the test-mode key or it lacks a permission test runs need; `message` names it."},
     "authorization_pending": {"status": 400, "type": "invalid_request_error", "description": "Device login: the human has not approved yet. Keep polling createDeviceToken every `interval` seconds."},
     "slow_down": {"status": 400, "type": "rate_limit_error", "description": "Device login: polling too fast. Add 5 seconds to the interval and keep polling."},
@@ -9766,7 +9770,7 @@ ERROR_CODES: Dict[str, Dict[str, Any]] = {
     "resource_conflict": {"status": 409, "type": "invalid_request_error", "description": "The object is in a state that does not allow this action."},
     "scan_already_queued": {"status": 409, "type": "invalid_request_error", "description": "A scan of this site is already queued or running."},
     "consent_reference_locked": {"status": 409, "type": "invalid_request_error", "description": "The consent already carries a different customer_reference; references are set once and never changed."},
-    "billing_account_mismatch": {"status": 409, "type": "invalid_request_error", "description": "The key's Stripe account looks like another site's (the site's prices or Payment Links are not in it, or it is already connected in another workspace), so nothing was stored or evaluated. Ask the human the question in `message`; retry with confirm_account_mismatch: true only if they say yes, else use this site's own key. `problems` lists what did not match."},
+    "billing_account_mismatch": {"status": 409, "type": "invalid_request_error", "description": "The key's Stripe account looks like another site's (the site's prices or Payment Links are not in it, or it is already connected in another workspace), so nothing was stored or evaluated. Ask the human the question in `message`; retry with confirm_account_mismatch: true only if they say yes (that only proposes it: the key is held until a person confirms the account in the dashboard), else use this site's own key. `problems` lists what did not match."},
     "test_run_in_progress": {"status": 409, "type": "invalid_request_error", "description": "The site already has a queued or running test run; wait for it (retrieveTestRun) or cancel it (cancelTestRun)."},
     "legal_hold_active": {"status": 409, "type": "invalid_request_error", "description": "A legal hold is on for the account or the site: deleting data and shortening retention are refused until it is turned off (updateAccount / updateSite legal_hold)."},
     "idempotency_key_in_use": {"status": 409, "type": "idempotency_error", "description": "A request with this Idempotency-Key is still being processed; retry shortly."},

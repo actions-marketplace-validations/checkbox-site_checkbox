@@ -74,7 +74,7 @@ what to change. Free. Every feature. No credit card. Fair-use limits.
    hint; prefer OAuth wherever the client supports it). With an API key it starts a setup session. Pass what you know:
    site_url, checkout_url, terms_url / refund_url / cancellation_url, billing_platform, plans, project.layout_file.
    (The \`checkbox init\` CLI, \`npx @checkbox-site/cli init\`, does the same and patches the layout file.)
-2. Follow the setup **next_action** (install the snippet in the root layout, store the one Stripe TEST restricted key yourself with store_stripe_test_key,
+2. Follow the setup **next_action** (install the snippet on the homepage, pricing, checkout and account pages, store the one Stripe TEST restricted key yourself with store_stripe_test_key,
    register checkout params). After each change: **update_setup**, then **get_setup_status** with verify=true.
 3. **get_compliance_plan** — ordered tasks: requirement + citation, where (file / selector / Stripe object), the exact
    change (diff template, copy, or Stripe params) and how to verify.
@@ -100,8 +100,8 @@ Every tool result ends with "Next: …" naming the tool to call. Errors carry a 
 ## Keys and modes
 
 - \`ck_test_…\` keys act on an isolated test-mode sandbox (use them while building). \`ck_live_…\` keys need a verified
-  domain before live scans. \`rk_…\` restricted keys only see the tools their permissions allow; a read-only key gives a
-  read-only server.
+  domain before live scans. \`ckr_…\` restricted keys (older ones start with \`rk_…\`) only see the tools their permissions allow; a read-only key gives a
+  read-only server. The --read-only flag only hides tools: it is not a security boundary, the key keeps its permissions.
 - Keep secret keys server-side (CHECKBOX_SECRET_KEY in .env.local, git-ignored). Publishable keys (\`pk_…\`) are for the
   browser snippet / Elements.
 
