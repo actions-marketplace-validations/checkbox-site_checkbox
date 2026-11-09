@@ -264,7 +264,7 @@
           "message": {
             "type": "string",
             "description": "One or two sentences telling the agent exactly what to do.",
-            "example": "Add <script async src=\"https://app.checkbox.site/s.js\" data-key=\"k3y9\"></script> to the <head> of every page, then report snippet_installed_in."
+            "example": "Add <script async src=\"https://app.checkbox.site/s.js\" data-key=\"k3y9\"></script> to the <head> of your homepage, pricing, checkout and account pages, then report snippet_installed_in."
           },
           "operation_id": {
             "type": "string",
@@ -1051,7 +1051,7 @@
             ],
             "example": {
               "type": "install_snippet",
-              "message": "Add <script async src=\"https://app.checkbox.site/s.js\" data-key=\"k3y9\"></script> to the <head> of every page, then report snippet_installed_in.",
+              "message": "Add <script async src=\"https://app.checkbox.site/s.js\" data-key=\"k3y9\"></script> to the <head> of your homepage, pricing, checkout and account pages, then report snippet_installed_in.",
               "operation_id": "updateSetupSession",
               "mcp_tool": "update_setup",
               "endpoint": "POST /v1/sites/{site}/test_credentials",
@@ -1371,7 +1371,7 @@
                   "string",
                   "null"
                 ],
-                "description": "The exact tag to put in <head> on every page.",
+                "description": "The exact tag to put in <head> of the homepage, pricing, checkout / sign-up and account pages (not needed on every page).",
                 "example": "<script async src=\"https://app.checkbox.site/s.js\" data-key=\"k3y9\" data-api=\"https://app.checkbox.site\"></script>"
               },
               "snippet_key": {
@@ -1597,7 +1597,7 @@
             "properties": {
               "test_key_consent": {
                 "type": "boolean",
-                "description": "Whether the human allowed Checkbox to use the project's Stripe TEST key for synthetic subscriptions.",
+                "description": "Whether the human ticked “Let your agent store a Stripe test-mode key” on the approval page (device login or OAuth connection). False: the agent may not store one (createTestCredential answers test_key_declined); the human adds it in the dashboard. Sessions started with a key the human made in the dashboard: true.",
                 "example": true
               },
               "test_key_hint": {
@@ -2564,7 +2564,7 @@
                 "steps": [],
                 "next_action": {
                   "type": "install_snippet",
-                  "message": "Add <script async src=\"https://app.checkbox.site/s.js\" data-key=\"k3y9\"></script> to the <head> of every page, then report snippet_installed_in.",
+                  "message": "Add <script async src=\"https://app.checkbox.site/s.js\" data-key=\"k3y9\"></script> to the <head> of your homepage, pricing, checkout and account pages, then report snippet_installed_in.",
                   "operation_id": "updateSetupSession",
                   "mcp_tool": "update_setup",
                   "endpoint": "POST /v1/sites/{site}/test_credentials",
@@ -3797,7 +3797,7 @@
         "properties": {
           "script_tag": {
             "type": "string",
-            "description": "Paste into the <head> of every page (or let `checkbox init` do it).",
+            "description": "Paste into the <head> of the homepage, pricing, checkout / sign-up and account pages (or let `checkbox init` do it). It sends only the renewal-relevant blocks of a page.",
             "example": "<script async src=\"https://app.checkbox.site/s.js\" data-key=\"ab12…\"></script>"
           },
           "snippet_key": {
@@ -6142,7 +6142,7 @@
           },
           "confirm_account_mismatch": {
             "type": "boolean",
-            "description": "Set true only after the human confirmed it: connect the key even though its Stripe account looks like another site’s (the billing_account_mismatch error asks \"This looks like <other site>’s Stripe account. Use it anyway?\"). Default false: such a key is not connected and nothing is evaluated.",
+            "description": "Set true only after the human said yes to the billing_account_mismatch question (\"This looks like <other site>’s Stripe account. Use it anyway?\"). It only proposes the account: the key is connected on hold (nothing from it is used, no test runs) until a person confirms it in the Checkbox dashboard (site Overview: “It is this site’s account: use it”). Default false: such a key is not connected and nothing is evaluated.",
             "example": false
           }
         },
@@ -8120,9 +8120,10 @@
               "verified",
               "no_longer_applicable",
               "superseded",
-              "declined"
+              "declined",
+              "decided"
             ],
-            "description": "Done / declined tasks: verified (its checks pass), no_longer_applicable (its checks no longer apply, e.g. the data source changed), superseded, declined.",
+            "description": "Done / declined tasks: verified (its checks pass), no_longer_applicable (its checks no longer apply, e.g. the data source changed), superseded, declined, decided (the owner confirmed a decision, e.g. New York notices by email only: closed, but its checks are not verified).",
             "example": null
           },
           "depends_on": {
@@ -8873,7 +8874,7 @@
                   "properties": {
                     "id": {
                       "type": "string",
-                      "description": "\"email_sender\" (who sends the required emails), or the id of the task whose question it is.",
+                      "description": "\"email_sender\" (who sends the required emails), \"notices_support_email\" / \"notices_cancel_timing\" (what Checkbox Notices needs before it sends), or the id of the task whose question it is.",
                       "example": "email_sender"
                     },
                     "text": {
@@ -10978,7 +10979,7 @@
               "string",
               "null"
             ],
-            "description": "The Checkbox account's login address (the owner's), offered as the support email but not used: Checkbox sends nothing with it, and does not save it, until a person confirms it once in the dashboard (Notices › Branding). Agents cannot confirm it; ask the human, or set a different support_email they chose. The Stripe account's public support email is used without asking.",
+            "description": "The Checkbox account's login address (the owner's), offered as the support email but not used: Checkbox sends nothing with it, and does not save it, until a person confirms it once in the dashboard (Emails › Branding). Agents cannot confirm it; ask the human, or set a different support_email they chose. The Stripe account's public support email is used without asking.",
             "example": null
           },
           "real_sends": {
@@ -10989,7 +10990,7 @@
               "needs_confirmation",
               "off"
             ],
-            "description": "Whether Checkbox Notices emails the site's real subscribers. test_mode: never (test-mode sites email only test-run inboxes and send the owner marked test copies). needs_confirmation: Notices are on, but nothing goes to real subscribers until a person confirms it once in the dashboard (Notices tab, after a preview); an API key or agent cannot confirm it. confirmed: they are emailed. off: Checkbox sends nothing.",
+            "description": "Whether Checkbox Notices emails the site's real subscribers. test_mode: never (test-mode sites email only test-run inboxes and send the owner marked test copies). needs_confirmation: Notices are on, but nothing goes to real subscribers until a person confirms it once in the dashboard (Emails tab, after a preview); an API key or agent cannot confirm it. confirmed: they are emailed. off: Checkbox sends nothing.",
             "example": "needs_confirmation"
           },
           "cancel_url": {
@@ -11361,7 +11362,7 @@
               "null"
             ],
             "maxLength": 320,
-            "description": "Support address every notice names (required before Checkbox sends). Turning a notice on without one uses the Checkbox cancellation page's or the Stripe account's public support email. The Checkbox account's login address is never used without a person: setting it here answers resource_conflict (next_action confirm_support_email) until the human confirms it once in the dashboard (Notices › Branding).",
+            "description": "Support address every notice names (required before Checkbox sends). Turning a notice on without one uses the Checkbox cancellation page's or the Stripe account's public support email. The Checkbox account's login address is never used without a person: setting it here answers resource_conflict (next_action confirm_support_email) until the human confirms it once in the dashboard (Emails › Branding).",
             "example": "help@acme.example"
           },
           "cancel_url": {
@@ -11452,7 +11453,7 @@
             "items": {
               "type": "string"
             },
-            "description": "Merge fields Checkbox could not fill (e.g. cancel_url until you set it); fill them before sending.",
+            "description": "Merge fields Checkbox could not fill (support_contact until a support email is confirmed, cancel_url when neither the notice settings nor the site name an account page). While this is not empty the email is NOT ready to send: fill each {{field}} first, or a check of the sent copy reopens its task naming the unfilled field.",
             "example": []
           }
         },
@@ -11463,7 +11464,7 @@
           "html",
           "missing_fields"
         ],
-        "description": "Copy-ready email for this subscriber. It passes the preflight email check for its kind when every field is filled."
+        "description": "The email for this subscriber, rendered from Checkbox's template. Ready to send only when missing_fields is empty; it then passes the preflight email check for its kind."
       },
       "DueNotice": {
         "type": "object",
@@ -11803,7 +11804,7 @@
           "updated",
           "next_action"
         ],
-        "description": "An email the merchant owes a subscriber, legally required (required: true) or recommended (\"You send\" mode): what, when, the copy-ready email and how to confirm it was sent."
+        "description": "An email the merchant owes a subscriber, legally required (required: true) or recommended (\"You send\" mode): what, when, the email to send (ready once email.missing_fields is empty) and how to confirm it was sent."
       },
       "DueNoticeList": {
         "type": "object",
@@ -24705,7 +24706,7 @@
       "post": {
         "operationId": "connectBillingPlatform",
         "summary": "Connect a billing platform",
-        "description": "Connects the site's billing platform with the one restricted key (a Stripe restricted key, a Recharge token, a Shopify Admin API token, a Chargebee read-only API key, a Recurly private API key or a Paddle API key with read permissions), so Checkbox reads the customer-portal and reminder settings. Stripe: One Stripe restricted key per site: Read permissions for the checks, and Write permissions that Checkbox uses only after you click Approve on a fix, or in test mode (the one exception: Webhook Endpoints, used once to add Checkbox's webhook endpoint when you connect the key) (checklist: https://checkbox.site/docs/guides/stripe-key). A full secret key (sk_test_ / sk_live_) is refused on every path with test_key_not_restricted: use a restricted key. API keys and AI agents may connect TEST-mode keys (rk_test_…) only; a live key (rk_live_ / sk_live_) is refused with live_key_requires_dashboard, because only a person signed in to the Checkbox dashboard can connect one. The credentials are validated by reading the settings once and stored encrypted. When the key's Stripe account looks like another site's (the site's prices or Payment Links are not in it, or it is already connected in another workspace), nothing is connected and the error billing_account_mismatch asks the human to confirm; retry with confirm_account_mismatch: true only after they said yes. The account owner is emailed about every key connected.",
+        "description": "Connects the site's billing platform with the one restricted key (a Stripe restricted key, a Recharge token, a Shopify Admin API token, a Chargebee read-only API key, a Recurly private API key or a Paddle API key with read permissions), so Checkbox reads the customer-portal and reminder settings. Stripe: One Stripe restricted key per site: Read permissions for the checks, and Write permissions that Checkbox uses only after you click Approve on a fix, or in test mode (the one exception: Webhook Endpoints, used once to add Checkbox's webhook endpoint when you connect the key) (checklist: https://checkbox.site/docs/guides/stripe-key). A full secret key (sk_test_ / sk_live_) is refused on every path with test_key_not_restricted: use a restricted key. API keys and AI agents may connect TEST-mode keys (rk_test_…) only; a live key (rk_live_ / sk_live_) is refused with live_key_requires_dashboard, because only a person signed in to the Checkbox dashboard can connect one. The credentials are validated by reading the settings once and stored encrypted. When the key's Stripe account looks like another site's (the site's prices or Payment Links are not in it, or it is already connected in another workspace), nothing is connected and the error billing_account_mismatch asks the human to confirm; retry with confirm_account_mismatch: true only after they said yes; the key is then held until a person confirms the account in the dashboard (an agent cannot confirm it). The account owner is emailed about every key connected.",
         "tags": [
           "Sites"
         ],
@@ -28317,7 +28318,7 @@
       "get": {
         "operationId": "listDueNotices",
         "summary": "List due notices",
-        "description": "The legally required emails you owe subscribers (sites in \"You send\" mode, the default): kind, the subscriber (billing-platform ids), the legal window for the subscriber's state, the recommended send date, the copy-ready email and the BCC address. Default: everything not yet sent (upcoming, due, overdue), soonest first. Live keys list live subscribers' notices, test keys test-mode ones. Send each one on its send_date (inside its window), then call markNoticeSent (or BCC the notice's bcc address). Subscribe to the notice.due webhook to get each one on its send date.",
+        "description": "The legally required emails you owe subscribers (sites in \"You send\" mode, the default): kind, the subscriber (billing-platform ids), the legal window for the subscriber's state, the recommended send date, the email (ready to send once email.missing_fields is empty) and the BCC address. Default: everything not yet sent (upcoming, due, overdue), soonest first. Live keys list live subscribers' notices, test keys test-mode ones. Send each one on its send_date (inside its window), then call markNoticeSent (or BCC the notice's bcc address). Subscribe to the notice.due webhook to get each one on its send date.",
         "tags": [
           "Notices"
         ],
@@ -28605,7 +28606,7 @@
       "get": {
         "operationId": "retrieveDueNotice",
         "summary": "Retrieve a due notice",
-        "description": "One notice you owe a subscriber, with its window, recommended send date, copy-ready email, BCC address and send status.",
+        "description": "One notice you owe a subscriber, with its window, recommended send date, email (ready to send once email.missing_fields is empty), BCC address and send status.",
         "tags": [
           "Notices"
         ],
@@ -31298,7 +31299,7 @@
       "post": {
         "operationId": "createTestCredential",
         "summary": "Store a billing test-mode key",
-        "description": "Stores the site's Stripe TEST-mode restricted key (rk_test_…), after checking it with Stripe the way the dashboard's Connect Stripe does. An agent may call this itself once the owner approved the setup; every store is logged on the site's setup timeline and Billing connection line, and the human can revoke it in one click. Live keys are refused (test_key_not_test_mode: a human adds live keys in the dashboard); a key whose Stripe account looks like another site's is refused with billing_account_mismatch until the human confirms (confirm_account_mismatch: true); secret keys (sk_test_…) are refused (test_key_not_restricted). On a test-mode site without a Stripe connection the key also becomes the site's Stripe connection: one key for checks, fixes (only after the human approves each) and test runs. The key's checklist: Customers: Write, Products: Read, Prices: Read, Coupons: Read, Subscriptions: Write, Test clocks: Write, Customer portal: Write, Checkout Sessions: Write, Payment Links: Write, Webhook Endpoints: Write. Replaces an existing key. Next: createTestRun.",
+        "description": "Stores the site's Stripe TEST-mode restricted key (rk_test_…), after checking it with Stripe the way the dashboard's Connect Stripe does. An agent may call this itself once the owner approved the setup; every store is logged on the site's setup timeline and Billing connection line, and the human can revoke it in one click. Live keys are refused (test_key_not_test_mode: a human adds live keys in the dashboard); the owner must have ticked \"Let your agent store a Stripe test-mode key\" on the approval page of the agent's sign-in or connection (else test_key_declined); a key whose Stripe account looks like another site's is refused with billing_account_mismatch (with confirm_account_mismatch: true the key is connected on hold until a person confirms the account in the dashboard; only a person can confirm it); secret keys (sk_test_…) are refused (test_key_not_restricted). On a test-mode site without a Stripe connection the key also becomes the site's Stripe connection: one key for checks, fixes (only after the human approves each) and test runs. The key's checklist: Customers: Write, Products: Read, Prices: Read, Coupons: Read, Subscriptions: Write, Test clocks: Write, Customer portal: Write, Checkout Sessions: Write, Payment Links: Write, Webhook Endpoints: Write. Replaces an existing key. Next: createTestRun.",
         "tags": [
           "Test runs"
         ],
@@ -31371,7 +31372,7 @@
                   },
                   "confirm_account_mismatch": {
                     "type": "boolean",
-                    "description": "Set true only after the human confirmed it: store the key even though its Stripe account looks like another site’s (billing_account_mismatch). Default false.",
+                    "description": "Set true only after the human said yes: proposes the key even though its Stripe account looks like another site’s (billing_account_mismatch). It is connected on hold, and nothing from it is used, until a person confirms the account in the Checkbox dashboard (site Overview); next to a person’s Stripe connection it is refused. Default false.",
                     "example": false
                   }
                 },
@@ -32222,6 +32223,22 @@
                         "description": "Trial for `price` (registered configs carry their own).",
                         "example": 14
                       },
+                      "coupon": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 200,
+                        "pattern": "^[A-Za-z0-9_-]+$",
+                        "description": "Mirror mode: a TEST-mode coupon id applied to the test subscription, so it has the same discount as your real subscribers (an intro price, for example). Its emails are then judged against that discount. Not with promotion_code.",
+                        "example": "FIRST9"
+                      },
+                      "promotion_code": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 200,
+                        "pattern": "^[A-Za-z0-9_-]+$",
+                        "description": "Mirror mode: a TEST-mode promotion code (promo_… id, or the code customers type) applied to the test subscription. Not with coupon.",
+                        "example": "promo_1PTest"
+                      },
                       "price_map": {
                         "type": "object",
                         "additionalProperties": {
@@ -32366,6 +32383,8 @@
                       "checkout_config": "scc_3f9a1c2e7b4d4e0f9a8b7c6d5e4f3a2b",
                       "price": "price_1PTestPro",
                       "trial_period_days": 14,
+                      "coupon": "FIRST9",
+                      "promotion_code": "promo_1PTest",
                       "price_map": {
                         "price_1LivePro": "price_1TestPro"
                       },
@@ -34078,7 +34097,7 @@
       "post": {
         "operationId": "webhook_notice_due",
         "summary": "notice.due",
-        "description": "An email the merchant sends itself (\"You send\" mode) reached its recommended send date: data.object is the due_notice with the window, send_at, the copy-ready email and its BCC address. Send it now (inside the window), then call markNoticeSent (or BCC the copy). required tells a legally required email from a recommended one.",
+        "description": "An email the merchant sends itself (\"You send\" mode) reached its recommended send date: data.object is the due_notice with the window, send_at, the email (ready to send once email.missing_fields is empty) and its BCC address. Send it now (inside the window), then call markNoticeSent (or BCC the copy). required tells a legally required email from a recommended one.",
         "tags": [
           "Webhooks"
         ],
@@ -36746,7 +36765,7 @@
     "test_key_declined": {
       "status": 403,
       "type": "permission_error",
-      "description": "The owner did not allow the agent to use the project's Stripe TEST key when approving the setup; only a person can add it, in the dashboard."
+      "description": "The owner did not tick “Let your agent store a Stripe test-mode key” on the approval page of this agent's sign-in (device login) or connection (OAuth). Nothing was stored. Ask them to allow it on the approval page (sign in again) or to add the key themselves in the dashboard."
     },
     "test_key_rejected": {
       "status": 400,
@@ -36866,7 +36885,7 @@
     "billing_account_mismatch": {
       "status": 409,
       "type": "invalid_request_error",
-      "description": "The key's Stripe account looks like another site's (the site's prices or Payment Links are not in it, or it is already connected in another workspace), so nothing was stored or evaluated. Ask the human the question in `message`; retry with confirm_account_mismatch: true only if they say yes, else use this site's own key. `problems` lists what did not match."
+      "description": "The key's Stripe account looks like another site's (the site's prices or Payment Links are not in it, or it is already connected in another workspace), so nothing was stored or evaluated. Ask the human the question in `message`; retry with confirm_account_mismatch: true only if they say yes (that only proposes it: the key is held until a person confirms the account in the dashboard), else use this site's own key. `problems` lists what did not match."
     },
     "test_run_in_progress": {
       "status": 409,

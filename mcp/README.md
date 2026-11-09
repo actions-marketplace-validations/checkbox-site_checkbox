@@ -40,7 +40,7 @@ test-mode keys.
 ```
 
 Package: `@checkbox-site/mcp` on npm (Node 20+; binary `checkbox-mcp`). Options:
-`--read-only`, `--api-key`, `--api-base`; environment `CHECKBOX_API_KEY` (falls back to `CHECKBOX_SECRET_KEY`),
+`--read-only` (hides write tools; not a security boundary, the key keeps its permissions: use a read-only `ckr_…` key to limit it), `--api-key`, `--api-base`; environment `CHECKBOX_API_KEY` (falls back to `CHECKBOX_SECRET_KEY`),
 `CHECKBOX_API_BASE`, `CHECKBOX_MCP_READ_ONLY=true`.
 
 ## Tools
