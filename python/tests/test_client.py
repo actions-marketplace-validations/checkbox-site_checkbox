@@ -283,3 +283,50 @@ def test_suggestions_for_site_and_stateless_generate(fake):
     req = fake.requests[1]
     assert (req.method, req.path) == ("POST", "/v1/suggestions")
     assert req.body["disclosure"]["button_text"] == "Subscribe"
+
+
+class _FakeStripeObject:
+    """Like a stripe-python object of recent versions: not a dict, converts itself with to_dict()."""
+
+    def __init__(self, data):
+        self._data = data
+
+    def to_dict(self):
+        return {k: (v.to_dict() if isinstance(v, _FakeStripeObject) else v) for k, v in self._data.items()}
+
+
+def test_round19_stripe_checks_accept_a_stripe_object_directly(fake):
+    fake.script([{"body": {"object": "check_result"}}, {"body": {"object": "check_result"}}])
+    c = client(fake)
+    link = _FakeStripeObject({"id": "plink_1", "object": "payment_link", "custom_text": _FakeStripeObject({"submit": None})})
+    c.checks.stripe_payment_link(link, merchant={"brand_name": "Jot"})
+    assert fake.requests[0].body == {"params": {"id": "plink_1", "object": "payment_link", "custom_text": {"submit": None}}, "merchant": {"brand_name": "Jot"}}
+    # Nested inside the usual body shape too.
+    c.checks.stripe_checkout_session(params=_FakeStripeObject({"mode": "subscription"}))
+    assert fake.requests[1].body == {"params": {"mode": "subscription"}}
+
+
+def test_round19_payment_link_id_is_looked_up_with_the_apps_stripe_key(fake, monkeypatch):
+    import sys
+    import types as pytypes
+
+    fake.script([{"body": {"object": "check_result"}}])
+    calls = []
+
+    class PaymentLink:
+        @staticmethod
+        def retrieve(link_id, expand=None):
+            calls.append((link_id, expand))
+            return _FakeStripeObject({"id": link_id, "object": "payment_link"})
+
+    stripe_mod = pytypes.SimpleNamespace(api_key="sk_test_x", PaymentLink=PaymentLink)
+    monkeypatch.setitem(sys.modules, "stripe", stripe_mod)
+    c = client(fake)
+    c.checks.stripe_payment_link("plink_123")
+    assert calls == [("plink_123", ["line_items"])]
+    assert fake.requests[0].body == {"params": {"id": "plink_123", "object": "payment_link"}}
+    # Without a Stripe key: a clear error, nothing sent.
+    stripe_mod.api_key = None
+    with pytest.raises(InvalidRequestError, match="stripe.api_key"):
+        c.checks.stripe_payment_link("plink_123")
+    assert len(fake.requests) == 1

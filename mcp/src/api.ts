@@ -6,6 +6,7 @@
 // - The local stdio server (`checkbox-mcp`) implements it over HTTPS (createHttpApi, or an @checkbox-site/node client
 //   through fromSdkClient).
 import { randomUUID } from 'node:crypto';
+import { MinimumVersionTracker } from './version-check.ts';
 
 /** API version the MCP tools are written against (sent as Checkbox-Version). */
 export const API_VERSION = '2026-10-30';
@@ -60,6 +61,11 @@ export interface CheckboxApi {
   readonly hasKey: boolean;
   /** Base URL of the API (for links in tool output). */
   readonly apiBase: string;
+  /**
+   * Round 21 (pilot 20 item 5): the oldest MCP server version the API said it expects (response header
+   * checkbox-mcp-minimum-version), once a response carried it. Absent on in-process clients (same version as the API).
+   */
+  minimumMcpVersion?(): string | undefined;
 }
 
 /** Builds the query string for a request (`expand` arrays are not needed by the tools). */
@@ -112,9 +118,11 @@ export function createHttpApi(opts: HttpApiOptions): CheckboxApi {
   const f = opts.fetch ?? fetch;
   const base = (opts.apiBase ?? DEFAULT_API_BASE).replace(/\/+$/, '');
   const maxRetries = opts.maxRetries ?? 2;
+  const versions = new MinimumVersionTracker();
   return {
     hasKey: Boolean(opts.apiKey),
     apiBase: base,
+    minimumMcpVersion: () => versions.minimum,
     async request<T>(method: HttpMethod, path: string, ro: ApiRequestOptions = {}): Promise<T> {
       const url = base + withQuery(path.startsWith('/') ? path : `/${path}`, ro.query);
       const headers: Record<string, string> = {
@@ -146,6 +154,7 @@ export function createHttpApi(opts: HttpApiOptions): CheckboxApi {
           await sleep(Number.isFinite(retryAfter) && retryAfter > 0 ? Math.min(retryAfter, 10) * 1000 : 500 * 2 ** attempt);
           continue;
         }
+        versions.observe(res.headers);
         const text = await res.text();
         let json: unknown;
         try {
@@ -175,12 +184,18 @@ export function fromSdkClient(client: unknown, info: { hasKey: boolean; apiBase:
       ? (m: HttpMethod, p: string, o: ApiRequestOptions) => c.rawRequest!(m, withQuery(p, o.query), o.body, { idempotencyKey: o.idempotencyKey ?? (m === 'POST' ? `mcp_${randomUUID()}` : undefined) })
       : null;
   if (!call) return null;
+  const versions = new MinimumVersionTracker();
   return {
     ...info,
+    minimumMcpVersion: () => versions.minimum,
     async request<T>(method: HttpMethod, path: string, ro: ApiRequestOptions = {}): Promise<T> {
       try {
-        return (await call(method, path, ro)) as T;
+        const out = await call(method, path, ro);
+        // The Node SDK puts the response headers on a non-enumerable `lastResponse`.
+        versions.observe((out as { lastResponse?: { headers?: Record<string, string> } } | null)?.lastResponse?.headers);
+        return out as T;
       } catch (err) {
+        versions.observe((err as { headers?: Record<string, string> } | null)?.headers);
         throw toCheckboxApiError(err);
       }
     },

@@ -1608,6 +1608,23 @@ OPERATIONS: Dict[str, Dict[str, Any]] = {
         "paginated": False,
         "summary": "Delete a registered checkout config",
     },
+    "deleteSiteStripeCheckoutConfig": {
+        "operation_id": "deleteSiteStripeCheckoutConfig",
+        "namespace": "site_stripe_checkout_configs",
+        "method": "delete",
+        "http_method": "DELETE",
+        "path": "/v1/sites/{site}/stripe_checkout_configs/{stripe_checkout_config}",
+        "path_params": ("site", "stripe_checkout_config", ),
+        "query_params": (),
+        "body": False,
+        "idempotent": False,
+        "auth": True,
+        "scope": "test_runs:write",
+        "response": "json",
+        "list": False,
+        "paginated": False,
+        "summary": "Delete a registered checkout config (site path)",
+    },
     "createTestRun": {
         "operation_id": "createTestRun",
         "namespace": "test_runs",
@@ -1649,7 +1666,7 @@ OPERATIONS: Dict[str, Dict[str, Any]] = {
         "http_method": "GET",
         "path": "/v1/test_runs/{test_run}",
         "path_params": ("test_run", ),
-        "query_params": (),
+        "query_params": ("wait", ),
         "body": False,
         "idempotent": False,
         "auth": True,
@@ -2031,7 +2048,7 @@ class SitesResource(Resource):
     def connect_billing_platform(self, site: str, params: Optional["types.ConnectBillingPlatformParams"] = None, /, *, request_options: Optional[RequestOptions] = None, **kwargs: Any) -> "types.Integration":
         """Connect a billing platform.
 
-        Connects the site's billing platform with read-only credentials (a Stripe restricted key, a Recharge token, a Shopify Admin API token, a Chargebee read-only API key, a Recurly private API key or a Paddle API key with read permissions), so Checkbox reads the customer-portal and reminder settings. Works for test-mode sites too (use an rk_test_ key). The credentials are validated by reading the settings once and stored encrypted.
+        Connects the site's billing platform with the one restricted key (a Stripe restricted key, a Recharge token, a Shopify Admin API token, a Chargebee read-only API key, a Recurly private API key or a Paddle API key with read permissions), so Checkbox reads the customer-portal and reminder settings. Stripe: One Stripe restricted key per site: Read permissions for the checks, and Write permissions that Checkbox uses only after you click Approve on a fix, or in test mode (the one exception: Webhook Endpoints, used once to add Checkbox's webhook endpoint when you connect the key) (checklist: https://checkbox.site/docs/guides/stripe-key). API keys and AI agents may connect TEST-mode keys (rk_test_…) only; a live key (rk_live_ / sk_live_) is refused with live_key_requires_dashboard, because only a person signed in to the Checkbox dashboard can connect one. The credentials are validated by reading the settings once and stored encrypted. When the key's Stripe account looks like another site's (the site's prices or Payment Links are not in it, or it is already connected in another workspace), nothing is connected and the error billing_account_mismatch asks the human to confirm; retry with confirm_account_mismatch: true only after they said yes. The account owner is emailed about every key connected.
 
         Parameters can be given as a dict (positional) or as keyword arguments.
 
@@ -2182,7 +2199,7 @@ class FindingsResource(Resource):
     def list(self, params: Optional["types.ListFindingsParams"] = None, /, *, request_options: Optional[RequestOptions] = None, **kwargs: Any) -> "ListObject[types.Finding]":
         """List findings.
 
-        Findings ordered by urgency (failing first, then by severity). Filter by site, status (fail, needs_review, pass, not_applicable) and state (open, acknowledged, resolved, accepted_risk). Fix the open `fail` findings to become compliant.
+        Findings ordered by urgency (failing first, then by severity). Filter by site, status (fail, needs_review, pass, not_applicable) and state (open, acknowledged, resolved, accepted_risk). Fix the open `fail` findings so the checks pass.
 
         Parameters can be given as a dict (positional) or as keyword arguments.
 
@@ -2217,7 +2234,7 @@ class PlansResource(Resource):
     def retrieve(self, site: str, /, *, request_options: Optional[RequestOptions] = None) -> "types.CompliancePlan":
         """Get the compliance plan for a site.
 
-        Ordered tasks that make the site compliant, recomputed from its latest evaluation: each with the requirement and citation, where to change (file / URL / selector / Stripe object), the exact change (unified-diff template with machine-applicable edits, copy, or Stripe params) and how to verify it. Do plan.next_action: apply the first open task, call verifyTask, repeat until status is compliant. Tasks with status manual hold a question for the human (answerTask); they never block the others.
+        Ordered tasks that make the site's checks pass, recomputed from its latest evaluation: each with the requirement and citation, where to change (file / URL / selector / Stripe object), the exact change (unified-diff template with machine-applicable edits, copy, or Stripe params) and how to verify it. Do plan.next_action: apply the first open task, call verifyTask, and repeat until the checks pass (status value compliant; status_label "Checks pass"). Tasks with status manual hold a question for the human (answerTask); they never block the others.
 
         ``GET /v1/sites/{site}/plan`` (operation ``retrieveCompliancePlan``, scope ``compliance_plans:read``).
         """
@@ -2247,7 +2264,7 @@ class TasksResource(Resource):
         """
         return self._call("updateTask", (task, ), params, kwargs, request_options)  # type: ignore[no-any-return]
 
-    def answer(self, task: str, params: Optional["types.AnswerTaskParams"] = None, /, *, request_options: Optional[RequestOptions] = None, **kwargs: Any) -> "types.Task":
+    def answer(self, task: str, params: Optional["types.AnswerTaskParams"] = None, /, *, request_options: Optional[RequestOptions] = None, **kwargs: Any) -> "types.AnsweredTask":
         """Record the human answer to a manual task.
 
         For tasks with status manual: record the human's answer to task.question (ask them; never answer on their behalf). Answers that assert a legal fact (yes, confirmed) are stored as a proposal and return next_action.type "ask_human_to_confirm" with a link the human opens while signed in to Checkbox; only their confirmation writes the attestation, sets the site fact and re-evaluates. no / needs_change turn the task into a change for the agent; done (after a dashboard-only step) re-checks at once. Every answer is stored in the evidence vault.
@@ -2276,7 +2293,7 @@ class VerificationsResource(Resource):
     def retrieve(self, verification: str, params: Optional["types.RetrieveVerificationParams"] = None, /, *, request_options: Optional[RequestOptions] = None, **kwargs: Any) -> "types.Verification":
         """Get a verification (long-poll with ?wait=30).
 
-        The verification's status (pending, passed, failed), expected vs observed per check, the diff and next_action. ?wait=N (≤ 30) holds the request until it resolves or N seconds pass.
+        The verification's status (pending, passed, failed), expected vs observed per check, the diff and next_action. Also takes a task id (task_…): the newest verification of that task. ?wait=N (≤ 30) holds the request until it resolves or N seconds pass.
 
         Parameters can be given as a dict (positional) or as keyword arguments.
 
@@ -2438,7 +2455,7 @@ class NoticeSettingsResource(Resource):
     def update(self, site: str, params: Optional["types.UpdateNoticeSettingsParams"] = None, /, *, request_options: Optional[RequestOptions] = None, **kwargs: Any) -> "types.NoticeSettings":
         """Update notice settings.
 
-        Chooses who sends the required emails (mode: merchant = you send them and Checkbox tracks them, the default; checkbox = Checkbox sends them), and sets branding, cancel_url and the confirmed cancellation policy. In checkbox mode, turning a notice on (enabled_kinds) requires cancel_url, a confirmed policy, a connected Stripe, Recharge, Chargebee, Recurly or Paddle account and a sending address; otherwise resource_conflict explains what is missing.
+        Chooses who sends the required emails (mode: merchant = you send them and Checkbox tracks them, the default; checkbox = Checkbox sends them), and sets branding, cancel_url and the confirmed cancellation policy. add_kinds / remove_kinds turn single notices on or off and leave the others as they are; enabled_kinds replaces the whole list. In checkbox mode, turning a notice on requires cancel_url, a confirmed policy, a support email, a connected Stripe, Recharge, Chargebee, Recurly or Paddle account and a sending address; otherwise resource_conflict explains what is missing. The support email may be the Stripe account's public one (used automatically); the account owner's login address only after the human confirms it in the dashboard (support_email_to_confirm; an agent cannot confirm it). Turning notices on through the API never emails a real subscriber: on a test-mode site only test-run inboxes (and marked test copies to the owner) are emailed, and on a live site real subscribers are emailed only after a person confirms it once in the dashboard, after a preview (real_sends). The account owner is emailed when an agent turns notices on.
 
         Parameters can be given as a dict (positional) or as keyword arguments.
 
@@ -2545,7 +2562,7 @@ class ChecksResource(Resource):
     def disclosure(self, params: Optional["types.DisclosureCheckParams"] = None, /, *, request_options: Optional[RequestOptions] = None, **kwargs: Any) -> "types.DisclosureCheckResult":
         """Check checkout disclosure text.
 
-        Checks the automatic-renewal disclosure you are about to show next to a subscribe button: what it says (renewal until canceled, price, frequency, trial, term, how to cancel), where it sits (above the button, same page) and how it looks (size, contrast, set off), and the consent checkbox (present, not pre-checked). Returns the verdict per check and per legal requirement, plus `replacement`: compliant text and drop-in HTML (and the same markup as JSX for React) generated from your price/interval/trial/cancel_url and verified by the engine. Call it whenever you write or change checkout copy. Stateless and deterministic: nothing is stored, the same input on the same as_of date gives the same verdicts. Every verdict comes from the Checkbox rules engine over the legal catalog (federal ROSCA / EFTA plus the state automatic-renewal laws); the response carries rules_version, catalog_version and a disclaimer (not legal advice). Read `verdict`, then `next_action`: it tells you exactly what to change and to call the check again until verdict is pass.
+        Checks the automatic-renewal disclosure you are about to show next to a subscribe button: what it says (renewal until canceled, price, frequency, trial, term, how to cancel), where it sits (above the button, same page) and how it looks (size, contrast, set off), and the consent checkbox (present, not pre-checked). Returns the verdict per check and per legal requirement, plus `replacement`: suggested text that passes the checks and drop-in HTML (and the same markup as JSX for React) generated from your price/interval/trial/cancel_url and verified by the engine. Call it whenever you write or change checkout copy. Stateless and deterministic: nothing is stored, the same input on the same as_of date gives the same verdicts. Every verdict comes from the Checkbox rules engine over the legal catalog (federal ROSCA / EFTA plus the state automatic-renewal laws); the response carries rules_version, catalog_version and a disclaimer (not legal advice). Read `verdict`, then `next_action`: it tells you exactly what to change and to call the check again until verdict is pass.
 
         Parameters can be given as a dict (positional) or as keyword arguments.
 
@@ -2578,7 +2595,7 @@ class ChecksResource(Resource):
     def email(self, params: Optional["types.EmailCheckParams"] = None, /, *, request_options: Optional[RequestOptions] = None, **kwargs: Any) -> "types.EmailCheckResult":
         """Check a subscription lifecycle email.
 
-        Checks the content of an acknowledgment (welcome) email, trial-ending reminder, renewal reminder, price-change notice, yearly terms reminder or cancellation confirmation against the requirements for that notice (renewal terms, amount, frequency, how to cancel, trial cancellation). The email is modelled as sent on time, so the verdict is about content; get send dates from checkNoticeSchedule. Returns `required_by` (requirements that make the email mandatory for this plan) and a compliant `template` with {{merge_tags}}, verified by the engine. Stateless and deterministic: nothing is stored, the same input on the same as_of date gives the same verdicts. Every verdict comes from the Checkbox rules engine over the legal catalog (federal ROSCA / EFTA plus the state automatic-renewal laws); the response carries rules_version, catalog_version and a disclaimer (not legal advice). Read `verdict`, then `next_action`: it tells you exactly what to change and to call the check again until verdict is pass.
+        Checks the content of an acknowledgment (welcome) email, trial-ending reminder, renewal reminder, price-change notice, yearly terms reminder or cancellation confirmation against the requirements for that notice (renewal terms, amount, frequency, how to cancel, trial cancellation). The email is modelled as sent on time, so the verdict is about content; get send dates from checkNoticeSchedule. Prices are judged against what Stripe charges: with `site` (or, without it, the account's one site with Stripe connected) the plan fields come from the site's plans and the email is matched to the plan it names ("Annual") first; a price that contradicts it fails, and `warnings` say which site and plan were used. Returns `required_by` (requirements that make the email mandatory for this plan) and a `template` that passes the checks, with {{merge_tags}}, verified by the engine. Stateless and deterministic: nothing is stored, the same input on the same as_of date gives the same verdicts. Every verdict comes from the Checkbox rules engine over the legal catalog (federal ROSCA / EFTA plus the state automatic-renewal laws); the response carries rules_version, catalog_version and a disclaimer (not legal advice). Read `verdict`, then `next_action`: it tells you exactly what to change and to call the check again until verdict is pass.
 
         Parameters can be given as a dict (positional) or as keyword arguments.
 
@@ -2600,7 +2617,7 @@ class ChecksResource(Resource):
     def notice_schedule(self, params: Optional["types.NoticeScheduleParams"] = None, /, *, request_options: Optional[RequestOptions] = None, **kwargs: Any) -> "types.NoticeScheduleResult":
         """Get the dates each required notice must be sent.
 
-        For a subscription plan (price, interval, trial) and where you sell, returns every legally required notice — acknowledgment, trial-ending reminder, renewal reminders, yearly terms reminder, price-change notice — with the recommended send time and the compliant window (opens / closes), the jurisdictions each send satisfies and the citations. Uses the same timing as Checkbox Notices: per-state windows intersected, or the fewest sends that cover conflicting windows. Stateless. Check each email's content with checkEmail, or let Checkbox Notices send them.
+        For a subscription plan (price, interval, trial) and where you sell, returns every legally required notice — acknowledgment, trial-ending reminder, renewal reminders, yearly terms reminder, price-change notice — with the recommended send time and the allowed send window (opens / closes), the jurisdictions each send satisfies and the citations. Uses the same timing as Checkbox Notices: per-state windows intersected, or the fewest sends that cover conflicting windows. Stateless. Check each email's content with checkEmail, or let Checkbox Notices send them.
 
         Parameters can be given as a dict (positional) or as keyword arguments.
 
@@ -2854,7 +2871,7 @@ class TestCredentialsResource(Resource):
     def create(self, site: str, params: Optional["types.CreateTestCredentialParams"] = None, /, *, request_options: Optional[RequestOptions] = None, **kwargs: Any) -> "types.TestCredential":
         """Store a billing test-mode key.
 
-        Stores the site's Stripe TEST-mode key (rk_test_… preferred) used by test runs, after checking it with Stripe. Live keys are refused (test_key_not_test_mode). Least privilege: Write on Customers, Checkout Sessions, Subscriptions, Test clocks and Customer portal; Read on Prices, Products and Billing portal configuration. Replaces an existing key. Next: createTestRun.
+        Stores the site's Stripe TEST-mode restricted key (rk_test_…), after checking it with Stripe the way the dashboard's Connect Stripe does. An agent may call this itself once the owner approved the setup; every store is logged on the site's setup timeline and Billing connection line, and the human can revoke it in one click. Live keys are refused (test_key_not_test_mode: a human adds live keys in the dashboard); a key whose Stripe account looks like another site's is refused with billing_account_mismatch until the human confirms (confirm_account_mismatch: true); secret keys (sk_test_…) are refused (test_key_not_restricted). On a test-mode site without a Stripe connection the key also becomes the site's Stripe connection: one key for checks, fixes (only after the human approves each) and test runs. The key's checklist: Customers: Write, Products: Read, Prices: Read, Coupons: Read, Subscriptions: Write, Test clocks: Write, Customer portal: Write, Checkout Sessions: Write, Payment Links: Write, Webhook Endpoints: Write. Replaces an existing key. Next: createTestRun.
 
         Parameters can be given as a dict (positional) or as keyword arguments.
 
@@ -2887,7 +2904,7 @@ class StripeCheckoutConfigsResource(Resource):
     def create(self, site: str, params: Optional["types.CreateStripeCheckoutConfigParams"] = None, /, *, request_options: Optional[RequestOptions] = None, **kwargs: Any) -> "types.StripeCheckoutConfig":
         """Register the Checkout Session params your code uses.
 
-        Registers exactly the object your code passes to stripe.checkout.sessions.create (customer, URLs and secrets are not needed and are ignored). Test runs mirror it into Stripe test mode; when it matches your latest live checkout, the scanned test page counts as an observation of your live checkout. Re-register after changing your checkout code, then call createTestRun.
+        Registers exactly the object your code passes to stripe.checkout.sessions.create (customer, URLs and secrets are not needed and are ignored; `warnings` says what was not stored). It is judged exactly like checkStripeCheckoutSession, discounts included. A config with the same name, or for the same Price ids, replaces the older one (`replaced`). Test runs mirror it into Stripe test mode; when it matches your latest live checkout, the scanned test page counts as an observation of your live checkout. Re-register after changing your checkout code, then call createTestRun.
 
         Parameters can be given as a dict (positional) or as keyword arguments.
 
@@ -2925,13 +2942,26 @@ class StripeCheckoutConfigsResource(Resource):
         return self._call("deleteStripeCheckoutConfig", (stripe_checkout_config, ), None, None, request_options)  # type: ignore[no-any-return]
 
 
+class SiteStripeCheckoutConfigsResource(Resource):
+    """``checkbox.site_stripe_checkout_configs``"""
+
+    def delete(self, site: str, stripe_checkout_config: str, /, *, request_options: Optional[RequestOptions] = None) -> "types.DeletedStripeCheckoutConfig":
+        """Delete a registered checkout config (site path).
+
+        The same as deleteStripeCheckoutConfig, under the site path where configs are created and listed.
+
+        ``DELETE /v1/sites/{site}/stripe_checkout_configs/{stripe_checkout_config}`` (operation ``deleteSiteStripeCheckoutConfig``, scope ``test_runs:write``).
+        """
+        return self._call("deleteSiteStripeCheckoutConfig", (site, stripe_checkout_config, ), None, None, request_options)  # type: ignore[no-any-return]
+
+
 class TestRunsResource(Resource):
     """``checkbox.test_runs``"""
 
     def create(self, site: str, params: Optional["types.CreateTestRunParams"] = None, /, *, request_options: Optional[RequestOptions] = None, **kwargs: Any) -> "types.TestRun":
         """Start a lifecycle test run.
 
-        Starts a synthetic test subscription in TEST mode and returns it queued. Stripe runs mirror your checkout into a test-mode Checkout Session, subscribe a test customer (card 4242) whose email is a Checkbox inbox, wait for your acknowledgment, advance a test clock through every legal notice window before trial end and renewal, cancel online in the customer portal and wait for the confirmation; then delete the test clock. Takes about 5-20 minutes: poll retrieveTestRun (next_action says when) or listen for test_run.completed. Each step reports observations, check results and agent-readable fixes; apply them and run again to verify.
+        Starts a synthetic test subscription in TEST mode and returns it queued. Stripe runs mirror your checkout into a test-mode Checkout Session, subscribe a test customer (card 4242) whose email is a Checkbox inbox, wait for your acknowledgment, advance a test clock through every legal notice window before trial end and renewal, cancel online in the customer portal and wait for the confirmation; then delete the test clock. Usually takes 2-4 minutes (longer when your own emails are slow to arrive): poll retrieveTestRun (next_action says when) or listen for test_run.completed. Each step reports observations, check results and agent-readable fixes; apply them and run again to verify.
 
         Parameters can be given as a dict (positional) or as keyword arguments.
 
@@ -2950,14 +2980,16 @@ class TestRunsResource(Resource):
         """
         return self._call("listTestRuns", (site, ), params, kwargs, request_options)  # type: ignore[no-any-return]
 
-    def retrieve(self, test_run: str, /, *, request_options: Optional[RequestOptions] = None) -> "types.TestRun":
+    def retrieve(self, test_run: str, params: Optional["types.RetrieveTestRunParams"] = None, /, *, request_options: Optional[RequestOptions] = None, **kwargs: Any) -> "types.TestRun":
         """Retrieve a test run.
 
-        The run with every step's status, observations, check results and fixes. While it runs, next_action.type is "wait"; when it finished, next_action says what to fix (apply_fixes / review_warnings) or "none".
+        The run with every step's status, observations, check results and fixes. While it runs, next_action.type is "wait" and waiting_for says what it waits for; ?wait=30 answers as soon as the run moves on (or after 30 seconds). When it finished, next_action says what to fix (apply_fixes / review_warnings), retrieve_plan when the only warnings have nothing to change, or "none".
+
+        Parameters can be given as a dict (positional) or as keyword arguments.
 
         ``GET /v1/test_runs/{test_run}`` (operation ``retrieveTestRun``, scope ``test_runs:read``).
         """
-        return self._call("retrieveTestRun", (test_run, ), None, None, request_options)  # type: ignore[no-any-return]
+        return self._call("retrieveTestRun", (test_run, ), params, kwargs, request_options)  # type: ignore[no-any-return]
 
     def cancel(self, test_run: str, /, *, request_options: Optional[RequestOptions] = None) -> "types.TestRun":
         """Cancel a test run.
@@ -3080,7 +3112,7 @@ class ReviewPromptsResource(Resource):
     def claim(self, site: str, params: Optional["types.ReviewPromptParams"] = None, /, *, request_options: Optional[RequestOptions] = None, **kwargs: Any) -> "types.ReviewPrompt":
         """Claim the one-time review prompt for a site.
 
-        The MCP tools call this when a site's compliance plan reaches compliant (including "Compliant · N live checks pending"). show is true exactly once per site: the agent then asks the human once whether they want to send a quick review of Checkbox (createFeedback with type review), and sends it only on a yes, after showing the text. Never send a review without the human's yes.
+        The MCP tools call this when a site's compliance plan reaches status compliant, i.e. checks pass (including "Checks pass · N live checks pending"). show is true exactly once per site: the agent then asks the human once whether they want to send a quick review of Checkbox (createFeedback with type review), and sends it only on a yes, after showing the text. Never send a review without the human's yes.
 
         Parameters can be given as a dict (positional) or as keyword arguments.
 
@@ -3120,6 +3152,7 @@ class ResourceNamespaces:
     receipt_settings: ReceiptSettingsResource
     test_credentials: TestCredentialsResource
     stripe_checkout_configs: StripeCheckoutConfigsResource
+    site_stripe_checkout_configs: SiteStripeCheckoutConfigsResource
     test_runs: TestRunsResource
     webhook_endpoints: WebhookEndpointsResource
     events: EventsResource
@@ -3157,6 +3190,7 @@ RESOURCES = {
     "receipt_settings": ReceiptSettingsResource,
     "test_credentials": TestCredentialsResource,
     "stripe_checkout_configs": StripeCheckoutConfigsResource,
+    "site_stripe_checkout_configs": SiteStripeCheckoutConfigsResource,
     "test_runs": TestRunsResource,
     "webhook_endpoints": WebhookEndpointsResource,
     "events": EventsResource,

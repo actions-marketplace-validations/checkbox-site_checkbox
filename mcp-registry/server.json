@@ -4,7 +4,7 @@
   "title": "Checkbox",
   "description": "Auto-renewal law compliance (ROSCA, CA, NY, other states) for subscription checkout and emails",
   "websiteUrl": "https://checkbox.site/docs/mcp",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "remotes": [
     {
       "type": "streamable-http",
@@ -30,7 +30,7 @@
     {
       "registryType": "npm",
       "identifier": "@checkbox-site/mcp",
-      "version": "0.1.1",
+      "version": "0.2.1",
       "transport": {
         "type": "stdio"
       },

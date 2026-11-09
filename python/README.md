@@ -36,6 +36,8 @@ No key yet? Connect the MCP server (`setup_checkbox`) or call `POST /v1/device/a
   and reused across retries; pass your own with `request_options={"idempotency_key": "…"}`.
 - **Versioning:** sends `Checkbox-Version: 2026-10-30`; override with `Checkbox(api_version=…)` or per request.
 - **Mode:** `cb.mode` is `"test"` or `"live"` from the key prefix.
+- **API origin:** `Checkbox(base_url="http://localhost:3000")` (or the `CHECKBOX_API_BASE` environment variable) points
+  the client at another origin, e.g. a local stack; default `https://app.checkbox.site`. A trailing `/v1` is ignored.
 - **Typed errors:** `InvalidRequestError`, `AuthenticationError`, `PermissionError`, `RateLimitError`,
   `IdempotencyError`, `APIError`, `APIConnectionError` (all `CheckboxError`) with `code`, `param`, `status_code`,
   `request_id`, `doc_url` and `next_action` (what an agent should do next).

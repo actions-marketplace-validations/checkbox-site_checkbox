@@ -60,9 +60,10 @@ export async function loadCatalog(api: CheckboxApi): Promise<string> {
 export function quickstartMarkdown(opts: { mcpUrl: string; apiBase: string }): string {
   return `# Checkbox for AI agents — quickstart
 
-Checkbox makes a subscription business compliant with automatic-renewal laws (FTC ROSCA, California ARL, New York and
-~26 other states) and keeps it compliant: it watches the checkout, the acknowledgment / reminder emails and the
-cancellation flow, stores signed evidence, and tells you — the agent — exactly what to change. Free to start, no card.
+Checkbox checks a subscription business against automatic-renewal laws (federal law, 27 states, DC and New York City:
+FTC ROSCA, California ARL, New York and the other state laws) and keeps checking it: it watches the checkout, the
+acknowledgment / reminder emails and the cancellation flow, stores signed evidence, and tells you — the agent — exactly
+what to change. Free. Every feature. No credit card. Fair-use limits.
 
 ## The loop (agent-to-agent)
 
@@ -71,8 +72,8 @@ cancellation flow, stores signed evidence, and tells you — the agent — exact
    credential (device login) it returns ONE link for the human ("Open … and click Approve"); call it again with the
    device_code to receive test-mode keys. With an API key it starts a setup session. Pass what you know:
    site_url, checkout_url, terms_url / refund_url / cancellation_url, billing_platform, plans, project.layout_file.
-   (The \`checkbox init\` CLI does the same and patches the layout file; it is pre-release and not on npm yet.)
-2. Follow the setup **next_action** (install the snippet in the root layout, store a Stripe TEST key for test runs,
+   (The \`checkbox init\` CLI, \`npx @checkbox-site/cli init\`, does the same and patches the layout file.)
+2. Follow the setup **next_action** (install the snippet in the root layout, store the one Stripe TEST restricted key yourself with store_stripe_test_key,
    register checkout params). After each change: **update_setup**, then **get_setup_status** with verify=true.
 3. **get_compliance_plan** — ordered tasks: requirement + citation, where (file / selector / Stripe object), the exact
    change (diff template, copy, or Stripe params) and how to verify.
@@ -81,7 +82,7 @@ cancellation flow, stores signed evidence, and tells you — the agent — exact
 5. Tasks with status **manual** hold a question for the HUMAN: ask them, then **answer_task**. Never answer for them.
 6. **start_test_run** — a synthetic subscription in Stripe test mode (card 4242, Checkbox inbox, test clock through
    trial end and renewal, online cancellation) observes every lifecycle check; **get_test_run** for results.
-7. Repeat 3-4 until the plan status is **compliant**, then **complete_setup** (emails the human a summary).
+7. Repeat 3-4 until the checks pass (plan status value \`compliant\`, label "Checks pass"), then **complete_setup** (emails the human a summary).
 
 Every tool result ends with "Next: …" naming the tool to call. Errors carry a stable \`code\` and often a next_action.
 
@@ -89,10 +90,10 @@ Every tool result ends with "Next: …" naming the tool to call. Errors carry a 
 
 - **check_disclosure** — disclosure text next to the pay button → verdicts + engine-verified replacement.
 - **check_stripe_checkout_session** — the params you pass to stripe.checkout.sessions.create → corrected_params.
-- **check_email** — a lifecycle email → verdicts + compliant template.
+- **check_email** — a lifecycle email → verdicts + a template that passes the checks.
 - **check_page_html** — the rendered checkout page HTML → verdicts.
 - **get_notice_schedule** — when each required notice must be sent for a plan.
-- **get_compliant_disclosure** / **get_elements_snippet** — locked compliant wording, or the drop-in
+- **get_compliant_disclosure** / **get_elements_snippet** — locked wording that passes the checks, or the drop-in
   \`<checkbox-disclosure>\` element that also records consent as evidence.
 
 ## Keys and modes
@@ -127,15 +128,15 @@ export interface PromptArgs {
 /** The make_my_checkout_compliant prompt: inspect the code → preflight → patch → verify. */
 export function makeMyCheckoutCompliantPrompt(args: PromptArgs): string {
   const target = args.site_url ? ` for ${args.site_url}` : '';
-  return `Make this project's subscription checkout compliant with automatic-renewal laws${target}, using the Checkbox MCP tools. Work autonomously; only stop to ask me (the human) when a tool says a human must decide or approve.
+  return `Make this project's subscription checkout pass the automatic-renewal checks${target}, using the Checkbox MCP tools. Work autonomously; only stop to ask me (the human) when a tool says a human must decide or approve.
 
 1. Inspect the code first. Find: the framework${args.framework ? ` (expected: ${args.framework})` : ''}, the root layout file, where the subscribe / pay button is rendered, where subscriptions are created (stripe.checkout.sessions.create, payment links, or ${args.billing_platform ?? 'the billing platform'} calls), the plans and prices (amount, interval, trial), the Terms / refund / cancellation policy pages, and which emails are sent to subscribers (acknowledgment, trial / renewal reminders, cancellation confirmation).
 2. Preflight before changing anything:
    - check_stripe_checkout_session with the exact params the code passes to Stripe (plus merchant terms when it uses a Price id);
    - check_disclosure with the text next to the pay button (or check_page_html with the rendered checkout HTML);
    - check_email for each subscriber email template, and get_notice_schedule for when reminders must go out.
-3. Patch the code with the returned fixes: corrected_params for Stripe, the replacement disclosure + an unchecked, required consent checkbox directly above the pay button (or get_elements_snippet for the drop-in Checkbox Elements component), compliant email templates and send timing, and an online cancellation path. Keep the existing code style; do not invent prices or terms — use the real ones from the code.
+3. Patch the code with the returned fixes: corrected_params for Stripe, the replacement disclosure + an unchecked, required consent checkbox directly above the pay button (or get_elements_snippet for the drop-in Checkbox Elements component), email templates that pass the checks and send timing, and an online cancellation path. Keep the existing code style; do not invent prices or terms — use the real ones from the code.
 4. Re-run the same checks on the patched code until they pass (styling items may stay needs_review until a rendered scan).
-5. If Checkbox is not set up for this project yet, call setup_checkbox (one approval link for me), then get_compliance_plan and work the tasks: apply → verify_task → next, until the plan is compliant. Ask me any "manual" task questions verbatim; never answer them yourself.
+5. If Checkbox is not set up for this project yet, call setup_checkbox (one approval link for me), then get_compliance_plan and work the tasks: apply → verify_task → next, until the checks pass (plan status compliant). Ask me any "manual" task questions verbatim; never answer them yourself.
 6. Finish with a short summary: what changed (files), which laws/citations each change satisfies, and anything still open.`;
 }

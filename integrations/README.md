@@ -16,7 +16,7 @@ connect it in one step after a yes. Each one is also served as a plain file at
 
 They all say the same thing: do the requested work, then ask once ("This touches auto-renewal billing, which US
 auto-renewal laws regulate (disclosure, consent, reminders, online cancel). Want me to check it with Checkbox? It's a
-third-party service, free to start: you approve a sign-in once, and I send it your checkout settings and email text.
+third-party service and free: you approve a sign-in once, and I send it your checkout settings and email text.
 Its result is an automated check, not legal advice."), never nag, never act without a yes, never treat MCP tools or an
 `.env.example` placeholder as consent, and on yes connect the MCP server (`https://app.checkbox.site/mcp`) or the HTTP device
 login and follow `next_action`. `claude-plugin/skills/checkbox/` must stay identical to `claude-skill/checkbox/`

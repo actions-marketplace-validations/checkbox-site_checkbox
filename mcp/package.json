@@ -1,9 +1,10 @@
 {
   "name": "@checkbox-site/mcp",
-  "version": "0.1.1",
+  "version": "0.2.1",
   "description": "Checkbox MCP server: subscription-law compliance tools for AI agents (remote at https://app.checkbox.site/mcp, or local stdio).",
   "keywords": [
     "subscription",
+    "subscription-compliance",
     "auto-renewal",
     "automatic-renewal",
     "compliance",
@@ -64,7 +65,7 @@
     "prepack": "npm run build"
   },
   "dependencies": {
-    "@checkbox-site/node": "^0.1.1",
+    "@checkbox-site/node": "^0.2.1",
     "@modelcontextprotocol/sdk": "^1.32.2",
     "zod": "^4.6.7"
   }

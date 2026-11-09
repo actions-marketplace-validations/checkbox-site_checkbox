@@ -19,6 +19,7 @@ export const OPERATION_TOOLS: Record<string, string> = {
   answerTask: 'answer_task',
   verifySite: 'verify_site',
   retrieveVerification: 'get_verification',
+  createTestCredential: 'store_stripe_test_key',
   createTestRun: 'start_test_run',
   retrieveTestRun: 'get_test_run',
   listTestRuns: 'get_test_run',
@@ -102,8 +103,8 @@ export function untrusted(value: unknown, max = 80): string {
 }
 
 /**
- * Audit P1: the `checkbox` CLI is not on npm yet. While this is false, MCP output never shows `command` fields or a
- * "CLI equivalent"; flip it once the CLI is published.
+ * Whether the `checkbox` CLI (@checkbox-site/cli) is on npm. While this is false, MCP output never shows `command`
+ * fields or a "CLI equivalent". It is published.
  */
 export const CLI_PUBLISHED = true;
 
@@ -140,8 +141,14 @@ const OP_RE = new RegExp(`\\b(${[...Object.keys(OPERATION_TOOLS), ...Object.keys
  * the CLI is unpublished.
  */
 export function mcpText(text: string): string {
-  let s = text.replace(/(?:POST )?\/v1\/checks\/(disclosure|stripe_checkout_session|stripe_payment_link|email|page|notice_schedule)\b/g, (_m, k: string) => CHECK_PATH_TOOLS[k]!);
+  // Round 23 (pilot 22 item 9): the REST body `{ type: "stripe_test", secret_key }` is said as the MCP tool's own
+  // arguments (store_stripe_test_key takes { secret_key }; `type` is accepted but not needed).
+  let s = text.replace(/\{ ?type: ?"stripe_test", ?secret_key\b/g, '{ secret_key');
+  s = s.replace(/(?:POST )?\/v1\/checks\/(disclosure|stripe_checkout_session|stripe_payment_link|email|page|notice_schedule)\b/g, (_m, k: string) => CHECK_PATH_TOOLS[k]!);
   s = s.replace(OP_RE, (op: string) => {
+    // Round 16 (pilot 15, sveltekit): "verifySetupSession" became plain get_setup_status, which only reads the checklist,
+    // so the agent looped on "Snippet installed: pending". The re-check is get_setup_status with verify=true.
+    if (op === 'verifySetupSession') return 'get_setup_status (verify=true)';
     const tool = OPERATION_TOOLS[op];
     if (tool) return tool;
     const endpoint = OPERATION_ENDPOINTS[op];
@@ -161,6 +168,8 @@ export function mcpText(text: string): string {
 }
 
 const TEXT_KEYS = new Set(['message', 'description', 'summary', 'fix', 'note', 'how', 'detail', 'headline']);
+/** Round 21 (pilot 20 item 16): lists of agent-facing sentences the API writes with operation names (REST words). */
+const TEXT_LIST_KEYS = new Set(['plan_terms_conflicts', 'notes', 'steps']);
 
 /** Rewrites agent-facing strings in an API object for MCP (mcpText), and drops `command` while the CLI is unpublished. */
 export function forMcp(value: unknown, depth = 0): unknown {
@@ -169,7 +178,12 @@ export function forMcp(value: unknown, depth = 0): unknown {
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
     if (k === 'command' && !CLI_PUBLISHED && (v === null || typeof v === 'string')) continue;
-    out[k] = typeof v === 'string' && TEXT_KEYS.has(k) ? mcpText(v) : forMcp(v, depth + 1);
+    out[k] =
+      typeof v === 'string' && TEXT_KEYS.has(k)
+        ? mcpText(v)
+        : Array.isArray(v) && TEXT_LIST_KEYS.has(k)
+          ? v.map((x) => (typeof x === 'string' ? mcpText(x) : forMcp(x, depth + 1)))
+          : forMcp(v, depth + 1);
   }
   return out;
 }
@@ -178,6 +192,7 @@ export function forMcp(value: unknown, depth = 0): unknown {
 function argHint(tool: string, next: NextAction, ctx: { data?: unknown }): string {
   const d = (ctx.data ?? {}) as { object?: unknown; id?: unknown };
   if (tool === 'get_verification') return d.object === 'verification' && typeof d.id === 'string' ? ` (verification: ${d.id})` : '';
+  if (tool === 'get_setup_status' && next.operation_id === 'verifySetupSession') return ' (verify: true)';
   const task = next.task ?? /\/v1\/tasks\/(task_[A-Za-z0-9]+)/.exec(next.endpoint ?? '')?.[1];
   return task && ['get_task', 'verify_task', 'answer_task'].includes(tool) ? ` (task: ${task})` : '';
 }
@@ -187,6 +202,8 @@ export function describeNextAction(next: NextAction | null | undefined, ctx: { d
   if (!next || typeof next !== 'object' || !next.type) return null;
   const text = mcpText((next.message ?? next.description ?? '').trim());
   if (next.type === 'done' || next.type === 'none') return `Next: nothing left to do${text ? ` — ${text}` : '.'}`;
+  // Round 23 (pilot 22, headless-agent-pr): everything left waits for a deploy or the owner.
+  if (next.type === 'done_for_now') return `Next: done for this change — ${text || 'the rest waits for a deploy or the owner.'}`;
   const op = next.operation_id ?? undefined;
   // Prefer the API's own mapping (next_action.mcp_tool); `call_api` means "no dedicated tool".
   const named = next.mcp_tool && next.mcp_tool !== 'call_api' ? next.mcp_tool : undefined;
@@ -326,11 +343,16 @@ export function fitJson(data: unknown, max = MAX_JSON_CHARS): { json: string; pa
   };
 }
 
+/** The "Next:" line of a result whose API object names no next step. */
+export const FALLBACK_NEXT = 'Next: nothing more is needed for this result; get_compliance_plan names the site\'s next step.';
+export const FALLBACK_NEXT_ERROR = 'Next: fix what the error names (see the hint above, if any) and call the tool again.';
+
 export function renderOutput(out: ToolOutput): CallToolResult {
   const lines = [mcpText(out.headline.trim())];
   for (const n of out.notes ?? []) if (n) lines.push(`- ${mcpText(n)}`);
   const next = describeNextAction(out.next === undefined ? nextActionOf(out.data) : out.next, { data: out.data });
-  if (next) lines.push(next);
+  // Round 23 (pilot 22 item 27, agent-discovery: a result with no "Next:" line): every result names what comes next.
+  lines.push(next ?? (out.isError ? FALLBACK_NEXT_ERROR : FALLBACK_NEXT));
   if (out.data !== undefined) {
     const fitted = fitJson(forMcp(out.data));
     if (fitted.page) lines.push(`- ${fitted.page}`);
