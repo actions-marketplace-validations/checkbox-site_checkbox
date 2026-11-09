@@ -2273,10 +2273,11 @@
               "chargebee",
               "recurly",
               "paddle",
+              "lemon_squeezy",
               "woocommerce",
               "custom"
             ],
-            "description": "Billing platform.",
+            "description": "Billing platform. lemon_squeezy: Checkbox checks your pages and emails (no billing connection).",
             "example": "stripe"
           },
           "plans": {
@@ -6926,6 +6927,11 @@
             "type": "string",
             "description": "When it was captured / received.",
             "example": "2026-11-01T10:00:00.000Z"
+          },
+          "test_run_id": {
+            "type": "string",
+            "description": "Set when a Checkbox test run recorded this page view (not a scan of your site).",
+            "example": "run_1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d"
           }
         },
         "required": [
@@ -6966,7 +6972,8 @@
                 "status": "fail",
                 "detail": "no statement that the subscription renews automatically",
                 "screenshot_ref": "ev_123",
-                "at": "2026-11-01T10:00:00.000Z"
+                "at": "2026-11-01T10:00:00.000Z",
+                "test_run_id": "run_1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d"
               }
             ]
           },
@@ -7465,7 +7472,8 @@
                       "status": "fail",
                       "detail": "no statement that the subscription renews automatically",
                       "screenshot_ref": "ev_123",
-                      "at": "2026-11-01T10:00:00.000Z"
+                      "at": "2026-11-01T10:00:00.000Z",
+                      "test_run_id": "run_1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d"
                     }
                   ],
                   "missing": "A test cancellation, or a captured account page with the cancel option."
@@ -10665,6 +10673,214 @@
         ],
         "description": "A page of certificates, newest first."
       },
+      "NoticeSend": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Unique identifier of the notice (ntc_…).",
+            "example": "ntc_3f9a1c2e7b4d4e0f9a8b7c6d5e4f3a2b"
+          },
+          "object": {
+            "type": "string",
+            "enum": [
+              "notice_send"
+            ],
+            "description": "String representing the object's type. Always \"notice_send\".",
+            "example": "notice_send"
+          },
+          "site": {
+            "type": "string",
+            "description": "The site.",
+            "example": "site_3f9a1c2e7b4d4e0f9a8b7c6d5e4f3a2b"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "acknowledgment",
+              "trial_ending",
+              "renewal_reminder",
+              "annual_terms",
+              "price_change",
+              "cancellation_confirmation",
+              "charge_notice"
+            ],
+            "description": "Notice kind.",
+            "example": "cancellation_confirmation"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "claimed",
+              "sent",
+              "failed",
+              "bounced",
+              "skipped"
+            ],
+            "description": "sent: the provider accepted it; failed: will be retried while its window is open; skipped: not sent, error says why; bounced; claimed: being sent.",
+            "example": "sent"
+          },
+          "sample": {
+            "type": "boolean",
+            "description": "A \"Send a test\" sample (never counts toward a check).",
+            "example": false
+          },
+          "platform": {
+            "type": "string",
+            "description": "Billing platform of the subscription.",
+            "example": "stripe"
+          },
+          "subscription": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Billing-platform subscription id (null for a sample).",
+            "example": "sub_1QabcXYZ"
+          },
+          "recipient": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Masked recipient address.",
+            "example": "a***@example.com"
+          },
+          "subject": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Subject line.",
+            "example": "Your Acme subscription is canceled"
+          },
+          "late": {
+            "type": "boolean",
+            "description": "Sent after its window opened late.",
+            "example": false
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why it failed or was skipped.",
+            "example": null
+          },
+          "attempts": {
+            "type": "integer",
+            "description": "Send attempts.",
+            "example": 1
+          },
+          "due": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "When it was due. Unix timestamp in seconds.",
+            "example": 1793318400
+          },
+          "sent": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "When it was sent. Unix timestamp in seconds.",
+            "example": 1793318400
+          },
+          "created": {
+            "type": "integer",
+            "description": "When the send was first claimed. Unix timestamp in seconds.",
+            "example": 1793318400
+          },
+          "evidence": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Evidence record of the sent email.",
+            "example": "ev_3f9a1c2e7b4d4e0f9a8b7c6d5e4f3a2b"
+          }
+        },
+        "required": [
+          "id",
+          "object",
+          "site",
+          "kind",
+          "status",
+          "sample",
+          "platform",
+          "subscription",
+          "recipient",
+          "subject",
+          "late",
+          "error",
+          "attempts",
+          "due",
+          "sent",
+          "created",
+          "evidence"
+        ],
+        "description": "One email Checkbox Notices sent (or tried to send) for the site."
+      },
+      "NoticeSendList": {
+        "type": "object",
+        "properties": {
+          "object": {
+            "type": "string",
+            "enum": [
+              "list"
+            ],
+            "description": "String representing the object's type. Always \"list\".",
+            "example": "list"
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NoticeSend"
+            },
+            "description": "Checkbox Notices sends, newest first.",
+            "example": [
+              {
+                "id": "ntc_3f9a1c2e7b4d4e0f9a8b7c6d5e4f3a2b",
+                "object": "notice_send",
+                "site": "site_3f9a1c2e7b4d4e0f9a8b7c6d5e4f3a2b",
+                "kind": "cancellation_confirmation",
+                "status": "sent",
+                "sample": false,
+                "platform": "stripe",
+                "subscription": "sub_1QabcXYZ",
+                "recipient": "a***@example.com",
+                "subject": "Your Acme subscription is canceled",
+                "late": false,
+                "error": null,
+                "attempts": 1,
+                "due": 1793318400,
+                "sent": 1793318400,
+                "created": 1793318400,
+                "evidence": "ev_3f9a1c2e7b4d4e0f9a8b7c6d5e4f3a2b"
+              }
+            ]
+          },
+          "has_more": {
+            "type": "boolean",
+            "description": "Whether more items exist after this page. Pass the last id as starting_after to fetch them.",
+            "example": false
+          },
+          "url": {
+            "type": "string",
+            "description": "The URL of this list.",
+            "example": "/v1/sites"
+          }
+        },
+        "required": [
+          "object",
+          "data",
+          "has_more",
+          "url"
+        ],
+        "description": "A page of checkbox notices sends, newest first."
+      },
       "NoticeSettings": {
         "type": "object",
         "properties": {
@@ -13084,7 +13300,8 @@
                       "status": "fail",
                       "detail": "no statement that the subscription renews automatically",
                       "screenshot_ref": "ev_123",
-                      "at": "2026-11-01T10:00:00.000Z"
+                      "at": "2026-11-01T10:00:00.000Z",
+                      "test_run_id": "run_1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d"
                     }
                   ],
                   "missing": "A test cancellation, or a captured account page with the cancel option."
@@ -13732,7 +13949,8 @@
                       "status": "fail",
                       "detail": "no statement that the subscription renews automatically",
                       "screenshot_ref": "ev_123",
-                      "at": "2026-11-01T10:00:00.000Z"
+                      "at": "2026-11-01T10:00:00.000Z",
+                      "test_run_id": "run_1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d"
                     }
                   ],
                   "missing": "A test cancellation, or a captured account page with the cancel option."
@@ -14420,7 +14638,8 @@
                       "status": "fail",
                       "detail": "no statement that the subscription renews automatically",
                       "screenshot_ref": "ev_123",
-                      "at": "2026-11-01T10:00:00.000Z"
+                      "at": "2026-11-01T10:00:00.000Z",
+                      "test_run_id": "run_1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d"
                     }
                   ],
                   "missing": "A test cancellation, or a captured account page with the cancel option."
@@ -14930,7 +15149,8 @@
                       "status": "fail",
                       "detail": "no statement that the subscription renews automatically",
                       "screenshot_ref": "ev_123",
-                      "at": "2026-11-01T10:00:00.000Z"
+                      "at": "2026-11-01T10:00:00.000Z",
+                      "test_run_id": "run_1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d"
                     }
                   ],
                   "missing": "A test cancellation, or a captured account page with the cancel option."
@@ -15505,7 +15725,8 @@
                       "status": "fail",
                       "detail": "no statement that the subscription renews automatically",
                       "screenshot_ref": "ev_123",
-                      "at": "2026-11-01T10:00:00.000Z"
+                      "at": "2026-11-01T10:00:00.000Z",
+                      "test_run_id": "run_1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d"
                     }
                   ],
                   "missing": "A test cancellation, or a captured account page with the cancel option."
@@ -16011,8 +16232,20 @@
               "stripe_checkout",
               "payment_link"
             ],
-            "description": "Where the shopper pays: own_page (a form on this page), stripe_checkout or payment_link (a Stripe-hosted page that collects consent, so no checkbox is needed here). Inferred from a purchase link to buy.stripe.com / checkout.stripe.com when absent.",
+            "description": "Where the shopper pays: own_page (a form on this page), stripe_checkout or payment_link (a Stripe-hosted page that collects consent, so no checkbox is needed here). Inferred from a purchase link to buy.stripe.com / checkout.stripe.com, or to one of payment_links, when absent.",
             "example": "payment_link"
+          },
+          "payment_links": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 2000
+            },
+            "maxItems": 50,
+            "description": "Your Stripe Payment Link URLs (buy.stripe.com or your own domain). A link to one of them is the purchase button, and the purchase and consent complete on Stripe, so no checkbox is added on this page. With site, the Payment Links read from your connected Stripe account are added.",
+            "example": [
+              "https://buy.stripe.com/test_abc123"
+            ]
           },
           "site": {
             "type": "string",
@@ -24472,7 +24705,7 @@
       "post": {
         "operationId": "connectBillingPlatform",
         "summary": "Connect a billing platform",
-        "description": "Connects the site's billing platform with the one restricted key (a Stripe restricted key, a Recharge token, a Shopify Admin API token, a Chargebee read-only API key, a Recurly private API key or a Paddle API key with read permissions), so Checkbox reads the customer-portal and reminder settings. Stripe: One Stripe restricted key per site: Read permissions for the checks, and Write permissions that Checkbox uses only after you click Approve on a fix, or in test mode (the one exception: Webhook Endpoints, used once to add Checkbox's webhook endpoint when you connect the key) (checklist: https://checkbox.site/docs/guides/stripe-key). API keys and AI agents may connect TEST-mode keys (rk_test_…) only; a live key (rk_live_ / sk_live_) is refused with live_key_requires_dashboard, because only a person signed in to the Checkbox dashboard can connect one. The credentials are validated by reading the settings once and stored encrypted. When the key's Stripe account looks like another site's (the site's prices or Payment Links are not in it, or it is already connected in another workspace), nothing is connected and the error billing_account_mismatch asks the human to confirm; retry with confirm_account_mismatch: true only after they said yes. The account owner is emailed about every key connected.",
+        "description": "Connects the site's billing platform with the one restricted key (a Stripe restricted key, a Recharge token, a Shopify Admin API token, a Chargebee read-only API key, a Recurly private API key or a Paddle API key with read permissions), so Checkbox reads the customer-portal and reminder settings. Stripe: One Stripe restricted key per site: Read permissions for the checks, and Write permissions that Checkbox uses only after you click Approve on a fix, or in test mode (the one exception: Webhook Endpoints, used once to add Checkbox's webhook endpoint when you connect the key) (checklist: https://checkbox.site/docs/guides/stripe-key). A full secret key (sk_test_ / sk_live_) is refused on every path with test_key_not_restricted: use a restricted key. API keys and AI agents may connect TEST-mode keys (rk_test_…) only; a live key (rk_live_ / sk_live_) is refused with live_key_requires_dashboard, because only a person signed in to the Checkbox dashboard can connect one. The credentials are validated by reading the settings once and stored encrypted. When the key's Stripe account looks like another site's (the site's prices or Payment Links are not in it, or it is already connected in another workspace), nothing is connected and the error billing_account_mismatch asks the human to confirm; retry with confirm_account_mismatch: true only after they said yes. The account owner is emailed about every key connected.",
         "tags": [
           "Sites"
         ],
@@ -27783,6 +28016,135 @@
         }
       }
     },
+    "/v1/sites/{site}/notice_sends": {
+      "get": {
+        "operationId": "listNoticeSends",
+        "summary": "List Checkbox Notices sends",
+        "description": "Read-only: the emails Checkbox Notices sent, or tried to send, for this site (newest first), with status and, for a failed or skipped send, why. A test run's email steps name these rows (notices_send_log). Samples (\"Send a test\") are left out unless include_samples=true.",
+        "tags": [
+          "Notices"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "basicAuth": []
+          }
+        ],
+        "x-checkbox-scope": "notices:read",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Unique identifier of the site (site_…).",
+              "example": "site_3f9a1c2e7b4d4e0f9a8b7c6d5e4f3a2b"
+            },
+            "required": true,
+            "name": "site",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "description": "At most this many rows (default 50).",
+              "example": 50
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "acknowledgment",
+                "trial_ending",
+                "renewal_reminder",
+                "annual_terms",
+                "price_change",
+                "cancellation_confirmation",
+                "charge_notice"
+              ],
+              "description": "Only this kind.",
+              "example": "cancellation_confirmation"
+            },
+            "required": false,
+            "name": "kind",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 200,
+              "description": "Only sends for this billing-platform subscription id.",
+              "example": "sub_1QabcXYZ"
+            },
+            "required": false,
+            "name": "subscription",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false"
+              ],
+              "description": "Include \"Send a test\" samples.",
+              "example": "false"
+            },
+            "required": false,
+            "name": "include_samples",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "API version (date). Defaults to the version your account is pinned to. Known: 2026-10-30.",
+              "example": "2026-10-30"
+            },
+            "required": false,
+            "name": "Checkbox-Version",
+            "in": "header"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NoticeSendList"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Error. See error.code (stable) and error.next_action.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "Error. See error.code (stable) and error.next_action.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/sites/{site}/notice_settings": {
       "get": {
         "operationId": "retrieveNoticeSettings",
@@ -28909,7 +29271,7 @@
       "post": {
         "operationId": "checkEmail",
         "summary": "Check a subscription lifecycle email",
-        "description": "Checks the content of an acknowledgment (welcome) email, trial-ending reminder, renewal reminder, price-change notice, yearly terms reminder or cancellation confirmation against the requirements for that notice (renewal terms, amount, frequency, how to cancel, trial cancellation). The email is modelled as sent on time, so the verdict is about content; get send dates from checkNoticeSchedule. Prices are judged against what Stripe charges: with `site` (or, without it, the account's one site with Stripe connected) the plan fields come from the site's plans and the email is matched to the plan it names (\"Annual\") first; a price that contradicts it fails, and `warnings` say which site and plan were used. Returns `required_by` (requirements that make the email mandatory for this plan) and a `template` that passes the checks, with {{merge_tags}}, verified by the engine. Stateless and deterministic: nothing is stored, the same input on the same as_of date gives the same verdicts. Every verdict comes from the Checkbox rules engine over the legal catalog (federal ROSCA / EFTA plus the state automatic-renewal laws); the response carries rules_version, catalog_version and a disclaimer (not legal advice). Read `verdict`, then `next_action`: it tells you exactly what to change and to call the check again until verdict is pass.",
+        "description": "Checks the content of an acknowledgment (welcome) email, trial-ending reminder, renewal reminder, price-change notice, yearly terms reminder or cancellation confirmation against the requirements for that notice (renewal terms, amount, frequency, how to cancel, trial cancellation). The email is modelled as sent on time, so the verdict is about content; get send dates from checkNoticeSchedule. Prices are judged against what Stripe charges: with `site` (or, without it and without a price in terms, the account's one site with Stripe connected) the plan fields come from the site's plans and the email is matched to the plan it names (\"Annual\") first; a price that contradicts it fails, and `warnings` say which site and plan were used. Without `site`, a price you send in terms is judged as sent; when it differs from every plan of that site, the result is at most needs_review and Next is update_setup (update the site's plans first). Returns `required_by` (requirements that make the email mandatory for this plan) and a `template` that passes the checks, with {{merge_tags}}, verified by the engine. Stateless and deterministic: nothing is stored, the same input on the same as_of date gives the same verdicts. Every verdict comes from the Checkbox rules engine over the legal catalog (federal ROSCA / EFTA plus the state automatic-renewal laws); the response carries rules_version, catalog_version and a disclaimer (not legal advice). Read `verdict`, then `next_action`: it tells you exactly what to change and to call the check again until verdict is pass.",
         "tags": [
           "Checks"
         ],
@@ -34772,7 +35134,8 @@
                                   "status": "fail",
                                   "detail": "no statement that the subscription renews automatically",
                                   "screenshot_ref": "ev_123",
-                                  "at": "2026-11-01T10:00:00.000Z"
+                                  "at": "2026-11-01T10:00:00.000Z",
+                                  "test_run_id": "run_1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d"
                                 }
                               ],
                               "missing": "A test cancellation, or a captured account page with the cancel option."
@@ -34930,7 +35293,8 @@
                                   "status": "fail",
                                   "detail": "no statement that the subscription renews automatically",
                                   "screenshot_ref": "ev_123",
-                                  "at": "2026-11-01T10:00:00.000Z"
+                                  "at": "2026-11-01T10:00:00.000Z",
+                                  "test_run_id": "run_1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d"
                                 }
                               ],
                               "missing": "A test cancellation, or a captured account page with the cancel option."
@@ -36377,7 +36741,7 @@
     "test_key_not_restricted": {
       "status": 400,
       "type": "invalid_request_error",
-      "description": "The key is a Stripe secret key (sk_test_…). Store a restricted test key (rk_test_…) with the permissions on Checkbox's key checklist instead; `message` lists them."
+      "description": "The key is a full Stripe secret key (sk_test_… or sk_live_…), which is refused on every connect path (createTestCredential, connectBillingPlatform, the dashboard). Use a restricted key (rk_test_…) with the permissions on Checkbox's key checklist instead; `message` lists them."
     },
     "test_key_declined": {
       "status": 403,

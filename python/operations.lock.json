@@ -161,6 +161,7 @@
     "listEvidence",
     "listFindings",
     "listLawUpdates",
+    "listNoticeSends",
     "listNoticeTemplates",
     "listReceipts",
     "listScans",

@@ -852,8 +852,8 @@ SetupSessionUpdate = TypedDict(
         "support_email": str,
         #: The brand subscribers know (it names the seller in generated disclosures and emails). Default: the site's host name, which the plan asks you to replace. (optional)
         "merchant_name": str,
-        #: Billing platform. (optional)
-        "billing_platform": Literal["stripe", "shopify", "recharge", "chargebee", "recurly", "paddle", "woocommerce", "custom"],
+        #: Billing platform. lemon_squeezy: Checkbox checks your pages and emails (no billing connection). (optional)
+        "billing_platform": Literal["stripe", "shopify", "recharge", "chargebee", "recurly", "paddle", "lemon_squeezy", "woocommerce", "custom"],
         #: Plans and prices (sets the free-trial and term facts the law depends on). (optional)
         "plans": List["SetupPlan"],
         #: Facts about the builder's codebase. (optional)
@@ -2229,6 +2229,8 @@ EvidenceItem = TypedDict(
         "screenshot_ref": str,
         #: When it was captured / received. (optional)
         "at": str,
+        #: Set when a Checkbox test run recorded this page view (not a scan of your site). (optional)
+        "test_run_id": str,
     },
     total=False,
 )
@@ -3536,6 +3538,66 @@ CertificateList = TypedDict(
         "object": Literal["list"],
         #: Certificates, newest first.
         "data": List["Certificate"],
+        #: Whether more items exist after this page. Pass the last id as starting_after to fetch them.
+        "has_more": bool,
+        #: The URL of this list.
+        "url": str,
+    },
+    total=False,
+)
+
+
+#: One email Checkbox Notices sent (or tried to send) for the site.
+NoticeSend = TypedDict(
+    "NoticeSend",
+    {
+        #: Unique identifier of the notice (ntc_…).
+        "id": str,
+        #: String representing the object's type. Always "notice_send".
+        "object": Literal["notice_send"],
+        #: The site.
+        "site": str,
+        #: Notice kind.
+        "kind": Literal["acknowledgment", "trial_ending", "renewal_reminder", "annual_terms", "price_change", "cancellation_confirmation", "charge_notice"],
+        #: sent: the provider accepted it; failed: will be retried while its window is open; skipped: not sent, error says why; bounced; claimed: being sent.
+        "status": Literal["claimed", "sent", "failed", "bounced", "skipped"],
+        #: A "Send a test" sample (never counts toward a check).
+        "sample": bool,
+        #: Billing platform of the subscription.
+        "platform": str,
+        #: Billing-platform subscription id (null for a sample).
+        "subscription": Optional[str],
+        #: Masked recipient address.
+        "recipient": Optional[str],
+        #: Subject line.
+        "subject": Optional[str],
+        #: Sent after its window opened late.
+        "late": bool,
+        #: Why it failed or was skipped.
+        "error": Optional[str],
+        #: Send attempts.
+        "attempts": int,
+        #: When it was due. Unix timestamp in seconds.
+        "due": Optional[int],
+        #: When it was sent. Unix timestamp in seconds.
+        "sent": Optional[int],
+        #: When the send was first claimed. Unix timestamp in seconds.
+        "created": int,
+        #: Evidence record of the sent email.
+        "evidence": Optional[str],
+    },
+    total=False,
+)
+
+
+#: A page of checkbox notices sends, newest first.
+NoticeSendList = TypedDict(
+    "NoticeSendList",
+    {
+        #: String representing the object's type. Always "list".
+        "object": Literal["list"],
+        #: Checkbox Notices sends, newest first.
+        "data": List["NoticeSend"],
         #: Whether more items exist after this page. Pass the last id as starting_after to fetch them.
         "has_more": bool,
         #: The URL of this list.
@@ -5103,8 +5165,10 @@ PageCheckParams = TypedDict(
         "terms": "CheckPlanTerms",
         #: Every plan a multi-plan pricing page sells (price or amount, interval, trial_days each; the same plan fields as setup plans[] in updateSetupSession). Each plan card / button is judged against its own plan; only a price no listed plan charges is a mismatch. Without it, one plan's `terms` leaves other plan cards' prices at needs_review (warning plans_partial). (optional)
         "plans": List["PageCheckParamsPlansItem"],
-        #: Where the shopper pays: own_page (a form on this page), stripe_checkout or payment_link (a Stripe-hosted page that collects consent, so no checkbox is needed here). Inferred from a purchase link to buy.stripe.com / checkout.stripe.com when absent. (optional)
+        #: Where the shopper pays: own_page (a form on this page), stripe_checkout or payment_link (a Stripe-hosted page that collects consent, so no checkbox is needed here). Inferred from a purchase link to buy.stripe.com / checkout.stripe.com, or to one of payment_links, when absent. (optional)
         "checkout_type": Literal["own_page", "stripe_checkout", "payment_link"],
+        #: Your Stripe Payment Link URLs (buy.stripe.com or your own domain). A link to one of them is the purchase button, and the purchase and consent complete on Stripe, so no checkbox is added on this page. With site, the Payment Links read from your connected Stripe account are added. (optional)
+        "payment_links": List[str],
         #: A site of yours (site_…): the page is judged exactly as verifyTask judges it — against the site's plans (the connected Stripe Prices win over plans typed in setup), its jurisdictions and its checkout type. These replace terms, plans, jurisdictions and checkout_type when the site knows them. Without it, the one site of the account with Stripe connected gives the plans when there is exactly one (warning site_from_stripe says so). "none" judges only what you send. (optional)
         "site": str,
         #: Where you sell: "all" (default) or state codes ("US-CA", "CA", "US-NY"; "US-FED" is always included). (optional)
@@ -7858,6 +7922,23 @@ RevokeCertificateParams = TypedDict(
 )
 
 
+#: Parameters of `notice_sends.list()` (listNoticeSends).
+ListNoticeSendsParams = TypedDict(
+    "ListNoticeSendsParams",
+    {
+        #: At most this many rows (default 50). (optional)
+        "limit": int,
+        #: Only this kind. (optional)
+        "kind": Literal["acknowledgment", "trial_ending", "renewal_reminder", "annual_terms", "price_change", "cancellation_confirmation", "charge_notice"],
+        #: Only sends for this billing-platform subscription id. (optional)
+        "subscription": str,
+        #: Include "Send a test" samples. (optional)
+        "include_samples": Literal["true", "false"],
+    },
+    total=False,
+)
+
+
 #: Parameters of `notices.list_due()` (listDueNotices).
 ListDueNoticesParams = TypedDict(
     "ListDueNoticesParams",
@@ -9660,7 +9741,7 @@ ERROR_CODES: Dict[str, Dict[str, Any]] = {
     "idempotency_key_reused": {"status": 400, "type": "idempotency_error", "description": "The Idempotency-Key was already used with different parameters within 24 hours."},
     "test_key_missing": {"status": 400, "type": "invalid_request_error", "description": "A Stripe test run needs a Stripe TEST-mode key stored for the site: the agent stores the restricted test key (rk_test_…) with createTestCredential, or a person adds it in the dashboard."},
     "test_key_not_test_mode": {"status": 400, "type": "invalid_request_error", "description": "The billing key is a live-mode (or malformed) key. Agents only store TEST-mode restricted keys (rk_test_…); a human adds live keys in the Checkbox dashboard."},
-    "test_key_not_restricted": {"status": 400, "type": "invalid_request_error", "description": "The key is a Stripe secret key (sk_test_…). Store a restricted test key (rk_test_…) with the permissions on Checkbox's key checklist instead; `message` lists them."},
+    "test_key_not_restricted": {"status": 400, "type": "invalid_request_error", "description": "The key is a full Stripe secret key (sk_test_… or sk_live_…), which is refused on every connect path (createTestCredential, connectBillingPlatform, the dashboard). Use a restricted key (rk_test_…) with the permissions on Checkbox's key checklist instead; `message` lists them."},
     "test_key_declined": {"status": 403, "type": "permission_error", "description": "The owner did not allow the agent to use the project's Stripe TEST key when approving the setup; only a person can add it, in the dashboard."},
     "test_key_rejected": {"status": 400, "type": "invalid_request_error", "description": "Stripe rejected the test-mode key or it lacks a permission test runs need; `message` names it."},
     "authorization_pending": {"status": 400, "type": "invalid_request_error", "description": "Device login: the human has not approved yet. Keep polling createDeviceToken every `interval` seconds."},

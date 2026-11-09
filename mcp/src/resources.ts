@@ -70,7 +70,8 @@ what to change. Free. Every feature. No credit card. Fair-use limits.
 1. **setup_checkbox** — connected through the Checkbox connector (OAuth: claude.ai, Claude Desktop, Claude Code, Cursor)
    the human already approved: it registers the site and runs the first checks at once, no key involved. Without any
    credential (device login) it returns ONE link for the human ("Open … and click Approve"); call it again with the
-   device_code to receive test-mode keys. With an API key it starts a setup session. Pass what you know:
+   device_code (the local stdio server saves the key to the project's git-ignored .env.local itself and shows only a
+   hint; prefer OAuth wherever the client supports it). With an API key it starts a setup session. Pass what you know:
    site_url, checkout_url, terms_url / refund_url / cancellation_url, billing_platform, plans, project.layout_file.
    (The \`checkbox init\` CLI, \`npx @checkbox-site/cli init\`, does the same and patches the layout file.)
 2. Follow the setup **next_action** (install the snippet in the root layout, store the one Stripe TEST restricted key yourself with store_stripe_test_key,
@@ -112,7 +113,8 @@ Every tool result ends with "Next: …" naming the tool to call. Errors carry a 
   \`Authorization: Bearer <key>\`. Agents without a browser: \`${opts.mcpUrl}?login=device\` offers setup_checkbox's
   device login.
 - Local (stdio): the \`checkbox-mcp\` binary (packages/mcp) with CHECKBOX_API_KEY set; without a key it starts with
-  setup_checkbox only and switches to the issued key after the human approves.
+  setup_checkbox only and switches to the issued key after the human approves (it saves the key to the project's
+  git-ignored .env.local itself; the key never appears in the conversation).
 - REST: ${opts.apiBase}/v1 — OpenAPI at ${opts.apiBase}/v1/openapi.json.
 
 Automated compliance checks, not legal advice.

@@ -39,6 +39,8 @@ export interface CheckboxMcpOptions {
   mcpUrl?: string;
   /** stdio: replace the API client + key after a device login (returns the new key context). */
   adoptKeys?: (keys: IssuedKeys) => Promise<{ api: CheckboxApi; key: KeyContext }>;
+  /** stdio: writes device-login keys to a git-ignored file in the project, so the tool result carries only a hint. */
+  saveKeys?: ToolContext['saveKeys'];
   /** Called for every tool call (metrics / logs). Never receives arguments (they may hold page HTML or keys). */
   onToolCall?: (event: { tool: string; ok: boolean; ms: number; code?: string }) => void;
   /** Remote: an API client for a key issued during a tool call (setup_checkbox finishes the setup with it). */
@@ -145,6 +147,7 @@ export function createCheckboxMcpServer(opts: CheckboxMcpOptions): CheckboxMcp {
       serverVersion: SERVER_VERSION,
       ...(opts.devicePoll ? { devicePoll: opts.devicePoll } : {}),
       ...(opts.apiForKey ? { apiForKey: opts.apiForKey } : {}),
+      ...(opts.saveKeys ? { saveKeys: opts.saveKeys } : {}),
       ...(client?.name ? { clientName: client.name } : {}),
       ...(opts.adoptKeys
         ? {

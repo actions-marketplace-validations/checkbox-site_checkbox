@@ -2,9 +2,9 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "site.checkbox/checkbox",
   "title": "Checkbox",
-  "description": "Auto-renewal law compliance (ROSCA, CA, NY, other states) for subscription checkout and emails",
+  "description": "Auto-renewal law checks (ROSCA, click-to-cancel, CA, NY) for subscription Stripe Checkout and emails",
   "websiteUrl": "https://checkbox.site/docs/mcp",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "remotes": [
     {
       "type": "streamable-http",
@@ -23,7 +23,22 @@
     "io.modelcontextprotocol.registry/publisher-provided": {
       "docs": "https://checkbox.site/docs/mcp",
       "llms_txt": "https://checkbox.site/llms.txt",
-      "openapi": "https://app.checkbox.site/v1/openapi.json"
+      "openapi": "https://app.checkbox.site/v1/openapi.json",
+      "keywords": [
+        "auto-renewal",
+        "automatic renewal",
+        "ROSCA",
+        "click-to-cancel",
+        "Stripe Checkout",
+        "subscription compliance",
+        "cancellation",
+        "renewal reminder",
+        "California ARL",
+        "New York",
+        "FTC",
+        "negative option"
+      ],
+      "summary": "Free checks of subscription checkouts, terms, cancellation flows and renewal emails against U.S. automatic-renewal laws (FTC ROSCA, California, New York and about 26 other states), with corrected Stripe Checkout parameters, disclosure text and email templates. Not legal advice."
     }
   },
   "packages": [

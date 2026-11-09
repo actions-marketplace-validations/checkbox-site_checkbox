@@ -403,7 +403,7 @@ function missingNext(message: string): NextAction {
 }
 
 const ERROR_HINTS: Record<string, string> = {
-  insufficient_scope: 'This connection lacks that permission (a read-only connection or a restricted key). Ask the human to reconnect Checkbox with write access (or change the key\'s permissions in the Checkbox dashboard → Developers); never ask them to paste a key. Read-only tools still work.',
+  insufficient_scope: 'This connection lacks that permission (a read-only connection or a restricted key). Ask the human to reconnect Checkbox and choose Full access on the approval page: Codex: `codex mcp logout checkbox`, then `codex mcp login checkbox`; Claude Code: `/mcp` → checkbox → Clear authentication → Authenticate; claude.ai / Claude Desktop: Settings → Connectors → Checkbox → Disconnect, then Connect. For an API key, change its permissions in the Checkbox dashboard → Agent & API. Never ask them to paste a key. Read-only tools still work.',
   insufficient_role: 'The key acts as a viewer; writes need a member or admin key.',
   api_key_missing: 'No Checkbox API key is configured: call setup_checkbox (one browser approval by the human) to get one.',
   api_key_invalid: 'The configured Checkbox API key is unknown, revoked or expired: reconnect with setup_checkbox (one browser approval by the human), or ask the human to fix the key in the Checkbox dashboard → Developers. Never ask them to paste a key into the chat.',

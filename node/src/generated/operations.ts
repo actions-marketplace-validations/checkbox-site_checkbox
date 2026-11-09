@@ -856,6 +856,23 @@ export const OPERATIONS = {
     paginated: false,
     summary: "Revoke a certificate",
   },
+  listNoticeSends: {
+    operationId: "listNoticeSends",
+    namespace: "noticeSends",
+    method: "list",
+    httpMethod: "GET",
+    path: "/v1/sites/{site}/notice_sends",
+    pathParams: ["site"],
+    queryParams: ["limit","kind","subscription","include_samples"],
+    body: false,
+    idempotent: false,
+    auth: true,
+    scope: "notices:read",
+    response: "json",
+    list: true,
+    paginated: false,
+    summary: "List Checkbox Notices sends",
+  },
   retrieveNoticeSettings: {
     operationId: "retrieveNoticeSettings",
     namespace: "noticeSettings",
@@ -1933,6 +1950,7 @@ export interface OperationTypes {
   retrieveCertificate: { args: { certificate: string }; response: T.Certificate };
   createCertificate: { args: { site: string } & T.CreateCertificateParams; response: T.Certificate };
   revokeCertificate: { args: { certificate: string } & T.RevokeCertificateParams; response: T.Certificate };
+  listNoticeSends: { args: { site: string } & T.ListNoticeSendsParams; response: T.NoticeSendList };
   retrieveNoticeSettings: { args: { site: string }; response: T.NoticeSettings };
   updateNoticeSettings: { args: { site: string } & T.UpdateNoticeSettingsParams; response: T.NoticeSettings };
   listDueNotices: { args: T.ListDueNoticesParams; response: T.DueNoticeList };
@@ -2199,7 +2217,7 @@ export class SitesResource extends Resource {
   /**
    * Connect a billing platform.
    *
-   * Connects the site's billing platform with the one restricted key (a Stripe restricted key, a Recharge token, a Shopify Admin API token, a Chargebee read-only API key, a Recurly private API key or a Paddle API key with read permissions), so Checkbox reads the customer-portal and reminder settings. Stripe: One Stripe restricted key per site: Read permissions for the checks, and Write permissions that Checkbox uses only after you click Approve on a fix, or in test mode (the one exception: Webhook Endpoints, used once to add Checkbox's webhook endpoint when you connect the key) (checklist: https://checkbox.site/docs/guides/stripe-key). API keys and AI agents may connect TEST-mode keys (rk_test_…) only; a live key (rk_live_ / sk_live_) is refused with live_key_requires_dashboard, because only a person signed in to the Checkbox dashboard can connect one. The credentials are validated by reading the settings once and stored encrypted. When the key's Stripe account looks like another site's (the site's prices or Payment Links are not in it, or it is already connected in another workspace), nothing is connected and the error billing_account_mismatch asks the human to confirm; retry with confirm_account_mismatch: true only after they said yes. The account owner is emailed about every key connected.
+   * Connects the site's billing platform with the one restricted key (a Stripe restricted key, a Recharge token, a Shopify Admin API token, a Chargebee read-only API key, a Recurly private API key or a Paddle API key with read permissions), so Checkbox reads the customer-portal and reminder settings. Stripe: One Stripe restricted key per site: Read permissions for the checks, and Write permissions that Checkbox uses only after you click Approve on a fix, or in test mode (the one exception: Webhook Endpoints, used once to add Checkbox's webhook endpoint when you connect the key) (checklist: https://checkbox.site/docs/guides/stripe-key). A full secret key (sk_test_ / sk_live_) is refused on every path with test_key_not_restricted: use a restricted key. API keys and AI agents may connect TEST-mode keys (rk_test_…) only; a live key (rk_live_ / sk_live_) is refused with live_key_requires_dashboard, because only a person signed in to the Checkbox dashboard can connect one. The credentials are validated by reading the settings once and stored encrypted. When the key's Stripe account looks like another site's (the site's prices or Payment Links are not in it, or it is already connected in another workspace), nothing is connected and the error billing_account_mismatch asks the human to confirm; retry with confirm_account_mismatch: true only after they said yes. The account owner is emailed about every key connected.
    *
    * @param site Unique identifier of the site (site_…).
    * @see POST /v1/sites/{site}/integrations (operation `connectBillingPlatform`, scope `sites:write`)
@@ -2645,6 +2663,22 @@ export class CertificatesResource extends Resource {
 
 }
 
+/** `checkbox.noticeSends` */
+export class NoticeSendsResource extends Resource {
+  /**
+   * List Checkbox Notices sends.
+   *
+   * Read-only: the emails Checkbox Notices sent, or tried to send, for this site (newest first), with status and, for a failed or skipped send, why. A test run's email steps name these rows (notices_send_log). Samples ("Send a test") are left out unless include_samples=true.
+   *
+   * @param site Unique identifier of the site (site_…).
+   * @see GET /v1/sites/{site}/notice_sends (operation `listNoticeSends`, scope `notices:read`)
+   */
+  list(site: string, params?: T.ListNoticeSendsParams, options?: RequestOptions): Promise<T.NoticeSendList> {
+    return this._request(OPERATIONS.listNoticeSends, [site], params, options) as Promise<T.NoticeSendList>;
+  }
+
+}
+
 /** `checkbox.noticeSettings` */
 export class NoticeSettingsResource extends Resource {
   /**
@@ -2811,7 +2845,7 @@ export class ChecksResource extends Resource {
   /**
    * Check a subscription lifecycle email.
    *
-   * Checks the content of an acknowledgment (welcome) email, trial-ending reminder, renewal reminder, price-change notice, yearly terms reminder or cancellation confirmation against the requirements for that notice (renewal terms, amount, frequency, how to cancel, trial cancellation). The email is modelled as sent on time, so the verdict is about content; get send dates from checkNoticeSchedule. Prices are judged against what Stripe charges: with `site` (or, without it, the account's one site with Stripe connected) the plan fields come from the site's plans and the email is matched to the plan it names ("Annual") first; a price that contradicts it fails, and `warnings` say which site and plan were used. Returns `required_by` (requirements that make the email mandatory for this plan) and a `template` that passes the checks, with {{merge_tags}}, verified by the engine. Stateless and deterministic: nothing is stored, the same input on the same as_of date gives the same verdicts. Every verdict comes from the Checkbox rules engine over the legal catalog (federal ROSCA / EFTA plus the state automatic-renewal laws); the response carries rules_version, catalog_version and a disclaimer (not legal advice). Read `verdict`, then `next_action`: it tells you exactly what to change and to call the check again until verdict is pass.
+   * Checks the content of an acknowledgment (welcome) email, trial-ending reminder, renewal reminder, price-change notice, yearly terms reminder or cancellation confirmation against the requirements for that notice (renewal terms, amount, frequency, how to cancel, trial cancellation). The email is modelled as sent on time, so the verdict is about content; get send dates from checkNoticeSchedule. Prices are judged against what Stripe charges: with `site` (or, without it and without a price in terms, the account's one site with Stripe connected) the plan fields come from the site's plans and the email is matched to the plan it names ("Annual") first; a price that contradicts it fails, and `warnings` say which site and plan were used. Without `site`, a price you send in terms is judged as sent; when it differs from every plan of that site, the result is at most needs_review and Next is update_setup (update the site's plans first). Returns `required_by` (requirements that make the email mandatory for this plan) and a `template` that passes the checks, with {{merge_tags}}, verified by the engine. Stateless and deterministic: nothing is stored, the same input on the same as_of date gives the same verdicts. Every verdict comes from the Checkbox rules engine over the legal catalog (federal ROSCA / EFTA plus the state automatic-renewal laws); the response carries rules_version, catalog_version and a disclaimer (not legal advice). Read `verdict`, then `next_action`: it tells you exactly what to change and to call the check again until verdict is pass.
    *
    * @see POST /v1/checks/email (operation `checkEmail`, scope `checks:read`)
    */
@@ -3438,6 +3472,7 @@ export const RESOURCES = {
   fixes: FixesResource,
   evidence: EvidenceResource,
   certificates: CertificatesResource,
+  noticeSends: NoticeSendsResource,
   noticeSettings: NoticeSettingsResource,
   notices: NoticesResource,
   lawUpdates: LawUpdatesResource,
