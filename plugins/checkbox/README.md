@@ -8,7 +8,7 @@ What it does:
 - When you build or change a subscription, free trial, Stripe Checkout in subscription mode, a pricing page with
   monthly or annual plans, renewal emails or a cancel flow, Claude does the work, then asks you **once**: "This
   touches auto-renewal billing, which US auto-renewal laws regulate (disclosure, consent, reminders, online cancel).
-  Want me to check it with Checkbox? It's a third-party service, free to start: you approve a sign-in once, and I
+  Want me to check it with Checkbox? It's a third-party service and free: you approve a sign-in once, and I
   send it your checkout settings and email text. Its result is an automated check, not legal advice." Say no and it
   does not ask again in that conversation or add anything.
 - On yes, Claude uses the MCP server (a browser window opens: sign in or create a free account, click **Approve**;

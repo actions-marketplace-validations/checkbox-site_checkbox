@@ -100,6 +100,64 @@ class CheckboxFile:
         return f"CheckboxFile(filename={self.filename!r}, content_type={self.content_type!r}, size={len(self.data)})"
 
 
+#: Checks whose ``params`` is a Stripe object (round 19: a stripe-python object or a Payment Link id is accepted).
+_STRIPE_PARAM_OPS = {"checkStripeCheckoutSession", "checkStripePaymentLink"}
+
+
+def to_plain(value: Any) -> Any:
+    """A stripe-python object (``StripeObject``, at any depth) as plain JSON data; anything else unchanged.
+
+    Newer stripe-python objects are not ``dict`` subclasses and ``json.dumps`` refuses them, so they are converted with
+    their own ``to_dict_recursive()`` / ``to_dict()``.
+    """
+    if value is None or isinstance(value, (str, bytes, int, float, bool)):
+        return value
+    if not isinstance(value, (dict, list, tuple)):
+        for name in ("to_dict_recursive", "to_dict"):
+            fn = getattr(value, name, None)
+            if callable(fn):
+                return to_plain(fn())
+        return value
+    if isinstance(value, dict):
+        return {k: to_plain(v) for k, v in value.items()}
+    return [to_plain(v) for v in value]
+
+
+def _payment_link_from_stripe(link_id: str) -> Any:
+    """Retrieves a Payment Link (with its line items) from the merchant's own Stripe account, with the stripe-python
+    library and the key the app already configured (``stripe.api_key``). Nothing is sent to Stripe by Checkbox."""
+    from .errors import InvalidRequestError
+
+    how = f'pass the retrieved object instead: stripe.PaymentLink.retrieve("{link_id}", expand=["line_items"])'
+    try:
+        import stripe  # type: ignore[import-not-found]
+    except ImportError:
+        raise InvalidRequestError(f"A Payment Link id needs the stripe library to look the link up; {how}.", type="invalid_request_error", code="parameter_invalid", param="params") from None
+    if not getattr(stripe, "api_key", None):
+        raise InvalidRequestError(f"A Payment Link id is looked up with your Stripe key, and stripe.api_key is not set; set it, or {how}.", type="invalid_request_error", code="parameter_invalid", param="params")
+    return stripe.PaymentLink.retrieve(link_id, expand=["line_items"])
+
+
+def _stripe_check_params(params: Any, kwargs: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
+    """``checks.stripe_payment_link(link)`` / ``("plink_…")``: a Stripe object (or a Payment Link id) given as the
+    positional argument is the ``params`` of the check; a dict with ``params`` is the request body as before."""
+    is_stripe = params is not None and (isinstance(params, str) or not isinstance(params, Mapping) or ("params" not in params and "object" in params))
+    merged: Dict[str, Any] = {} if is_stripe or params is None else dict(params)
+    merged.update(kwargs or {})
+    if is_stripe:
+        merged["params"] = params
+    value = merged.get("params")
+    if isinstance(value, str):
+        if not value.startswith("plink_"):
+            from .errors import InvalidRequestError
+
+            raise InvalidRequestError("params must be the Stripe params object (or a retrieved Payment Link), or a Payment Link id (plink_…).", type="invalid_request_error", code="parameter_invalid", param="params")
+        value = _payment_link_from_stripe(value)
+    if value is not None:
+        merged["params"] = to_plain(value)
+    return merged
+
+
 class Resource:
     """Base of every ``checkbox.<namespace>`` object."""
 
@@ -114,6 +172,8 @@ class Resource:
         kwargs: Optional[Mapping[str, Any]],
         request_options: Optional[RequestOptions],
     ) -> Any:
+        if operation_id in _STRIPE_PARAM_OPS:
+            return self._client._send(operation_id, path_args, _stripe_check_params(params, kwargs), request_options)
         merged: Dict[str, Any] = dict(params or {})
         merged.update(kwargs or {})
         return self._client._send(operation_id, path_args, merged, request_options)

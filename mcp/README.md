@@ -7,7 +7,7 @@ your agent can set up a project with one human click, check checkout code before
 done and run synthetic test subscriptions — against ROSCA, California's Automatic Renewal Law, New York GBL § 527-a
 and the other state automatic-renewal laws.
 
-Docs: https://checkbox.site/docs/mcp · Agent index: https://checkbox.site/llms.txt · Free to start.
+Docs: https://checkbox.site/docs/mcp · Agent index: https://checkbox.site/llms.txt · Free. Every feature. No credit card. Fair-use limits.
 
 ## Connect
 
@@ -45,7 +45,7 @@ Package: `@checkbox-site/mcp` on npm (Node 20+; binary `checkbox-mcp`). Options:
 
 ## Tools
 
-Start with `setup_checkbox`; then `get_compliance_plan` → apply a task → `verify_task`, until the plan is compliant.
+Start with `setup_checkbox`; then `get_compliance_plan` → apply a task → `verify_task`, until the checks pass (plan status `compliant`).
 Preflight tools (`check_disclosure`, `check_stripe_checkout_session`, `check_email`, `check_page_html`,
 `get_notice_schedule`) work on code before it is deployed. The full list, with the API operation behind each tool, is
 at https://checkbox.site/docs/mcp#tools.

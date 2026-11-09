@@ -1,9 +1,43 @@
 # Checkbox
 
+Check a subscription checkout's renewal terms in one command. Offline: no account, no key, nothing leaves your machine.
+
+```bash
+npx @checkbox-site/cli check disclosure --offline \
+  --text '$19.99 per month.' --price 19.99 --interval month \
+  --merchant-name Acme --cancel-url https://acme.example/cancel --consent-checkbox --bold
+```
+
+```text
+FAIL  disclosure · all jurisdictions · rules 1.4.0 · catalog 2026.11.09.1 · offline
+  ✗ signup.disclosure.autorenew_language (critical)
+  ✓ signup.disclosure.price (critical)
+  ✓ signup.disclosure.frequency (critical)
+  ✗ signup.disclosure.cancellation_policy (critical)
+  ✓ signup.disclosure.term_length (critical)
+  ? signup.disclosure.proximity (critical)
+  ? signup.disclosure.conspicuous (critical)
+  ? signup.consent.affirmative (critical)
+  ✓ signup.consent.not_prechecked (critical)
+
+Suggested replacement (passes the checks) (verified by the rules engine)
+  disclosure: Your Acme subscription automatically renews every month at $19.99 (plus applicable taxes) until you cancel.
+              You can cancel anytime online at https://acme.example/cancel; cancellation takes effect at the
+              end of your current billing period. To avoid the next charge, cancel before your next billing
+              date (every month).
+  checkbox:   I agree that my Acme subscription renews automatically every month at $19.99 (plus applicable taxes) until I
+              cancel, and I understand I can cancel anytime online at https://acme.example/cancel.
+```
+
+The output is abridged: the full run also prints each failing check's reason and fix. ✓ passes · ✗ fails · ? needs
+review. More offline checks: https://checkbox.site/docs/cli#offline
+
+## What it is
+
 Automatic-renewal law compliance for subscription businesses, as an API, an MCP server and assistant integrations.
 Checkbox checks a subscription checkout, its renewal emails and its cancellation flow against US automatic-renewal
 laws — federal ROSCA, California Bus. & Prof. Code § 17600 et seq., New York GBL § 527-a and the other state laws —
-and returns the exact change to make. Free to start. Checkbox is a System1 company.
+and returns the exact change to make. Free. Checkbox is a System1 company.
 
 - Docs: https://checkbox.site/docs · Docs for agents: https://checkbox.site/llms.txt
 - API reference (OpenAPI 3.1): [`openapi/checkbox.v1.json`](openapi/checkbox.v1.json), live at

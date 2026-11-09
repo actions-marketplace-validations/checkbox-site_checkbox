@@ -1604,6 +1604,23 @@ export const OPERATIONS = {
     paginated: false,
     summary: "Delete a registered checkout config",
   },
+  deleteSiteStripeCheckoutConfig: {
+    operationId: "deleteSiteStripeCheckoutConfig",
+    namespace: "siteStripeCheckoutConfigs",
+    method: "del",
+    httpMethod: "DELETE",
+    path: "/v1/sites/{site}/stripe_checkout_configs/{stripe_checkout_config}",
+    pathParams: ["site","stripe_checkout_config"],
+    queryParams: [],
+    body: false,
+    idempotent: false,
+    auth: true,
+    scope: "test_runs:write",
+    response: "json",
+    list: false,
+    paginated: false,
+    summary: "Delete a registered checkout config (site path)",
+  },
   createTestRun: {
     operationId: "createTestRun",
     namespace: "testRuns",
@@ -1645,7 +1662,7 @@ export const OPERATIONS = {
     httpMethod: "GET",
     path: "/v1/test_runs/{test_run}",
     pathParams: ["test_run"],
-    queryParams: [],
+    queryParams: ["wait"],
     body: false,
     idempotent: false,
     auth: true,
@@ -1900,7 +1917,7 @@ export interface OperationTypes {
   retrieveCompliancePlan: { args: { site: string }; response: T.CompliancePlan };
   retrieveTask: { args: { task: string }; response: T.Task };
   updateTask: { args: { task: string } & T.UpdateTaskParams; response: T.Task };
-  answerTask: { args: { task: string } & T.AnswerTaskParams; response: T.Task };
+  answerTask: { args: { task: string } & T.AnswerTaskParams; response: T.AnsweredTask };
   verifyTask: { args: { task: string } & T.VerifyTaskRequestParams; response: T.Verification };
   verifySite: { args: { site: string } & T.VerifySiteParams; response: T.Verification };
   retrieveVerification: { args: { verification: string } & T.RetrieveVerificationParams; response: T.Verification };
@@ -1960,9 +1977,10 @@ export interface OperationTypes {
   listStripeCheckoutConfigs: { args: { site: string } & T.ListStripeCheckoutConfigsParams; response: T.StripeCheckoutConfigList };
   retrieveStripeCheckoutConfig: { args: { stripe_checkout_config: string }; response: T.StripeCheckoutConfig };
   deleteStripeCheckoutConfig: { args: { stripe_checkout_config: string }; response: T.DeletedStripeCheckoutConfig };
+  deleteSiteStripeCheckoutConfig: { args: { site: string; stripe_checkout_config: string }; response: T.DeletedStripeCheckoutConfig };
   createTestRun: { args: { site: string } & T.CreateTestRunParams; response: T.TestRun };
   listTestRuns: { args: { site: string } & T.ListTestRunsParams; response: T.TestRunList };
-  retrieveTestRun: { args: { test_run: string }; response: T.TestRun };
+  retrieveTestRun: { args: { test_run: string } & T.RetrieveTestRunParams; response: T.TestRun };
   cancelTestRun: { args: { test_run: string }; response: T.TestRun };
   createWebhookEndpoint: { args: T.CreateWebhookEndpointParams; response: T.WebhookEndpoint };
   listWebhookEndpoints: { args: T.ListWebhookEndpointsParams; response: T.WebhookEndpointList };
@@ -2355,7 +2373,7 @@ export class FindingsResource extends Resource {
   /**
    * List findings.
    *
-   * Findings ordered by urgency (failing first, then by severity). Filter by site, status (fail, needs_review, pass, not_applicable) and state (open, acknowledged, resolved, accepted_risk). Fix the open `fail` findings to become compliant.
+   * Findings ordered by urgency (failing first, then by severity). Filter by site, status (fail, needs_review, pass, not_applicable) and state (open, acknowledged, resolved, accepted_risk). Fix the open `fail` findings so the checks pass.
    *
    * @see GET /v1/findings (operation `listFindings`, scope `findings:read`)
    */
@@ -2394,7 +2412,7 @@ export class PlansResource extends Resource {
   /**
    * Get the compliance plan for a site.
    *
-   * Ordered tasks that make the site compliant, recomputed from its latest evaluation: each with the requirement and citation, where to change (file / URL / selector / Stripe object), the exact change (unified-diff template with machine-applicable edits, copy, or Stripe params) and how to verify it. Do plan.next_action: apply the first open task, call verifyTask, repeat until status is compliant. Tasks with status manual hold a question for the human (answerTask); they never block the others.
+   * Ordered tasks that make the site's checks pass, recomputed from its latest evaluation: each with the requirement and citation, where to change (file / URL / selector / Stripe object), the exact change (unified-diff template with machine-applicable edits, copy, or Stripe params) and how to verify it. Do plan.next_action: apply the first open task, call verifyTask, and repeat until the checks pass (status value compliant; status_label "Checks pass"). Tasks with status manual hold a question for the human (answerTask); they never block the others.
    *
    * @param site Unique identifier of the site (site_…).
    * @see GET /v1/sites/{site}/plan (operation `retrieveCompliancePlan`, scope `compliance_plans:read`)
@@ -2439,8 +2457,8 @@ export class TasksResource extends Resource {
    * @param task Unique identifier of the task (task_…).
    * @see POST /v1/tasks/{task}/answer (operation `answerTask`, scope `compliance_plans:write`)
    */
-  answer(task: string, params: T.AnswerTaskParams, options?: RequestOptions): Promise<T.Task> {
-    return this._request(OPERATIONS.answerTask, [task], params, options) as Promise<T.Task>;
+  answer(task: string, params: T.AnswerTaskParams, options?: RequestOptions): Promise<T.AnsweredTask> {
+    return this._request(OPERATIONS.answerTask, [task], params, options) as Promise<T.AnsweredTask>;
   }
 
   /**
@@ -2462,7 +2480,7 @@ export class VerificationsResource extends Resource {
   /**
    * Get a verification (long-poll with ?wait=30).
    *
-   * The verification's status (pending, passed, failed), expected vs observed per check, the diff and next_action. ?wait=N (≤ 30) holds the request until it resolves or N seconds pass.
+   * The verification's status (pending, passed, failed), expected vs observed per check, the diff and next_action. Also takes a task id (task_…): the newest verification of that task. ?wait=N (≤ 30) holds the request until it resolves or N seconds pass.
    *
    * @param verification Unique identifier of the verification (ver_…).
    * @see GET /v1/verifications/{verification} (operation `retrieveVerification`, scope `compliance_plans:read`)
@@ -2644,7 +2662,7 @@ export class NoticeSettingsResource extends Resource {
   /**
    * Update notice settings.
    *
-   * Chooses who sends the required emails (mode: merchant = you send them and Checkbox tracks them, the default; checkbox = Checkbox sends them), and sets branding, cancel_url and the confirmed cancellation policy. In checkbox mode, turning a notice on (enabled_kinds) requires cancel_url, a confirmed policy, a connected Stripe, Recharge, Chargebee, Recurly or Paddle account and a sending address; otherwise resource_conflict explains what is missing.
+   * Chooses who sends the required emails (mode: merchant = you send them and Checkbox tracks them, the default; checkbox = Checkbox sends them), and sets branding, cancel_url and the confirmed cancellation policy. add_kinds / remove_kinds turn single notices on or off and leave the others as they are; enabled_kinds replaces the whole list. In checkbox mode, turning a notice on requires cancel_url, a confirmed policy, a connected Stripe, Recharge, Chargebee, Recurly or Paddle account and a sending address; otherwise resource_conflict explains what is missing.
    *
    * @param site Unique identifier of the site (site_…).
    * @see POST /v1/sites/{site}/notice_settings (operation `updateNoticeSettings`, scope `notices:write`, live mode needs an activated account)
@@ -2760,7 +2778,7 @@ export class ChecksResource extends Resource {
   /**
    * Check checkout disclosure text.
    *
-   * Checks the automatic-renewal disclosure you are about to show next to a subscribe button: what it says (renewal until canceled, price, frequency, trial, term, how to cancel), where it sits (above the button, same page) and how it looks (size, contrast, set off), and the consent checkbox (present, not pre-checked). Returns the verdict per check and per legal requirement, plus `replacement`: compliant text and drop-in HTML (and the same markup as JSX for React) generated from your price/interval/trial/cancel_url and verified by the engine. Call it whenever you write or change checkout copy. Stateless and deterministic: nothing is stored, the same input on the same as_of date gives the same verdicts. Every verdict comes from the Checkbox rules engine over the legal catalog (federal ROSCA / EFTA plus the state automatic-renewal laws); the response carries rules_version, catalog_version and a disclaimer (not legal advice). Read `verdict`, then `next_action`: it tells you exactly what to change and to call the check again until verdict is pass.
+   * Checks the automatic-renewal disclosure you are about to show next to a subscribe button: what it says (renewal until canceled, price, frequency, trial, term, how to cancel), where it sits (above the button, same page) and how it looks (size, contrast, set off), and the consent checkbox (present, not pre-checked). Returns the verdict per check and per legal requirement, plus `replacement`: suggested text that passes the checks and drop-in HTML (and the same markup as JSX for React) generated from your price/interval/trial/cancel_url and verified by the engine. Call it whenever you write or change checkout copy. Stateless and deterministic: nothing is stored, the same input on the same as_of date gives the same verdicts. Every verdict comes from the Checkbox rules engine over the legal catalog (federal ROSCA / EFTA plus the state automatic-renewal laws); the response carries rules_version, catalog_version and a disclaimer (not legal advice). Read `verdict`, then `next_action`: it tells you exactly what to change and to call the check again until verdict is pass.
    *
    * @see POST /v1/checks/disclosure (operation `checkDisclosure`, scope `checks:read`)
    */
@@ -2793,7 +2811,7 @@ export class ChecksResource extends Resource {
   /**
    * Check a subscription lifecycle email.
    *
-   * Checks the content of an acknowledgment (welcome) email, trial-ending reminder, renewal reminder, price-change notice, yearly terms reminder or cancellation confirmation against the requirements for that notice (renewal terms, amount, frequency, how to cancel, trial cancellation). The email is modelled as sent on time, so the verdict is about content; get send dates from checkNoticeSchedule. Returns `required_by` (requirements that make the email mandatory for this plan) and a compliant `template` with {{merge_tags}}, verified by the engine. Stateless and deterministic: nothing is stored, the same input on the same as_of date gives the same verdicts. Every verdict comes from the Checkbox rules engine over the legal catalog (federal ROSCA / EFTA plus the state automatic-renewal laws); the response carries rules_version, catalog_version and a disclaimer (not legal advice). Read `verdict`, then `next_action`: it tells you exactly what to change and to call the check again until verdict is pass.
+   * Checks the content of an acknowledgment (welcome) email, trial-ending reminder, renewal reminder, price-change notice, yearly terms reminder or cancellation confirmation against the requirements for that notice (renewal terms, amount, frequency, how to cancel, trial cancellation). The email is modelled as sent on time, so the verdict is about content; get send dates from checkNoticeSchedule. Prices are judged against what Stripe charges: with `site` (or, without it, the account's one site with Stripe connected) the plan fields come from the site's plans and the email is matched to the plan it names ("Annual") first; a price that contradicts it fails, and `warnings` say which site and plan were used. Returns `required_by` (requirements that make the email mandatory for this plan) and a `template` that passes the checks, with {{merge_tags}}, verified by the engine. Stateless and deterministic: nothing is stored, the same input on the same as_of date gives the same verdicts. Every verdict comes from the Checkbox rules engine over the legal catalog (federal ROSCA / EFTA plus the state automatic-renewal laws); the response carries rules_version, catalog_version and a disclaimer (not legal advice). Read `verdict`, then `next_action`: it tells you exactly what to change and to call the check again until verdict is pass.
    *
    * @see POST /v1/checks/email (operation `checkEmail`, scope `checks:read`)
    */
@@ -2815,11 +2833,11 @@ export class ChecksResource extends Resource {
   /**
    * Get the dates each required notice must be sent.
    *
-   * For a subscription plan (price, interval, trial) and where you sell, returns every legally required notice — acknowledgment, trial-ending reminder, renewal reminders, yearly terms reminder, price-change notice — with the recommended send time and the compliant window (opens / closes), the jurisdictions each send satisfies and the citations. Uses the same timing as Checkbox Notices: per-state windows intersected, or the fewest sends that cover conflicting windows. Stateless. Check each email's content with checkEmail, or let Checkbox Notices send them.
+   * For a subscription plan (price, interval, trial) and where you sell, returns every legally required notice — acknowledgment, trial-ending reminder, renewal reminders, yearly terms reminder, price-change notice — with the recommended send time and the allowed send window (opens / closes), the jurisdictions each send satisfies and the citations. Uses the same timing as Checkbox Notices: per-state windows intersected, or the fewest sends that cover conflicting windows. Stateless. Check each email's content with checkEmail, or let Checkbox Notices send them.
    *
    * @see POST /v1/checks/notice_schedule (operation `checkNoticeSchedule`, scope `checks:read`)
    */
-  noticeSchedule(params: T.NoticeScheduleParams, options?: RequestOptions): Promise<T.NoticeScheduleResult> {
+  noticeSchedule(params?: T.NoticeScheduleParams, options?: RequestOptions): Promise<T.NoticeScheduleResult> {
     return this._request(OPERATIONS.checkNoticeSchedule, [], params, options) as Promise<T.NoticeScheduleResult>;
   }
 
@@ -3143,7 +3161,7 @@ export class StripeCheckoutConfigsResource extends Resource {
   /**
    * Register the Checkout Session params your code uses.
    *
-   * Registers exactly the object your code passes to stripe.checkout.sessions.create (customer, URLs and secrets are not needed and are ignored). Test runs mirror it into Stripe test mode; when it matches your latest live checkout, the scanned test page counts as an observation of your live checkout. Re-register after changing your checkout code, then call createTestRun.
+   * Registers exactly the object your code passes to stripe.checkout.sessions.create (customer, URLs and secrets are not needed and are ignored; `warnings` says what was not stored). It is judged exactly like checkStripeCheckoutSession, discounts included. A config with the same name, or for the same Price ids, replaces the older one (`replaced`). Test runs mirror it into Stripe test mode; when it matches your latest live checkout, the scanned test page counts as an observation of your live checkout. Re-register after changing your checkout code, then call createTestRun.
    *
    * @param site Unique identifier of the site (site_…).
    * @see POST /v1/sites/{site}/stripe_checkout_configs (operation `createStripeCheckoutConfig`, scope `test_runs:write`)
@@ -3194,12 +3212,33 @@ export class StripeCheckoutConfigsResource extends Resource {
 
 }
 
+/** `checkbox.siteStripeCheckoutConfigs` */
+export class SiteStripeCheckoutConfigsResource extends Resource {
+  /**
+   * Delete a registered checkout config (site path).
+   *
+   * The same as deleteStripeCheckoutConfig, under the site path where configs are created and listed.
+   *
+   * @param site Unique identifier of the site (site_…).
+   * @param stripeCheckoutConfig Unique identifier of the stripe checkout config (scc_…).
+   * @see DELETE /v1/sites/{site}/stripe_checkout_configs/{stripe_checkout_config} (operation `deleteSiteStripeCheckoutConfig`, scope `test_runs:write`)
+   */
+  del(site: string, stripeCheckoutConfig: string, options?: RequestOptions): Promise<T.DeletedStripeCheckoutConfig> {
+    return this._request(OPERATIONS.deleteSiteStripeCheckoutConfig, [site, stripeCheckoutConfig], undefined, options) as Promise<T.DeletedStripeCheckoutConfig>;
+  }
+  /** Alias of `del()`. */
+  delete(site: string, stripeCheckoutConfig: string, options?: RequestOptions): Promise<T.DeletedStripeCheckoutConfig> {
+    return this.del(site, stripeCheckoutConfig, options);
+  }
+
+}
+
 /** `checkbox.testRuns` */
 export class TestRunsResource extends Resource {
   /**
    * Start a lifecycle test run.
    *
-   * Starts a synthetic test subscription in TEST mode and returns it queued. Stripe runs mirror your checkout into a test-mode Checkout Session, subscribe a test customer (card 4242) whose email is a Checkbox inbox, wait for your acknowledgment, advance a test clock through every legal notice window before trial end and renewal, cancel online in the customer portal and wait for the confirmation; then delete the test clock. Takes about 5-20 minutes: poll retrieveTestRun (next_action says when) or listen for test_run.completed. Each step reports observations, check results and agent-readable fixes; apply them and run again to verify.
+   * Starts a synthetic test subscription in TEST mode and returns it queued. Stripe runs mirror your checkout into a test-mode Checkout Session, subscribe a test customer (card 4242) whose email is a Checkbox inbox, wait for your acknowledgment, advance a test clock through every legal notice window before trial end and renewal, cancel online in the customer portal and wait for the confirmation; then delete the test clock. Usually takes 2-4 minutes (longer when your own emails are slow to arrive): poll retrieveTestRun (next_action says when) or listen for test_run.completed. Each step reports observations, check results and agent-readable fixes; apply them and run again to verify.
    *
    * @param site Unique identifier of the site (site_…).
    * @see POST /v1/sites/{site}/test_runs (operation `createTestRun`, scope `test_runs:write`, live mode needs an activated account)
@@ -3223,13 +3262,13 @@ export class TestRunsResource extends Resource {
   /**
    * Retrieve a test run.
    *
-   * The run with every step's status, observations, check results and fixes. While it runs, next_action.type is "wait"; when it finished, next_action says what to fix (apply_fixes / review_warnings) or "none".
+   * The run with every step's status, observations, check results and fixes. While it runs, next_action.type is "wait" and waiting_for says what it waits for; ?wait=30 answers as soon as the run moves on (or after 30 seconds). When it finished, next_action says what to fix (apply_fixes / review_warnings), retrieve_plan when the only warnings have nothing to change, or "none".
    *
    * @param testRun Unique identifier of the test run (run_…).
    * @see GET /v1/test_runs/{test_run} (operation `retrieveTestRun`, scope `test_runs:read`)
    */
-  retrieve(testRun: string, options?: RequestOptions): Promise<T.TestRun> {
-    return this._request(OPERATIONS.retrieveTestRun, [testRun], undefined, options) as Promise<T.TestRun>;
+  retrieve(testRun: string, params?: T.RetrieveTestRunParams, options?: RequestOptions): Promise<T.TestRun> {
+    return this._request(OPERATIONS.retrieveTestRun, [testRun], params, options) as Promise<T.TestRun>;
   }
 
   /**
@@ -3371,7 +3410,7 @@ export class ReviewPromptsResource extends Resource {
   /**
    * Claim the one-time review prompt for a site.
    *
-   * The MCP tools call this when a site's compliance plan reaches compliant (including "Compliant · N live checks pending"). show is true exactly once per site: the agent then asks the human once whether they want to send a quick review of Checkbox (createFeedback with type review), and sends it only on a yes, after showing the text. Never send a review without the human's yes.
+   * The MCP tools call this when a site's compliance plan reaches status compliant, i.e. checks pass (including "Checks pass · N live checks pending"). show is true exactly once per site: the agent then asks the human once whether they want to send a quick review of Checkbox (createFeedback with type review), and sends it only on a yes, after showing the text. Never send a review without the human's yes.
    *
    * @param site Unique identifier of the site (site_…).
    * @see POST /v1/sites/{site}/review_prompt (operation `claimReviewPrompt`, scope `compliance_plans:read`)
@@ -3412,6 +3451,7 @@ export const RESOURCES = {
   receiptSettings: ReceiptSettingsResource,
   testCredentials: TestCredentialsResource,
   stripeCheckoutConfigs: StripeCheckoutConfigsResource,
+  siteStripeCheckoutConfigs: SiteStripeCheckoutConfigsResource,
   testRuns: TestRunsResource,
   webhookEndpoints: WebhookEndpointsResource,
   events: EventsResource,

@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 # Published to PyPI as checkbox-site ("checkbox" and "checkbox-sdk" belong to unrelated projects); the import name is `checkbox`.
 name = "checkbox-site"
-version = "0.1.1"
+version = "0.2.0"
 description = "Checkbox: automatic-renewal-law compliance (ROSCA, California ARL, New York and other state laws) for subscription businesses. Official Python SDK."
 readme = "README.md"
 requires-python = ">=3.10"

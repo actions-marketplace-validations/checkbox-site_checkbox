@@ -102,8 +102,8 @@ export function untrusted(value: unknown, max = 80): string {
 }
 
 /**
- * Audit P1: the `checkbox` CLI is not on npm yet. While this is false, MCP output never shows `command` fields or a
- * "CLI equivalent"; flip it once the CLI is published.
+ * Whether the `checkbox` CLI (@checkbox-site/cli) is on npm. While this is false, MCP output never shows `command`
+ * fields or a "CLI equivalent". It is published.
  */
 export const CLI_PUBLISHED = true;
 
@@ -142,6 +142,9 @@ const OP_RE = new RegExp(`\\b(${[...Object.keys(OPERATION_TOOLS), ...Object.keys
 export function mcpText(text: string): string {
   let s = text.replace(/(?:POST )?\/v1\/checks\/(disclosure|stripe_checkout_session|stripe_payment_link|email|page|notice_schedule)\b/g, (_m, k: string) => CHECK_PATH_TOOLS[k]!);
   s = s.replace(OP_RE, (op: string) => {
+    // Round 16 (pilot 15, sveltekit): "verifySetupSession" became plain get_setup_status, which only reads the checklist,
+    // so the agent looped on "Snippet installed: pending". The re-check is get_setup_status with verify=true.
+    if (op === 'verifySetupSession') return 'get_setup_status (verify=true)';
     const tool = OPERATION_TOOLS[op];
     if (tool) return tool;
     const endpoint = OPERATION_ENDPOINTS[op];
@@ -161,6 +164,8 @@ export function mcpText(text: string): string {
 }
 
 const TEXT_KEYS = new Set(['message', 'description', 'summary', 'fix', 'note', 'how', 'detail', 'headline']);
+/** Round 21 (pilot 20 item 16): lists of agent-facing sentences the API writes with operation names (REST words). */
+const TEXT_LIST_KEYS = new Set(['plan_terms_conflicts', 'notes', 'steps']);
 
 /** Rewrites agent-facing strings in an API object for MCP (mcpText), and drops `command` while the CLI is unpublished. */
 export function forMcp(value: unknown, depth = 0): unknown {
@@ -169,7 +174,12 @@ export function forMcp(value: unknown, depth = 0): unknown {
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
     if (k === 'command' && !CLI_PUBLISHED && (v === null || typeof v === 'string')) continue;
-    out[k] = typeof v === 'string' && TEXT_KEYS.has(k) ? mcpText(v) : forMcp(v, depth + 1);
+    out[k] =
+      typeof v === 'string' && TEXT_KEYS.has(k)
+        ? mcpText(v)
+        : Array.isArray(v) && TEXT_LIST_KEYS.has(k)
+          ? v.map((x) => (typeof x === 'string' ? mcpText(x) : forMcp(x, depth + 1)))
+          : forMcp(v, depth + 1);
   }
   return out;
 }
@@ -178,6 +188,7 @@ export function forMcp(value: unknown, depth = 0): unknown {
 function argHint(tool: string, next: NextAction, ctx: { data?: unknown }): string {
   const d = (ctx.data ?? {}) as { object?: unknown; id?: unknown };
   if (tool === 'get_verification') return d.object === 'verification' && typeof d.id === 'string' ? ` (verification: ${d.id})` : '';
+  if (tool === 'get_setup_status' && next.operation_id === 'verifySetupSession') return ' (verify: true)';
   const task = next.task ?? /\/v1\/tasks\/(task_[A-Za-z0-9]+)/.exec(next.endpoint ?? '')?.[1];
   return task && ['get_task', 'verify_task', 'answer_task'].includes(tool) ? ` (task: ${task})` : '';
 }

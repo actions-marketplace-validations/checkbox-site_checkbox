@@ -13,7 +13,7 @@ import uuid
 from typing import Any, Callable, Dict, Mapping, Optional, Tuple
 
 from . import webhook as _webhook
-from ._resource import CheckboxFile, CheckboxObject, ListObject, RequestOptions, ResponseMeta
+from ._resource import CheckboxFile, CheckboxObject, ListObject, RequestOptions, ResponseMeta, to_plain
 from ._resources import OPERATIONS, RESOURCES, ResourceNamespaces
 from ._version import VERSION
 from .errors import APIConnectionError, AuthenticationError, CheckboxError, InvalidRequestError, error_from_response
@@ -210,7 +210,7 @@ class Checkbox(ResourceNamespaces):
         data: Optional[bytes] = None
         idempotency_key: Optional[str] = None
         if op["http_method"] == "POST":
-            data = json.dumps(body).encode("utf-8")
+            data = json.dumps(to_plain(body)).encode("utf-8")
             headers["Content-Type"] = "application/json"
             if op["idempotent"] or options.get("idempotency_key"):
                 idempotency_key = options.get("idempotency_key") or f"sdk_{uuid.uuid4()}"

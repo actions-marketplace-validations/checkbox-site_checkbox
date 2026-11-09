@@ -14,7 +14,7 @@ export async function handleEvent(event: WebhookEvent): Promise<string> {
     case 'plan.updated':
       return `Compliance plan for ${event.data?.object.site} is now ${event.data?.object.status}`;
     case 'site.compliant':
-      return 'Site is compliant';
+      return 'Site checks pass';
     case 'test_run.completed':
     case 'test_run.failed':
       return `Test subscription ${event.type.split('.')[1]}`;

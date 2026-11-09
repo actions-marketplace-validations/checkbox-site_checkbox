@@ -31,7 +31,7 @@ export async function usage(): Promise<void> {
     await checkbox.certificates.create(site.id);
   } catch (err) {
     if (!(err instanceof CheckboxError)) throw err;
-    // resource_conflict: not eligible yet (verify the domain, stay compliant for 7 days);
+    // resource_conflict: not eligible yet (verify the domain, keep the checks passing for 7 days);
     // account_not_activated: a live key before any domain is verified.
     console.log(err.code, err.message, err.nextAction);
   }

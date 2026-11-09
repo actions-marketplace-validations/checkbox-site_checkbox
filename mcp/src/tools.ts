@@ -1,6 +1,7 @@
 // The Checkbox MCP tools. Names are stable snake_case; descriptions are written for an LLM (when to use, what to pass,
 // what the output means, what to do next). Every tool is a thin call (or two) to the public /v1 API, so scopes,
 // test/live isolation and validation are exactly the API's.
+import { nestedUnknownMessage, unknownArgumentsMessage, unknownKeysParams } from './unknown-args.ts';
 import { z, type ZodRawShape } from 'zod';
 import type { ToolAnnotations } from '@modelcontextprotocol/sdk/types.js';
 import { planTodo, todoLine, type TodoTaskLike } from './todo.ts';
@@ -43,6 +44,8 @@ export interface ToolDef {
   /** Listed even without a key (setup). */
   public?: boolean;
   annotations: ToolAnnotations;
+  /** Unknown fields reach run() instead of being dropped by the schema (round 12: setup tools warn about them). */
+  passthrough?: boolean;
   run(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolOutput>;
 }
 
@@ -83,21 +86,38 @@ const emailKind = z.enum(EMAIL_KINDS);
 export const checkKind = (k: unknown) => (k === 'trial_ending' ? 'trial_reminder' : k);
 /** The Notices API name (trial_ending). */
 export const noticeKind = (k: unknown) => (k === 'trial_reminder' ? 'trial_ending' : k);
-const intervalStr = z.string().max(20).describe('Billing interval: "day", "week", "month" or "year".');
+const intervalStr = z.string().max(20).describe('Billing interval: day, week, month or year.');
 
 const planTermsShape = {
   merchant_name: z.string().max(200).optional().describe('Brand shown to subscribers, e.g. "Acme".'),
+  brand_name: z.string().max(200).optional().describe('Alias of merchant_name.'),
   plan_name: z.string().max(200).optional().describe('Plan / product name, e.g. "Pro".'),
-  price: z.union([z.number().positive(), z.string().max(40)]).optional().describe('Recurring price in MAJOR units, e.g. 19.99. Or give amount.'),
-  amount: z.number().int().positive().optional().describe('Recurring price in MINOR units, Stripe style: 1999 = $19.99.'),
+  price: z.union([z.number().positive(), z.string().max(40)]).optional().describe('Recurring price, major units (19.99).'),
+  amount: z.number().int().positive().optional().describe('Or minor units (1999 = $19.99).'),
   currency: z.string().length(3).optional().describe('ISO currency, default "usd".'),
   interval: intervalStr.optional(),
-  interval_count: z.number().int().min(1).max(36).optional().describe('Intervals between charges (default 1; 3 + month = quarterly).'),
+  interval_count: z.number().int().min(1).max(36).optional().describe('Default 1; 3 + month = quarterly.'),
   trial_days: z.number().int().min(0).max(730).optional().describe('Free-trial days (0 or absent = no trial).'),
-  cancel_url: z.string().max(2048).optional().describe('https URL where subscribers cancel online. Strongly recommended: generated text uses it.'),
+  // Pilot round 12 (change-guard): no way to describe a promo, so "$5 first month (50% off)" passed against a 20% coupon.
+  // The API also takes intro_amount / intro_amount_off (minor units); kept out here for the tool list's size.
+  intro_price: z.number().positive().optional().describe('Promo first-period price, major units ($8 → 8).'),
+  intro_percent_off: z.number().gt(0).lt(100).optional().describe('Or the promo as % off (coupon percent_off).'),
+  intro_periods: z.number().int().min(1).max(36).optional().describe('Billing periods the promo lasts (default 1).'),
+  cancel_url: z.string().max(2048).optional().describe('https URL where subscribers cancel online (used in generated text).'),
   cancel_timing: z.enum(['period_end', 'immediately']).optional().describe('When a cancellation takes effect (default period_end).'),
 };
-const planTerms = z.object(planTermsShape);
+/**
+ * Pilot round 13 (sveltekit, change-guard, api-only): nested objects were not strict, so plans[].price_cents, a bogus
+ * key or merchant.name were dropped with no word. Nested objects now refuse unknown keys with the closest known one.
+ */
+export function strictObject<T extends z.ZodRawShape>(shape: T, where: string, hints: Readonly<Record<string, string>> = {}) {
+  const known = Object.keys(shape);
+  return z
+    .object(shape, unknownKeysParams((keys) => nestedUnknownMessage(where, keys, known, hints)))
+    .strict();
+}
+const planTerms = strictObject(planTermsShape, 'terms');
+const merchantTerms = strictObject(planTermsShape, 'merchant');
 
 // Values above 30 are clamped to 30 instead of rejected (pilot: wait=60 was a raw -32602 validation error).
 const wait = z
@@ -110,34 +130,58 @@ const wait = z
 const listLimit = z.number().int().min(1).max(100).optional().describe('How many to return (1-100, default 10).');
 const startingAfter = z.string().max(100).optional().describe('Pagination cursor: the last id of the previous page (when has_more was true).');
 
+/** Plan fields agents reach for, mapped to the setup field (plans[] amounts are minor units). */
+const PLAN_FIELD_HINTS: Readonly<Record<string, string>> = Object.freeze({
+  price: 'amount (minor units: 800 = $8.00)',
+  price_cents: 'amount (minor units: 800 = $8.00)',
+  amount_cents: 'amount',
+  unit_amount: 'amount',
+  trial_period_days: 'trial_days',
+  billing_interval: 'interval',
+  plan_name: 'name',
+  stripe_price: 'price_id',
+  intro_price: 'intro_amount (minor units)',
+  cancel_url: 'account_url (a site field, not a plan field)',
+});
+
 const setupFactsShape = {
   site_url: z.string().max(2048).optional().describe('Public URL of the site (production, or a preview deployment), e.g. "https://acme.example".'),
   checkout_url: z.string().max(2048).optional().describe('Page where customers subscribe (pricing or checkout page).'),
-  account_url: z.string().max(2048).optional().describe('Account page where subscribers manage / cancel.'),
-  terms_url: z.string().max(2048).optional().describe('Terms of service URL. Checkbox fetches and checks it.'),
-  privacy_url: z.string().max(2048).optional().describe('Privacy policy URL.'),
-  refund_url: z.string().max(2048).optional().describe('Refund policy URL.'),
-  cancellation_url: z.string().max(2048).optional().describe('Cancellation policy URL, if separate from the Terms.'),
+  account_url: z.string().max(2048).nullable().optional().describe('Account page where subscribers manage / cancel (null clears a URL).'),
+  terms_url: z.string().max(2048).nullable().optional().describe('Terms of service URL. Checkbox fetches and checks it.'),
+  privacy_url: z.string().max(2048).nullable().optional().describe('Privacy policy URL.'),
+  refund_url: z.string().max(2048).nullable().optional().describe('Refund policy URL.'),
+  cancellation_url: z.string().max(2048).nullable().optional().describe('Cancellation policy URL, if separate from the Terms.'),
   support_email: z.string().max(320).optional().describe('Support address subscribers can write to.'),
-  merchant_name: z.string().max(100).optional().describe('The brand subscribers know (names the seller in generated disclosures), e.g. from the <title> or package.json. Default: the host name, which the plan then asks you to replace.'),
+  merchant_name: z.string().max(100).optional().describe('The brand subscribers know (names the seller in generated disclosures), e.g. from the <title> or package.json (also accepted as "brand"). Default: the host name, which the plan then asks you to replace.'),
   billing_platform: z
     .enum(['stripe', 'shopify', 'recharge', 'chargebee', 'recurly', 'paddle', 'woocommerce', 'custom'])
     .optional()
     .describe('Billing platform the code uses.'),
   plans: z
     .array(
-      z.object({
-        name: z.string().max(200).optional(),
-        amount: z.number().int().min(0).optional().describe('Minor units (1900 = $19).'),
-        currency: z.string().length(3).optional(),
-        interval: z.enum(['day', 'week', 'month', 'year']).optional(),
-        interval_count: z.number().int().min(1).max(36).optional(),
-        trial_days: z.number().int().min(0).max(730).optional(),
-      }),
+      strictObject(
+        {
+          name: z.string().max(200).optional(),
+          amount: z.number().int().min(0).optional().describe('Minor units (1900 = $19).'),
+          currency: z.string().length(3).optional(),
+          interval: z.enum(['day', 'week', 'month', 'year']).optional(),
+          interval_count: z.number().int().min(1).max(36).optional(),
+          trial_days: z.number().int().min(0).max(730).optional(),
+          // Pilot round 13 (change-guard): intro / promo terms had nowhere to live, so the generated copy dropped them.
+          intro_amount: z.number().int().min(0).optional().describe('Promo first-period price, minor units.'),
+          intro_percent_off: z.number().gt(0).lt(100).optional(),
+          intro_amount_off: z.number().int().positive().optional(),
+          intro_periods: z.number().int().min(1).max(36).optional(),
+          price_id: z.string().max(200).optional().describe('Stripe Price id.'),
+        },
+        'plans[]',
+        PLAN_FIELD_HINTS,
+      ),
     )
     .max(50)
     .optional()
-    .describe('Plans and prices found in the code, e.g. [{"name":"Pro","amount":1900,"currency":"usd","interval":"month","trial_days":14}]. They decide which laws apply (trials, annual terms).'),
+    .describe('Plans and prices found in the code, e.g. [{"name":"Pro","amount":1900,"currency":"usd","interval":"month","trial_days":14}]; a promo adds intro_percent_off and intro_periods. They decide which laws apply and what generated copy states.'),
   project: z
     .object({
       name: z.string().max(200).optional().describe('package.json name.'),
@@ -244,21 +288,28 @@ interface CheckSummary {
 }
 
 /**
- * One bullet per check that needs something from the human, in the user-facing labels (status.ts): NEEDS A FIX with the
+ * One bullet per check that needs something from the human, in the user-facing labels (status.ts): FIX NEEDED with the
  * one change, YOUR CALL with the question and the recommended answer, LIVE CHECK PENDING with how it completes. The
  * texts are Checkbox's own wording (never quoted from the checked page / email).
+ *
+ * Pilot round 12 (change-guard): the bullet said "NEEDS A FIX" / "LOOKS COMPLIANT" while the JSON said needs_review.
+ * Each bullet now carries the JSON status in brackets and its label never says more than the status does: a fix
+ * Checkbox could not confirm (needs_review) is YOUR CALL, and a note is CHECKS PASS (on a pass) or NOTE (needs_review).
+ * Round 16 (item 21, change-guard: the headline said "1 fix needed" over a "YOUR CALL" bullet): the bullet uses the
+ * roll-up's own word. A check the roll-up counts as a fix is FIX NEEDED; the bracket still says when it is needs_review.
  */
 export function complianceBullet(checkId: string, c: ComplianceWire | undefined, fallbackStatus: string, title: string): string | null {
-  if (!c) return fallbackStatus === 'fail' || fallbackStatus === 'needs_review' ? `${fallbackStatus === 'fail' ? 'FAIL' : 'REVIEW'} ${checkId}: ${title}` : null;
+  const st = ['pass', 'fail', 'needs_review', 'not_applicable'].includes(fallbackStatus) ? ` [${fallbackStatus}]` : '';
+  if (!c) return fallbackStatus === 'fail' || fallbackStatus === 'needs_review' ? `${fallbackStatus === 'fail' ? 'FIX NEEDED' : 'YOUR CALL'} ${checkId}${st}: ${title}` : null;
   switch (c.status) {
     case 'needs_fix':
-      return `NEEDS A FIX ${checkId}: ${c.fix ?? title}`;
+      return fallbackStatus === 'needs_review' ? `FIX NEEDED ${checkId}${st}: Checkbox could not confirm this is met; the fix: ${c.fix ?? title}` : `FIX NEEDED ${checkId}${st}: ${c.fix ?? title}`;
     case 'your_call':
-      return `YOUR CALL ${checkId}: ${c.question?.text ?? title}${c.question?.recommended ? ` Recommended: ${c.question.recommended}` : ''}`;
+      return `YOUR CALL ${checkId}${st}: ${c.question?.text ?? title}${c.question?.recommended ? ` Recommended: ${c.question.recommended}` : ''}`;
     case 'pending_live_check':
-      return `LIVE CHECK PENDING ${checkId}: ${c.pending_live_check ? `${c.pending_live_check.what} — ${c.pending_live_check.completes}` : title} (counts as compliant)`;
+      return `LIVE CHECK PENDING ${checkId}${st}: ${c.pending_live_check ? `${c.pending_live_check.what} — ${c.pending_live_check.completes}` : title} (counts as passing the checks)`;
     case 'compliant':
-      return c.note ? `LOOKS COMPLIANT ${checkId}: ${c.note}` : null;
+      return c.note ? `${fallbackStatus === 'needs_review' ? 'NOTE' : 'CHECKS PASS'} ${checkId}${st}: ${c.note}` : null;
     default:
       return null;
   }
@@ -272,7 +323,7 @@ function checkNotes(r: CheckSummary, max = 8, covered?: { by: string; except?: r
   const coveredBy = (c: (typeof r.checks)[number]) => !!covered && c.compliance?.status === 'needs_fix' && !(covered.except ?? []).includes(c.check_id);
   const lines = r.checks
     .map((c) => {
-      const line = coveredBy(c) ? `NEEDS A FIX ${c.check_id}: fixed by ${covered!.by}` : complianceBullet(c.check_id, c.compliance, c.status, c.title);
+      const line = coveredBy(c) ? `FIX NEEDED ${c.check_id} [${c.status}]: fixed by ${covered!.by}` : complianceBullet(c.check_id, c.compliance, c.status, c.title);
       const cite = c.requirements?.[0]?.citation;
       return { c, line: line && cite && c.compliance_status !== 'compliant' ? `${line} [${cite}]` : line, r: rank[c.compliance_status ?? (c.status === 'fail' ? 'needs_fix' : 'your_call')] ?? 9 };
     })
@@ -334,6 +385,12 @@ const verdictHeadline = (what: string, r: CheckSummary) => {
   if (r.verdict === 'not_applicable') return `${what}: Not required for this plan.`;
   const label = r.compliance ? plainLabel(r.compliance.label) : statusLine(r.verdict);
   // One counting system per headline: the task-based status label only (the per-check counts stay in data.summary).
+  // Pilot round 12: "Checks pass" next to verdict needs_review read as a contradiction; the headline names the verdict
+  // and the checks that keep it open.
+  if (r.verdict !== 'pass' && /^Checks pass/.test(label)) {
+    const open = r.checks.filter((c) => c.status === r.verdict).map((c) => c.check_id);
+    return `${what}: ${label} (verdict ${r.verdict}${open.length ? `: ${open.slice(0, 4).join(', ')}` : ''}).`;
+  }
   return `${what}: ${label}.`;
 };
 
@@ -348,7 +405,7 @@ const FAILING_REQUIREMENTS_SHOWN = 8;
 function withoutUnneededFix(r: Record<string, unknown>): Record<string, unknown> {
   const counts = (r.compliance as { counts?: Record<string, number> } | undefined)?.counts;
   if (!counts || (counts.needs_fix ?? 0) > 0 || r.verdict === 'fail') return r;
-  const { replacement: _r, ...rest } = r;
+  const { replacement: _r, plan_replacements: _pr, ...rest } = r;
   const correction = rest.correction as { patch?: unknown[]; corrected_params?: unknown } | undefined;
   if (correction && !correction.patch?.length) {
     const { corrected_params: _c, ...c } = correction;
@@ -461,6 +518,28 @@ export function unverifiedScanNote(u: unknown): string | null {
   return `UNVERIFIED SCAN (read-only, not evidence, no checkout submitted): ${c.pages_captured ?? 0} page(s) read; ${c.failing ?? 0} failing, ${c.needs_review ?? 0} to review, ${c.passing ?? 0} passing${failing.length ? ` (failing: ${failing.join(', ')})` : ''}. Verify the domain for the full scan, which replaces it.`;
 }
 
+interface SitePlanLite {
+  name?: string;
+  price?: string;
+  interval?: string;
+  interval_count?: number;
+  trial_days?: number;
+  stripe_price_ids?: string[];
+}
+
+/** Round 20: one line with the plans Checkbox judges the site against (setup's site_plans), so no second call is needed. */
+export function sitePlansNote(plans: unknown): string | null {
+  if (!Array.isArray(plans)) return null;
+  if (!plans.length) return 'Plans: none known yet. Pass plans[] (name, price, interval, trial, Stripe price id) with update_setup, or ask the human to connect Stripe.';
+  const lines = (plans as SitePlanLite[]).slice(0, 6).map((p) => {
+    const every = (p.interval_count ?? 1) > 1 ? `every ${p.interval_count} ${p.interval}s` : `/${p.interval ?? '?'}`;
+    const trial = p.trial_days ? `, ${p.trial_days}-day trial` : ', no trial';
+    const ids = p.stripe_price_ids?.length ? `, ${p.stripe_price_ids.slice(0, 3).join(' ')}` : '';
+    return `${untrusted(p.name ?? 'plan', 80)} ${p.price ?? ''}${every}${trial}${ids}`;
+  });
+  return `Plans Checkbox judges against (${plans.length}): ${lines.join('; ')}${plans.length > 6 ? '; …' : ''}.`;
+}
+
 /**
  * setup_checkbox on an OAuth connection (one-click connector): the human approved in the browser already and the
  * connection itself is the credential, so nothing is pasted or saved. The site is registered by the setup session
@@ -493,6 +572,8 @@ async function setupOverOAuth(
       firstCheck = { evaluated: v.evaluated ?? false, scan: v.scan ?? null, unverified_scan: v.unverified_scan ?? null, steps: v.setup_session?.steps?.map((st) => `${st.key}: ${st.status}`) ?? [] };
       if (v.domain_verified) notes.push(`Domain verified: ${v.domain_verified.method === 'snippet' ? `the Checkbox snippet is live on ${v.domain_verified.domain}` : `${v.domain_verified.domain} (${v.domain_verified.method})`}.`);
       notes.push(firstCheckNote(next, v));
+      const pl = sitePlansNote((v.setup_session as { site_plans?: unknown } | undefined)?.site_plans);
+      if (pl) notes.push(pl);
     } catch (err) {
       notes.push(`First checks did not run yet (${err instanceof Error ? err.message.slice(0, 160) : 'error'}); call get_setup_status with verify=true.`);
     }
@@ -503,7 +584,11 @@ async function setupOverOAuth(
     headline: `Setup session ${session.id} started${session.business?.site_url ? ` for ${untrusted(session.business.site_url, 100)}` : ''}${session.site ? ` (test-mode site ${session.site})` : ''}.`,
     notes,
     ...(next ? { next } : {}),
-    data: withoutLegacyScore({ ...session, ...(fresh ?? {}), ...(firstCheck ? { first_check: firstCheck } : {}) }),
+    data: (() => {
+      const doc = { ...session, ...(fresh ?? {}) } as Record<string, unknown> & { install?: { snippet_key?: unknown }; publishable_key?: unknown };
+      const keys = labelledPublicKeys(doc.install?.snippet_key, doc.publishable_key);
+      return withoutLegacyScore({ ...doc, ...(keys.length ? { public_keys: keys } : {}), ...(firstCheck ? { first_check: firstCheck } : {}) });
+    })(),
   };
 }
 
@@ -548,7 +633,7 @@ const setupCheckbox: ToolDef = {
   title: 'Set up Checkbox for this project',
   description: [
     'Start here when the user says "add Checkbox", "make my subscriptions compliant", or the project is not connected to Checkbox yet.',
-    'Checkbox monitors a subscription business against automatic-renewal laws (FTC ROSCA, California ARL, New York and ~26 other states).',
+    'Checkbox monitors a subscription business against automatic-renewal laws (federal law, 27 states, DC and New York City: FTC ROSCA, California ARL, New York and the other state laws).',
     '',
     'Connected through the Checkbox connector (OAuth: claude.ai, Claude Desktop, Claude Code /mcp, Cursor, VS Code): the human already approved in the browser; there is NO key to ask for, paste or save. Call it with site_url (and what else you know): it registers the site and runs the first checks in the same call.',
     'Pass everything you already know from the codebase: site_url, checkout_url, terms/privacy/refund/cancellation URLs, billing_platform, plans, project.layout_file. Checkbox fetches and checks the Terms itself.',
@@ -589,6 +674,8 @@ const setupCheckbox: ToolDef = {
         notes.push(`claude mcp add --transport http checkbox ${ctx.mcpUrl} --header "Authorization: Bearer $CHECKBOX_SECRET_KEY" (Cursor / VS Code: add the same header to the server config). Until then, the plan below is all you need; the HTTP API works with the key right away.`);
       }
       notes.push('The secret key is shown only this once. Never commit it; the publishable key (pk_) is safe in browser code (e.g. NEXT_PUBLIC_CHECKBOX_PUBLISHABLE_KEY).');
+      // Round 16 (pilot 15, sveltekit / change-guard): two public keys in one response, unexplained.
+      notes.push("Two public keys: the snippet tag's data-key is the site's snippet key (install.snippet_key; use the script_tag exactly as given); publishable_key is the account key for Checkbox Elements and consent receipts only.");
       // In the same call, with the new key: apply the facts given (they are not lost between the two calls), run the
       // first checks, and return the setup checklist's next step — exactly what `checkbox init` does.
       // Normal-round pilot (sveltekit): the first checks failed with "No API key provided" and the facts given with the
@@ -596,24 +683,48 @@ const setupCheckbox: ToolDef = {
       const keyed = ctx.apiForKey?.(res.secret_key) ?? (ctx.adoptKeys ? ctx.api : undefined);
       let next: NextAction | undefined;
       let firstCheck: unknown;
+      let site: string | null = res.site ?? null;
+      let inputWarnings: unknown[] = [];
+      let snippetKey: unknown;
       if (keyed && res.setup_session) {
         try {
-          const facts = { ...(PENDING_SETUP_FACTS.get(args.device_code) ?? {}), ...pick(args, Object.keys(setupFactsShape)) };
+          const facts: Record<string, unknown> = { ...(PENDING_SETUP_FACTS.get(args.device_code) ?? {}), ...pick(args, Object.keys(setupFactsShape)) };
           PENDING_SETUP_FACTS.delete(args.device_code);
-          if (Object.keys(facts).length) await keyed.request('POST', `/v1/setup_sessions/${res.setup_session}`, { body: facts });
-          const v = await keyed.request<{ homepage?: unknown; scan?: unknown; evaluated?: boolean; setup_session?: { next_action?: NextAction; steps?: Array<{ key: string; status: string }> } }>('POST', `/v1/setup_sessions/${res.setup_session}/verify`, { body: {} });
+          // Pilot round 13 (change-guard): `agent` given with the device_code call (or known only now: a stateless
+          // remote connection has no client name on the first call) was never stored, so the session said agent null.
+          const agentName = args.agent ?? ctx.key.appName ?? ctx.clientName;
+          if (agentName) facts.client = { name: 'checkbox-mcp', version: ctx.serverVersion, agent: String(agentName).slice(0, 100) };
+          if (Object.keys(facts).length) {
+            const upd = await keyed.request<{ warnings?: unknown }>('POST', `/v1/setup_sessions/${res.setup_session}`, { body: facts });
+            if (Array.isArray(upd?.warnings)) inputWarnings = upd.warnings;
+          }
+          const v = await keyed.request<{ homepage?: unknown; scan?: unknown; evaluated?: boolean; setup_session?: { site?: string | null; next_action?: NextAction; steps?: Array<{ key: string; status: string }>; site_plans?: unknown } }>('POST', `/v1/setup_sessions/${res.setup_session}/verify`, { body: {} });
           next = v.setup_session?.next_action;
-          firstCheck = { evaluated: v.evaluated ?? false, scan: v.scan ?? null, steps: v.setup_session?.steps?.map((st) => `${st.key}: ${st.status}`) ?? [] };
+          snippetKey = (v.setup_session as { install?: { snippet_key?: unknown } } | undefined)?.install?.snippet_key;
+          // Pilot round 13 (change-guard): the site created by these facts was missing from the result (site: null next
+          // to "site: done"), and the JSON next_action was the device token's, not the checklist's.
+          if (typeof v.setup_session?.site === 'string') site = v.setup_session.site;
+          firstCheck = { evaluated: v.evaluated ?? false, scan: v.scan ?? null, steps: v.setup_session?.steps?.map((st) => `${st.key}: ${st.status}`) ?? [], ...(Array.isArray(v.setup_session?.site_plans) ? { site_plans: v.setup_session.site_plans } : {}) };
           notes.push(firstCheckNote(next));
+          const pl = sitePlansNote(v.setup_session?.site_plans);
+          if (pl) notes.push(pl);
         } catch (err) {
           notes.push(`First checks did not run yet (${err instanceof Error ? err.message.slice(0, 160) : 'error'}); call get_setup_status with verify=true.`);
         }
       }
       return {
-        headline: `Approved. Checkbox account ready${res.site ? ` with test-mode site ${res.site}` : ''}; setup session ${res.setup_session ?? '(none)'}.`,
+        headline: `Approved. Checkbox account ready${site ? ` with test-mode site ${site}` : ''}; setup session ${res.setup_session ?? '(none)'}.`,
         notes,
         ...(next ? { next } : {}),
-        data: { ...res, env: { CHECKBOX_SECRET_KEY: res.secret_key, ...(res.publishable_key ? { CHECKBOX_PUBLISHABLE_KEY: res.publishable_key } : {}) }, ...(firstCheck ? { first_check: firstCheck } : {}) },
+        data: {
+          ...res,
+          site,
+          ...(next ? { next_action: next } : {}),
+          env: { CHECKBOX_SECRET_KEY: res.secret_key, ...(res.publishable_key ? { CHECKBOX_PUBLISHABLE_KEY: res.publishable_key } : {}) },
+          public_keys: labelledPublicKeys(snippetKey ?? (res as { install?: { snippet_key?: unknown } }).install?.snippet_key, res.publishable_key),
+          ...(firstCheck ? { first_check: firstCheck } : {}),
+          ...(inputWarnings.length ? { warnings: inputWarnings } : {}),
+        },
       };
     }
 
@@ -647,13 +758,29 @@ const setupCheckbox: ToolDef = {
     if (ctx.key.auth === 'oauth') return setupOverOAuth(api, session, ctx);
     const notes = session.review_url ? [`Human review page: ${session.review_url}`] : [];
     if (session.next_action?.type === 'verify_domain') notes.push(firstCheckNote(session.next_action));
+    const plansLine = sitePlansNote((session as { site_plans?: unknown }).site_plans);
+    if (plansLine) notes.push(plansLine);
     return {
       headline: `Setup session ${session.id} started${session.business?.site_url ? ` for ${untrusted(session.business.site_url, 100)}` : ''}${session.site ? ` (test-mode site ${session.site})` : ''}.`,
       notes,
-      data: withoutLegacyScore(session),
+      data: (() => {
+        const keys = labelledPublicKeys((session as { install?: { snippet_key?: unknown } }).install?.snippet_key, (session as { publishable_key?: unknown }).publishable_key);
+        return keys.length ? { ...withoutLegacyScore(session), public_keys: keys } : withoutLegacyScore(session);
+      })(),
     };
   },
 };
+
+/**
+ * Round 20 (pilot 19 item 16, sveltekit / change-guard: a pk_ site key and a pk_test_ key side by side, unlabelled): each
+ * public key says what it is for.
+ */
+export function labelledPublicKeys(snippetKey: unknown, publishableKey: unknown): Array<{ key: string; name: string; use: string }> {
+  const out: Array<{ key: string; name: string; use: string }> = [];
+  if (typeof snippetKey === 'string' && snippetKey) out.push({ key: snippetKey, name: 'Site snippet key', use: 'The data-key of the Checkbox snippet <script> tag, for this site only (use install.script_tag exactly as given).' });
+  if (typeof publishableKey === 'string' && publishableKey) out.push({ key: publishableKey, name: 'Account publishable key', use: 'For Checkbox Elements (<checkbox-disclosure>) and consent receipts (data-publishable-key) only; never the snippet data-key.' });
+  return out;
+}
 
 const getSetupStatus: ToolDef = {
   name: 'get_setup_status',
@@ -680,15 +807,18 @@ const getSetupStatus: ToolDef = {
       else if (res.unverified_scan?.reason) notes.push(`No new read-only scan: ${untrusted(res.unverified_scan.reason, 200)}.`);
       const ro = unverifiedScanNote(res.setup_session?.unverified_scan);
       if (ro && !res.unverified_scan?.queued) notes.push(ro);
+      const pl = sitePlansNote((res.setup_session as { site_plans?: unknown } | undefined)?.site_plans);
+      if (pl) notes.push(pl);
       return { headline: `Re-checked setup session ${id}.`, ...(notes.length ? { notes } : {}), data: withoutLegacyScore(res), next: nextActionOf(res) ?? nextActionOf(res.session) };
     }
-    const session = await api.request<{ id: string; status: string; unverified_scan?: unknown; steps?: Array<{ key?: string; status?: string; title?: string; summary?: string }> }>('GET', `/v1/setup_sessions/${enc(id)}`);
+    const session = await api.request<{ id: string; status: string; unverified_scan?: unknown; site_plans?: unknown; steps?: Array<{ key?: string; status?: string; title?: string; summary?: string }> }>('GET', `/v1/setup_sessions/${enc(id)}`);
     const open = (session.steps ?? []).filter((s) => s.status && !['done', 'skipped', 'not_applicable'].includes(s.status));
     const ro = unverifiedScanNote(session.unverified_scan);
+    const plansLine = sitePlansNote(session.site_plans);
     return {
       headline: `Setup session ${session.id}: ${session.status}; ${open.length} checklist step(s) open.`,
       // The policies step says what an unverified preview read (or that the pages wait for domain verification).
-      notes: [...open.slice(0, 8).map((s) => `${s.status}: ${s.title ?? s.key}${s.key === 'policies' && s.summary ? ` (${s.summary.slice(0, 240)})` : ''}`), ...(ro ? [ro] : [])],
+      notes: [...open.slice(0, 8).map((s) => `${s.status}: ${s.title ?? s.key}${s.key === 'policies' && s.summary ? ` (${s.summary.slice(0, 240)})` : ''}`), ...(ro ? [ro] : []), ...(plansLine ? [plansLine] : [])],
       data: withoutLegacyScore(session),
     };
   },
@@ -716,9 +846,22 @@ const updateSetup: ToolDef = {
     const id = await resolveSetupSession(api, args.setup_session);
     const body = pick(args, [...Object.keys(setupFactsShape), 'snippet_installed_in', 'env_written', 'live_site', 'refetch_policies']);
     const session = await api.request<{ id: string }>('POST', `/v1/setup_sessions/${enc(id)}`, { body });
-    return { headline: `Updated setup session ${session.id}.`, data: withoutLegacyScore(session) };
+    // Round 20 (pilot 19 item 6): a plans change re-evaluates the site; say where the new plan's tasks show up.
+    const notes = Array.isArray(args.plans) && args.plans.length
+      ? ['Plans saved: Checkbox re-evaluates the site with them now, so get_compliance_plan lists each plan\'s tasks (e.g. the trial reminder of a plan with a trial). If one seems missing, call verify_site to re-check at once.']
+      : [];
+    return { headline: `Updated setup session ${session.id}.`, notes, data: withoutLegacyScore(session) };
   },
 };
+
+/** Round 13 (pilot 12, codex: "sent" while nothing new arrived): the summary email's real delivery status, with when. */
+export function summaryEmailLine(status: string | null | undefined, d: { at?: number | null; to?: string | null; error?: string | null } | null | undefined): string {
+  const when = d?.at ? ` at ${new Date(d.at * 1000).toISOString().slice(0, 16).replace('T', ' ')} UTC` : '';
+  if (status === 'sent') return `sent${d?.to ? ` to ${d.to}` : ''} (the mail server accepted it${when}; it is sent once per setup)`;
+  if (status === 'failed') return `failed${d?.error ? ` (${d.error})` : ''}; call complete_setup again to retry`;
+  if (status === 'not_configured') return 'not sent: this deployment has no email delivery';
+  return 'not sent';
+}
 
 const completeSetup: ToolDef = {
   name: 'complete_setup',
@@ -730,9 +873,9 @@ const completeSetup: ToolDef = {
   annotations: { ...write(true), title: 'Complete setup' },
   async run(args, { api }) {
     const id = await resolveSetupSession(api, args.setup_session);
-    const session = await api.request<{ id: string; owner_email?: string | null; review_url?: string }>('POST', `/v1/setup_sessions/${enc(id)}/complete`, { body: {} });
+    const session = await api.request<{ id: string; owner_email?: string | null; owner_email_detail?: { at?: number | null; to?: string | null; error?: string | null } | null; review_url?: string }>('POST', `/v1/setup_sessions/${enc(id)}/complete`, { body: {} });
     return {
-      headline: `Setup ${session.id} completed; summary email: ${session.owner_email ?? 'not sent'}.`,
+      headline: `Setup ${session.id} completed; summary email: ${summaryEmailLine(session.owner_email, session.owner_email_detail)}.`,
       notes: session.review_url ? [`Human review page: ${session.review_url}`] : [],
       data: withoutLegacyScore(session),
     };
@@ -743,14 +886,31 @@ const completeSetup: ToolDef = {
 // Compliance plan loop
 // ---------------------------------------------------------------------------------------------------------------------
 
+/**
+ * Round 21 (pilot 20 item 8, lawyer): the plan status in words ("Checks pass"), never the bare machine value `compliant`
+ * an agent would repeat to a merchant. Older APIs without status_label: the same mapping here.
+ */
+const PLAN_STATUS_WORDS: Record<string, string> = { action_required: 'Fixes needed', verifying: 'Checking your changes', compliant: 'Checks pass', blocked: 'Your call' };
+export function planStatusWords(status: string, label?: string | null): string {
+  return label || PLAN_STATUS_WORDS[status] || status;
+}
+
 interface PlanLite {
   status: string;
+  status_label?: string;
   summary?: string;
   counts?: Record<string, number>;
   protection_level?: string;
   optional_improvements?: Record<string, unknown>;
   compliance?: { label?: string } | null;
   tasks?: Array<{ id: string; title: string; status: string; priority?: string; order?: number; tier?: string; change?: { type?: string }; where?: Record<string, unknown> }>;
+}
+
+/** "Old task (covered by: Open task)": the open task sharing a check with a superseded one. Pure, exported for tests. */
+export function coveredLine(t: { key?: unknown; title: string; check_ids?: readonly string[] }, open: ReadonlyArray<{ key?: unknown; title: string; check_ids?: readonly string[] }>): string {
+  const ids = t.check_ids ?? [];
+  const by = open.find((o) => o.key !== t.key && (o.check_ids ?? []).some((c) => ids.includes(c)));
+  return by ? `${t.title} (covered by: ${by.title})` : `${t.title} (covered by another open task)`;
 }
 
 /** The plan with each task reduced to what an agent needs to choose the next one (the full task: get_task). */
@@ -797,11 +957,11 @@ const getCompliancePlan: ToolDef = {
   name: 'get_compliance_plan',
   title: 'Get the compliance plan (ordered tasks)',
   description: [
-    'The main tool after setup. Returns the ordered tasks that make the site compliant with automatic-renewal laws, recomputed from the latest observations.',
+    'The main tool after setup. Returns the ordered tasks that make the site pass the automatic-renewal checks, recomputed from the latest observations.',
     'Each task has: requirement + legal citation, why (what Checkbox observed), where (file / component / URL / CSS selector / Stripe object), change (exact unified-diff template, copy text or Stripe params), and verify (how to check).',
-    'Plan status: action_required (apply open tasks), verifying (waiting for confirming observations), compliant (done — "pending_live_check" tasks count as compliant: they complete on their own or with a proof run), blocked (only human questions — "Your call" — left).',
+    'Plan status: action_required (apply open tasks), verifying (waiting for confirming observations), compliant (done: the checks pass — "pending_live_check" tasks count as passing: they complete on their own or with a proof run), blocked (only human questions — "Your call" — left).',
     'Tasks are tagged tier required / recommended / extra. Only required tasks matter for compliance; recommended and extra tasks are optional suggestions (mention them once, do not push them).',
-    'Loop: apply the first open required task in the code → verify_task → get_compliance_plan → … until status is compliant. Tasks with status "manual" carry a question with a recommended answer: ask the HUMAN, then answer_task. Never invent answers.',
+    'Loop: apply the first open required task in the code → verify_task → get_compliance_plan → … until the checks pass (status compliant). Tasks with status "manual" carry a question with a recommended answer: ask the HUMAN, then answer_task. Never invent answers.',
   ].join('\n'),
   input: { site: siteId.optional() },
   scopes: ['compliance_plans:read'],
@@ -818,13 +978,27 @@ const getCompliancePlan: ToolDef = {
     const { score: _score, insurable: _insurable, ...shown } = plan as PlanLite & { score?: unknown; insurable?: unknown };
     return {
       // Audit P2: one Next line (the plan's next_action below); the summary's own "Next: …" is not repeated.
-      headline: `Plan for ${site}: ${plainLabel(plan.compliance?.label ?? 'Not checked yet')} (plan ${plan.status}).`,
+      headline: `Plan for ${site}: ${plainLabel(plan.compliance?.label ?? 'Not checked yet')} (plan status: ${planStatusWords(plan.status, plan.status_label)}).`,
       notes: [
         ...(todo.length ? [`To do (${todo.length}, in order):`] : []),
         ...todo.map((t, i) => `${i + 1}. ${t.id} ${todoLine(t)}`),
         ...rest.map((t) => `${t.id} [${t.status}${t.priority ? `, ${t.priority}` : ''}${t.change?.type ? `, ${t.change.type}` : ''}] ${t.title}`),
-        ...(optional.length ? [`Optional suggestions (${plan.protection_level ?? 'balanced'} protection; never block compliant): ${optional.map((t) => t.title).join('; ')}`] : []),
-        ...(plan.optional_improvements ? ['Optional (never blocking, not part of compliance): compliant conversion suggestions for this site with `suggest_improvements`.'] : []),
+        // Round 14: a task closed because it no longer applies is "Not applicable", never "done". Round 16 (pilot 15,
+        // codex): a task closed by a passing verification is "Done (verified)", never "Not applicable".
+        ...(() => {
+          const closed = (plan.tasks ?? []) as Array<NonNullable<PlanLite['tasks']>[number] & { compliance_status?: string; closed_reason?: string | null; check_ids?: string[] }>;
+          const verified = closed.filter((t) => t.status === 'done' && t.closed_reason === 'verified' && t.compliance_status !== 'not_applicable');
+          // Round 20 (pilot 19 item 9): a task merged into another open task is "covered by" it, never "not applicable".
+          const covered = closed.filter((t) => t.closed_reason === 'superseded');
+          const na = closed.filter((t) => t.compliance_status === 'not_applicable' && t.closed_reason !== 'verified' && t.closed_reason !== 'superseded');
+          return [
+            ...(verified.length ? [`Done (verified): ${verified.map((t) => t.title).join('; ')}`] : []),
+            ...(covered.length ? [`Merged into another task: ${covered.map((t) => coveredLine(t, open)).join('; ')}`] : []),
+            ...(na.length ? [`Not applicable (closed without a change, nothing observed passing): ${na.map((t) => t.title).join('; ')}`] : []),
+          ];
+        })(),
+        ...(optional.length ? [`Optional suggestions (${plan.protection_level ?? 'balanced'} protection; never block the checks from passing): ${optional.map((t) => t.title).join('; ')}`] : []),
+        ...(plan.optional_improvements ? ['Optional (never blocking, not part of compliance): conversion suggestions for this site with `suggest_improvements`.'] : []),
         'Each task below is a summary; call get_task with its id for the full change (diff, copy or params) before applying it.',
         ...(plan.status === 'compliant' ? await reviewHint(api, site, 'plan_compliant') : []),
       ],
@@ -848,7 +1022,8 @@ const getTask: ToolDef = {
     // Audit P3: a task citing every state's law listed dozens of citations; the first 8 and a count are enough here.
     const cites = task.requirement?.citations;
     const shown = Array.isArray(cites) && cites.length > 8 ? { ...task, requirement: { ...task.requirement, citations: cites.slice(0, 8), citations_more: cites.length - 8 } } : task;
-    return { headline: `Task ${task.id} [${task.status}]: ${task.title}`, data: shown };
+    const word = (task as { compliance_status?: string }).compliance_status === 'not_applicable' ? 'not applicable' : task.status;
+    return { headline: `Task ${task.id} [${word}]: ${task.title}`, data: shown };
   },
 };
 
@@ -882,6 +1057,7 @@ const verifyTask: ToolDef = {
     task: z.string().max(100).describe('Task id (task_…).'),
     html: z.string().max(950_000).optional().describe('Page tasks: the rendered page HTML.'),
     stripe_checkout_session: z.record(z.string(), z.unknown()).optional().describe('Stripe tasks: the params your code passes to stripe.checkout.sessions.create.'),
+    stripe_checkout_sessions: z.array(z.record(z.string(), z.unknown())).max(10).optional().describe('Stripe tasks, one params object per plan.'),
     email: z
       .object({
         kind: emailKind.optional(),
@@ -890,28 +1066,33 @@ const verifyTask: ToolDef = {
         html: z.string().max(100_000).optional(),
       })
       .optional()
-      .describe('Email tasks: the new template.'),
+      .describe('Email tasks: the new template (passes when it matches one plan fully).'),
+    plan: z.string().min(1).max(200).optional().describe('Email tasks: only this plan (name).'),
+    price_id: z.string().min(1).max(200).optional().describe('Email tasks: only this plan (Price id).'),
     recheck: z.boolean().optional().describe('true re-checks a task that is already done (evaluates again now and queues a scan) instead of returning its last result.'),
     wait,
   },
   scopes: ['compliance_plans:write'],
   annotations: { ...write(true, true), title: 'Verify task' },
   async run(args, { api }) {
-    const body = pick(args, ['html', 'stripe_checkout_session', 'email', 'recheck']);
+    const body = pick(args, ['html', 'stripe_checkout_session', 'stripe_checkout_sessions', 'email', 'plan', 'price_id', 'recheck']);
     if (body.email && typeof body.email === 'object' && (body.email as { kind?: unknown }).kind) body.email = { ...(body.email as object), kind: checkKind((body.email as { kind?: unknown }).kind) };
-    const v = await api.request<{ id: string; site?: string; status: string; diff?: unknown[]; plan_status?: string | null; next_action?: NextAction | null; precheck?: PrecheckLite | null }>('POST', `/v1/tasks/${enc(String(args.task))}/verify`, {
+    const v = await api.request<{ id: string; site?: string; status: string; checked?: string; diff?: unknown[]; plan_status?: string | null; plan_status_label?: string | null; next_action?: NextAction | null; precheck?: PrecheckLite | null }>('POST', `/v1/tasks/${enc(String(args.task))}/verify`, {
       query: { wait: (args.wait as number | undefined) ?? 25 },
       body,
     });
     const hint = v.plan_status === 'compliant' && v.site ? await reviewHint(api, v.site, 'last_task_verified') : [];
     return {
-      headline: `Verification ${v.id} of ${String(args.task)}: ${statusLine(v.status)}${v.plan_status ? `; plan is now ${v.plan_status}` : ''}.`,
+      headline: `Verification ${v.id} of ${String(args.task)}: ${statusLine(v.status)}${v.plan_status ? `; plan is now ${planStatusWords(v.plan_status, v.plan_status_label)}` : ''}.${v.checked ? ` Checked: ${untrusted(v.checked, 300)}.` : ''}`,
       notes: [
         ...precheckLines(v.precheck),
         ...((v.status === 'failed' || v.status === 'not_checked') && v.next_action?.type === 'verify_domain'
           ? ['The domain is not verified yet. Waiting for the human to publish the DNS record / file / meta tag or install the snippet; don\'t retry until they say it\'s done. Nothing to change in the code.']
           : v.next_action?.type === 'retry_later'
           ? ['Checkbox could not confirm it (a problem on Checkbox\'s side): nothing to change in the code. Continue with the next task; verify again later.']
+          : v.next_action?.type === 'live_check_pending' && v.status === 'pending'
+          ? // Round 14 (pilot 13): Checkbox Notices sends this email; never "add the BCC".
+            [v.next_action.description ?? 'Checkbox Notices sends this email: nothing to add to your code. Continue with the next task.']
           : v.next_action?.type === 'bcc_then_continue'
           ? ['The copy is checked; the task closes when the first real email arrives with the BCC. Add the BCC to your sending code and continue with the next task (no need to poll).']
           : v.status === 'failed'
@@ -943,7 +1124,9 @@ const answerTask: ToolDef = {
   scopes: ['compliance_plans:write'],
   annotations: { ...write(false), title: 'Answer task' },
   async run(args, { api }) {
-    const task = await api.request<{ id: string; status: string; title: string }>('POST', `/v1/tasks/${enc(String(args.task))}/answer`, { body: pick(args, ['answer', 'note']) });
+    const task = await api.request<{ id: string; status: string; title: string; next_action?: NextAction | null }>('POST', `/v1/tasks/${enc(String(args.task))}/answer`, { body: pick(args, ['answer', 'note']) });
+    // Round 21 (pilot 20 item 16): "done" on a task Checkbox already closed succeeds without recording anything.
+    if (task.status === 'done' && task.next_action?.type === 'retrieve_plan') return { headline: `${task.id} was already done (Checkbox closed it itself): nothing to answer, nothing recorded.`, data: task };
     return { headline: `Recorded the answer on ${task.id}; task is now ${task.status}.`, data: task };
   },
 };
@@ -952,20 +1135,23 @@ const verifySite: ToolDef = {
   name: 'verify_site',
   title: 'Re-check the whole site now',
   description:
-    'Re-fetches the registered policies, pre-checks the checkout, re-evaluates every law and queues a scan. Use it for the first check after setup, after deploying several changes, or when the plan looks stale. Waits up to `wait` seconds, then call get_compliance_plan.',
+    'Re-reads the connected billing platform (Stripe portal, prices, Checkout Sessions; rate-limited), re-fetches the registered policies, pre-checks the checkout, re-evaluates every law and queues a scan. Use it for the first check after setup, after deploying several changes, after changing a Stripe setting, or when the plan looks stale. Waits up to `wait` seconds, then call get_compliance_plan.',
   input: { site: siteId.optional(), wait },
   scopes: ['compliance_plans:write'],
   annotations: { ...write(true, true), title: 'Verify site' },
   async run(args, { api }) {
     const site = await resolveSite(api, args.site);
-    const v = await api.request<{ id: string; status: string; plan_status?: string | null; diff?: unknown[]; next_action?: NextAction }>('POST', `/v1/sites/${enc(site)}/verify`, { query: { wait: (args.wait as number | undefined) ?? 25 }, body: {} });
+    const v = await api.request<{ id: string; status: string; plan_status?: string | null; diff?: unknown[]; next_action?: NextAction; precheck?: { note?: string } | null }>('POST', `/v1/sites/${enc(site)}/verify`, { query: { wait: (args.wait as number | undefined) ?? 25 }, body: {} });
+    // Pilot 11: say what was re-read from the billing platform (the note's first sentence), so a stale answer is visible.
+    const reread = /^(?:Re-read |Could not re-read |[A-Z][\w ]{0,40} was read ).*?(?:before judging\.|seconds\)\.|ago\.|earlier\.)/.exec(v.precheck?.note ?? '')?.[0];
     // A whole-site check that finds open checks produced the to-do list; it is not a failed change.
-    const headline =
+    const base =
       v.next_action?.type === 'verify_domain'
         ? `Site check ${v.id}: nothing was fetched or scanned because the site's domain is not verified yet (Checkbox only visits websites their owners have verified). Follow Next to verify it.`
         : v.status === 'failed'
         ? `${v.next_action?.type === 'first_check_complete' ? 'First check complete' : 'Site check complete'} (${v.id}): the open tasks of get_compliance_plan are the to-do list, not a failed change.${v.plan_status ? ` Plan: ${v.plan_status}.` : ''}`
         : `Site check ${v.id}: ${statusLine(v.status)}${v.plan_status ? `; plan is ${v.plan_status}` : ''}.`;
+    const headline = reread ? `${base} ${reread}` : base;
     return { headline, data: v };
   },
 };
@@ -974,7 +1160,7 @@ const getVerification: ToolDef = {
   name: 'get_verification',
   title: 'Get a verification result',
   description: 'Status of a verification from verify_task / verify_site: pending, passed or failed, expected vs observed per check, the diff and next_action. Pass wait (≤ 30 s) to wait for a pending one.',
-  input: { verification: z.string().max(100).describe('Verification id (ver_…).'), wait: wait },
+  input: { verification: z.string().max(100).describe('ver_…, or task_… (its newest)'), wait: wait },
   scopes: ['compliance_plans:read'],
   annotations: { ...ro, title: 'Verification' },
   async run(args, { api }) {
@@ -1006,7 +1192,7 @@ const startTestRun: ToolDef = {
   description: [
     'Observes the WHOLE subscription lifecycle, not just the checkout: in the billing platform\'s TEST mode Checkbox subscribes a test customer (card 4242…) whose email is a Checkbox inbox, waits for your acknowledgment email, fast-forwards a Stripe test clock through every legal notice window before trial end and renewal (collecting reminder emails), then cancels online and waits for the cancellation confirmation. Nothing is charged.',
     'Needs a Stripe TEST key stored for the site — the human adds it in the Checkbox dashboard (the site\'s Proof page); never ask them to paste it into the chat. If missing, the error\'s next_action says so. For non-Stripe sites use type "generic".',
-    'Takes ~5-20 minutes: poll get_test_run (its next_action says when). Each step reports observations, check results and agent-readable fixes; apply them and run again.',
+    'Usually 2-4 minutes: poll get_test_run (its next_action says when). Each step reports observations, check results and agent-readable fixes; apply them and run again.',
     'mode "real_checkout" is the PROOF run: the shopper buys through the merchant\'s own checkout on its test deployment (stripe.checkout_url or stripe.payment_link), so the merchant\'s webhook handlers and email code fire; give stripe.test_account + stripe.cancel_url when customers cancel in the app. A step is "passed" only with evidence; "warning" means needs review.',
   ].join('\n'),
   input: {
@@ -1063,8 +1249,12 @@ const getTestRun: ToolDef = {
   name: 'get_test_run',
   title: 'Get a test run (steps, observations, fixes)',
   description:
-    'A synthetic test subscription with every step (checkout, acknowledgment email, reminders at each legal window, cancellation, confirmation): what was observed, check results, evidence ids and fixes. While running, next_action.type is "wait" (poll again in a minute or two). When finished, apply the fixes (usually via get_compliance_plan) and start another run to verify. Without test_run, returns the newest run of the site.',
-  input: { test_run: z.string().max(100).optional().describe('Test run id (run_…). Default: the newest run of the site.'), site: siteId.optional() },
+    'A synthetic test subscription with every step (checkout, acknowledgment email, reminders at each legal window, cancellation, confirmation): what was observed, check results, evidence ids and fixes. While running, next_action.type is "wait" and waiting_for says what it waits for (pass wait: 30 to get the answer as soon as the run moves on). When finished, apply the fixes (usually via get_compliance_plan) and start another run to verify. Without test_run, returns the newest run of the site.',
+  input: {
+    test_run: z.string().max(100).optional().describe('Test run id (run_…). Default: the newest run of the site.'),
+    site: siteId.optional(),
+    wait: z.number().int().min(0).max(30).optional().describe('Long-poll: wait up to this many seconds for the run to move on before answering.'),
+  },
   scopes: ['test_runs:read'],
   annotations: { ...ro, title: 'Test run' },
   async run(args, { api }) {
@@ -1075,10 +1265,14 @@ const getTestRun: ToolDef = {
       if (!list.data.length) throw new ToolError(`Site ${site} has no test run yet.`, { type: 'start_test_run', message: 'Call start_test_run.', operation_id: 'createTestRun' });
       id = list.data[0]!.id;
     }
-    const run = await api.request<{ id: string; status: string; phase?: string; steps?: Array<{ key?: string; title?: string; status?: string; code?: string }> }>('GET', `/v1/test_runs/${enc(id)}`);
+    const wait = typeof args.wait === 'number' && args.wait > 0 ? Math.min(30, Math.floor(args.wait)) : undefined;
+    const run = await api.request<{ id: string; status: string; status_label?: string; phase?: string; waiting_for?: { what: string; until: number | null; step?: number | null; steps_total?: number | null; minutes_left?: number | null } | null; steps?: Array<{ key?: string; title?: string; status?: string; code?: string }> }>('GET', `/v1/test_runs/${enc(id)}`, wait ? { query: { wait } } : undefined);
+    const w = run.waiting_for;
+    const progress = w ? [w.step && w.steps_total ? `step ${w.step} of ${w.steps_total}` : '', w.minutes_left ? `about ${w.minutes_left} min left` : ''].filter(Boolean).join(', ') : '';
+    const waiting = w ? `Waiting for: ${w.what}${w.until ? ` (until ${new Date(w.until * 1000).toISOString().slice(0, 16).replace('T', ' ')} UTC at the latest)` : ''}${progress ? ` [${progress}]` : ''}` : null;
     return {
-      headline: `Test run ${run.id}: ${statusLine(run.status)}${run.phase ? ` (phase ${run.phase})` : ''}.`,
-      notes: (run.steps ?? []).map((s) => `${s.status ?? '?'}: ${s.title ?? s.key}${s.code ? ` (${s.code})` : ''}`).slice(0, 12),
+      headline: `Test run ${run.id}: ${run.status_label ?? statusLine(run.status)}${run.phase && run.status !== 'succeeded' && run.status !== 'failed' ? ` (phase ${run.phase})` : ''}.`,
+      notes: [...(waiting ? [waiting] : []), ...(run.steps ?? []).map((s) => `${s.status ?? '?'}: ${s.title ?? s.key}${s.code ? ` (${s.code})` : ''}`)].slice(0, 13),
       data: run,
     };
   },
@@ -1102,8 +1296,8 @@ const checkDisclosure: ToolDef = {
     interval: intervalStr,
     button_text: z.string().max(200).optional().describe('Purchase button label, e.g. "Start free trial".'),
     order_summary: z.string().max(1000).optional().describe('Other text next to the button (order summary), if any.'),
-    placement: z
-      .object({
+    placement: strictObject(
+      {
         above_button: z.boolean().optional(),
         same_page_as_payment: z.boolean().optional(),
         font_size_px: z.number().min(4).max(96).optional(),
@@ -1111,16 +1305,20 @@ const checkDisclosure: ToolDef = {
         bold: z.boolean().optional(),
         boxed: z.boolean().optional(),
         body_font_size_px: z.number().min(4).max(96).optional(),
-      })
+      },
+      'placement',
+    )
       .optional()
       .describe('Where and how the disclosure is shown (defaults: above the button, same page, 14px, high contrast).'),
-    consent: z
-      .object({
+    consent: strictObject(
+      {
         checkbox: z.boolean(),
         prechecked: z.boolean().optional(),
         label: z.string().max(1000).optional(),
         required: z.boolean().optional(),
-      })
+      },
+      'consent',
+    )
       .optional()
       .describe('The consent checkbox, if the page has one. Omit when there is none.'),
     jurisdictions: jurisdictions.optional(),
@@ -1140,12 +1338,14 @@ const checkStripeCheckoutSession: ToolDef = {
   title: 'Check Stripe Checkout Session params (returns corrected params)',
   description: [
     'Before shipping Stripe Checkout code: pass EXACTLY the object your code passes to stripe.checkout.sessions.create (mode "subscription"). Checkbox evaluates it against automatic-renewal laws and returns correction.corrected_params — the full params with the fix applied, ready to paste — plus an RFC 6902 JSON patch and before/after verification per check.',
-    'When line_items reference a Price id (price_…), also pass merchant { price or amount, interval, trial_days, merchant_name, cancel_url } because the params alone do not state them.',
+    'With a Price id (price_…) in line_items, pass site (its plans are used) or merchant { price, interval, trial_days, merchant_name, cancel_url }.',
     'Note: Stripe styles custom_text itself, so "clear and conspicuous" stays needs_review here; the plan shows it as a note, never a fix.',
   ].join('\n'),
   input: {
     params: z.record(z.string(), z.unknown()).describe('The Checkout Session params object, e.g. {"mode":"subscription","line_items":[{"price":"price_123","quantity":1}],"success_url":"https://acme.example/welcome"}.'),
-    merchant: planTerms.optional().describe('What the params do not say: merchant_name, cancel_url, and price/interval when line_items use a Price id.'),
+    merchant: merchantTerms.optional().describe('What the params do not say: merchant_name, cancel_url, and price/interval when line_items use a Price id.'),
+    site: z.string().max(100).optional().describe('site_… whose plans judge it (as verify_task)'),
+    plan: z.string().max(200).optional().describe('With site: plan name or price_…'),
     jurisdictions: jurisdictions.optional(),
     as_of: asOf.optional(),
   },
@@ -1171,7 +1371,7 @@ const checkEmail: ToolDef = {
   name: 'check_email',
   title: 'Check a subscription lifecycle email',
   description: [
-    'Checks an acknowledgment, trial reminder, renewal reminder, price-change, annual-terms or cancellation-confirmation email against the laws that require it, and returns a compliant template (subject, text, html with merge tags) verified by the rules engine, plus required_by (which laws make this email mandatory for this plan).',
+    'Checks an acknowledgment, trial reminder, renewal reminder, price-change, annual-terms or cancellation-confirmation email against the laws that require it, and returns a template that passes the checks (subject, text, html with merge tags), verified by the rules engine, plus required_by (which laws make this email mandatory for this plan).',
     'Example: {"kind":"trial_reminder","subject":"Your trial ends soon","text":"…","terms":{"price":19.99,"interval":"month","trial_days":14,"cancel_url":"https://acme.example/account/cancel","merchant_name":"Acme"}}.',
     'For WHEN each email must be sent, use get_notice_schedule.',
   ].join('\n'),
@@ -1180,23 +1380,29 @@ const checkEmail: ToolDef = {
     subject: z.string().min(1).max(1000).describe('Subject line.'),
     text: z.string().max(100_000).optional().describe('Plain-text body (give text, html or both).'),
     html: z.string().max(100_000).optional().describe('HTML body.'),
-    terms: planTerms
-      .extend({
+    terms: strictObject(
+      {
+        ...planTermsShape,
         previous_price: z.union([z.number().positive(), z.string().max(40)]).optional().describe('price_change: price before the change, major units.'),
         previous_amount: z.number().int().positive().optional(),
         support_contact: z.string().max(200).optional().describe('Support email / URL for the template.'),
-      })
-      .describe('The plan the email is about: price (or amount), interval and cancel_url at least.'),
+      },
+      'terms',
+    )
+      .optional()
+      .describe('price, interval, cancel_url (optional with site); price_change: NEW price'),
+    site: z.string().max(100).optional().describe('site_… whose Stripe prices judge it (default: your Stripe site).'),
+    plan: z.string().max(200).optional().describe('Plan name or price_… (default: the one named)'),
     jurisdictions: jurisdictions.optional(),
     as_of: asOf.optional(),
   },
   scopes: ['checks:read'],
   annotations: { ...ro, title: 'Check email' },
   async run(args, { api }) {
-    const r = await api.request<CheckSummary & { required_by?: string[]; template?: { verified?: boolean; remaining_checks?: string[] } }>('POST', '/v1/checks/email', { body: { ...args, kind: checkKind(args.kind) } });
+    const r = await api.request<CheckSummary & { plan?: string; required_by?: string[]; template?: { verified?: boolean; remaining_checks?: string[] } }>('POST', '/v1/checks/email', { body: { ...args, kind: checkKind(args.kind) } });
     const notes = checkNotes(r, 8, r.template?.verified ? { by: 'template (subject + text or html; add your greeting and sign-off around it if you like)', except: r.template.remaining_checks ?? [] } : undefined);
     notes.unshift(r.required_by?.length ? `Legally required for this plan by: ${citationList(r.required_by, (r as { requirements?: Array<{ id: string; citation: string }> }).requirements)}.` : 'Not legally required for this plan (still good practice).');
-    return { headline: verdictHeadline(`Email (${String(args.kind)})`, r), notes, data: slimCheckResult(r as unknown as Record<string, unknown>) };
+    return { headline: verdictHeadline(`Email (${String(args.kind)}${r.plan ? `, plan ${untrusted(r.plan, 60)}` : ''})`, r), notes, data: slimCheckResult(r as unknown as Record<string, unknown>) };
   },
 };
 
@@ -1212,7 +1418,10 @@ const checkPageHtml: ToolDef = {
     html: z.string().max(1_000_000).optional().describe('Rendered checkout page HTML. Give html or url.'),
     url: z.string().max(2048).optional().describe('Live public page URL to fetch instead (live, activated accounts).'),
     page_kind: z.enum(['checkout', 'pricing']).optional().describe('Default checkout.'),
-    terms: planTerms.optional().describe('The plan sold on the page (helps judge price / interval statements).'),
+    terms: planTerms.optional().describe('The plan sold on the page. merchant_name / cancel_url alone are fine (no price compared).'),
+    plans: z.array(strictObject(planTermsShape, 'plans[]')).max(20).optional().describe('Multi-plan pricing page: EVERY plan it sells (price, interval, trial_days each). Each plan card is judged against its own plan; plan_replacements gives each plan its own markup for its own button.'),
+    checkout_type: z.enum(['own_page', 'stripe_checkout', 'payment_link']).optional().describe('Where shoppers pay (default: inferred).'),
+    site: z.string().max(100).optional().describe("Your site_…: judge it as verify_task does (the site's Stripe-checked plans)."),
     jurisdictions: jurisdictions.optional(),
     as_of: asOf.optional(),
   },
@@ -1220,8 +1429,10 @@ const checkPageHtml: ToolDef = {
   annotations: { ...roOpen, title: 'Check page' },
   async run(args, { api }) {
     if (!args.html && !args.url) throw new ToolError('Pass html (the rendered page) or url.');
-    const r = await api.request<CheckSummary & { extraction?: { purchase_buttons?: string[] } }>('POST', '/v1/checks/page', { body: args });
+    const r = await api.request<CheckSummary & { extraction?: { purchase_buttons?: string[] }; replacement?: { consent_on?: string; note?: string } }>('POST', '/v1/checks/page', { body: args });
     const notes = checkNotes(r);
+    // Round 17 (python-flask): on a Payment Link / Stripe Checkout page, replacement.html is the terms only.
+    if (r.replacement?.consent_on && r.replacement.note && r.verdict !== 'pass') notes.push(`Replacement: ${r.replacement.note}`);
     if (r.extraction?.purchase_buttons) {
       const b = r.extraction.purchase_buttons;
       notes.unshift(b.length ? `Purchase buttons found: ${b.length} (first: ${untrusted(b[0], 60)}; texts in extraction.purchase_buttons).` : 'Purchase buttons found: none (send the rendered HTML).');
@@ -1239,6 +1450,7 @@ interface ScheduledNotice {
   window_closes_at?: number;
   jurisdictions: string[];
   days_before: number;
+  timing_note?: string;
 }
 
 const DAY_S = 86_400;
@@ -1255,7 +1467,7 @@ export function noticeScheduleLine(n: ScheduledNotice): string {
   }
   const most = Math.round((anchor - n.window_opens_at) / DAY_S);
   const least = Math.round((anchor - n.window_closes_at) / DAY_S);
-  const window = least >= 0 && most >= least ? `; allowed ${least}–${most} days before` : '';
+  const window = least >= 0 && most >= least ? `; allowed ${least === most ? `exactly ${least}` : `${least}–${most}`} days before` : '';
   return `${n.send_date}: ${n.kind} — ${n.days_before} days before ${event} (${n.anchor_date})${window} (${n.jurisdictions.join(', ')})`;
 }
 
@@ -1290,14 +1502,15 @@ const getNoticeSchedule: ToolDef = {
   name: 'get_notice_schedule',
   title: 'Get the dates each required notice must be sent',
   description: [
-    'For a plan (price, interval, trial) and a sign-up date: every legally required notice (acknowledgment, trial-ending reminder, renewal reminder, yearly terms reminder, charge notice, price-change notice — the same emails as the compliance plan\'s email tasks) with the recommended send date, the compliant window (earliest/latest), the jurisdictions it satisfies and citations; plus notice kinds NOT required and why.',
+    'For a plan (price, interval, trial) and a sign-up date: every legally required notice (acknowledgment, trial-ending reminder, renewal reminder, yearly terms reminder, charge notice, price-change notice — the same emails as the compliance plan\'s email tasks) with the recommended send date, the allowed send window (earliest/latest), the jurisdictions it satisfies and citations; plus notice kinds NOT required and why.',
     'Use it to implement reminder emails / cron jobs correctly. Example: {"terms":{"price":99,"interval":"year","trial_days":30},"start_date":"2026-11-01"}.',
   ].join('\n'),
   input: {
-    terms: planTerms.describe('The plan: price (or amount), interval, interval_count, trial_days.'),
+    terms: planTerms.optional().describe('The plan: price (or amount), interval, interval_count, trial_days (or site + plan).'),
+    site: z.string().max(100).optional().describe('site_… (its plans, jurisdictions)'),
+    plan: z.string().max(200).optional().describe('With site: plan name or price_…'),
     start_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe('Sign-up date, YYYY-MM-DD (default today).'),
-    price_change: z
-      .object({ effective_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), new_price: z.number().positive().optional() })
+    price_change: strictObject({ effective_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), new_price: z.number().positive().optional() }, 'price_change')
       .optional()
       .describe('A planned price change to schedule the notice for.'),
     cycles: z.number().int().min(1).max(24).optional().describe('How many renewals to plan (default one year).'),
@@ -1308,20 +1521,24 @@ const getNoticeSchedule: ToolDef = {
   scopes: ['checks:read'],
   annotations: { ...ro, title: 'Notice schedule' },
   async run(args, { api }) {
-    const r = await api.request<{ notices: ScheduledNotice[]; not_required?: Array<{ kind: string; reason: string }> }>(
+    const r = await api.request<{ notices: ScheduledNotice[]; not_required?: Array<{ kind: string; reason: string }>; rounding_rule?: string; plan?: string; warnings?: Array<{ message: string }> }>(
       'POST',
       '/v1/checks/notice_schedule',
       { body: args },
     );
+    const singleDay = [...new Set(r.notices.flatMap((n) => (n.timing_note ? [`${n.kind}: ${n.timing_note}`] : [])))].slice(0, 3);
     const kinds = [...new Set(r.notices.map((n) => n.kind))];
     return {
       // Polish round: one email per kind, named like the compliance plan's email tasks (the per-send dates follow).
       headline: kinds.length
-        ? `${kinds.length} required email${kinds.length === 1 ? '' : 's'} for this plan: ${kinds.map((k) => NOTICE_KIND_TASKS[k] ? `${NOTICE_KIND_TASKS[k]!.name} (plan task ${NOTICE_KIND_TASKS[k]!.task})` : k).join(', ')}; ${r.notices.length} send${r.notices.length === 1 ? '' : 's'} in the period below.`
+        ? `${kinds.length} required email${kinds.length === 1 ? '' : 's'} for ${r.plan ? `plan ${untrusted(r.plan, 60)}` : 'this plan'}: ${kinds.map((k) => NOTICE_KIND_TASKS[k] ? `${NOTICE_KIND_TASKS[k]!.name} (plan task ${NOTICE_KIND_TASKS[k]!.task})` : k).join(', ')}; ${r.notices.length} send${r.notices.length === 1 ? '' : 's'} in the period below.`
         : 'No required notices for this plan under these jurisdictions.',
       notes: [
         ...noticeScheduleLines(r.notices),
+        ...singleDay,
+        ...(r.rounding_rule ? [`Timing rule: ${r.rounding_rule}`] : []),
         ...(r.not_required ?? []).map((n) => `Not required: ${n.kind} — ${n.reason}`),
+        ...(r.warnings ?? []).filter((w) => typeof w?.message === 'string').slice(0, 3).map((w) => w.message),
       ],
       data: r,
     };
@@ -1367,7 +1584,7 @@ const SUGGESTION_SURFACE_NAMES = [
 
 const suggestImprovements: ToolDef = {
   name: 'suggest_improvements',
-  title: 'Suggest compliant conversion improvements',
+  title: 'Suggest conversion improvements that keep the checks passing',
   description: [
     'OPTIONAL, after compliance: concrete ways to make the checkout page, Stripe Checkout, lifecycle emails and the cancellation flow convert or retain better WITHOUT breaking automatic-renewal laws. Deterministic library; every after-example was run through Checkbox\'s own checks for the merchant\'s states before it is offered.',
     'Each suggestion gives apply.where + apply.content (the exact copy, Stripe JSON patch or flow change to make), apply.instructions, preconditions that must be true (never apply one whose precondition is false), and guardrails with catalog requirement ids (e.g. California / Colorado click-to-cancel next to any save offer, Minnesota ask-first). Never invent figures or add urgency, pre-checked boxes or obstacles.',
@@ -1377,7 +1594,7 @@ const suggestImprovements: ToolDef = {
   input: {
     site: siteId.optional(),
     terms: planTerms.optional().describe('The plan sold (price or amount, interval, trial_days, merchant_name, cancel_url). Required with disclosure or emails.'),
-    other_plans: z.array(planTerms.extend({ name: z.string().max(80).optional().describe('Plan name, e.g. "Lite" (or plan_name).') })).max(10).optional().describe('Other plans you sell (enables cheaper-plan / plan-choice suggestions).'),
+    other_plans: z.array(strictObject({ ...planTermsShape, name: z.string().max(80).optional().describe('Plan name, e.g. "Lite" (or plan_name).') }, 'other_plans[]')).max(10).optional().describe('Other plans you sell (enables cheaper-plan / plan-choice suggestions).'),
     disclosure: z
       .object({
         text: z.string().min(1).max(5000).describe('Disclosure next to the purchase button, as rendered.'),
@@ -1453,7 +1670,7 @@ const suggestImprovements: ToolDef = {
     });
     if (r.suggestions.length > 15) notes.push(`…and ${r.suggestions.length - 15} more in data.suggestions.`);
     const held = r.surfaces.filter((s) => s.held_by.length);
-    if (held.length) notes.push(`Held (fix first with get_compliance_plan): ${held.map((s) => `${s.surface} (${s.held_label ? `${s.held_label.toUpperCase()}: ` : ''}${s.held_by.join(', ')})`).join('; ')}.`);
+    if (held.length) notes.push(`Held (fix first with get_compliance_plan): ${held.map((s) => `${s.surface} (${s.held_label ? `${s.held_label}: ` : ''}${s.held_by.join(', ')})`).join('; ')}.`);
     if (r.withheld.length) notes.push(`Withheld: ${r.withheld.slice(0, 8).map((w) => `${w.key}: ${w.reason}`).join(' | ')}`);
     return { headline: `Suggestions for ${where}: ${r.summary}`, notes, data: r };
   },
@@ -1553,10 +1770,17 @@ const updateSite: ToolDef = {
     name: z.string().max(200).optional().describe('Merchant / brand name (used in generated disclosures).'),
     checkout_url: z.string().max(2048).optional().describe('Page with the Subscribe / Buy button.'),
     checkout_steps: z.array(z.record(z.string(), z.unknown())).max(20).optional().describe('Steps to reach the purchase button (clicks / fills), as in the API.'),
-    test_account: z
-      .object({ login_url: z.string().max(2048), email: z.string().max(320), password: z.string().max(200) })
+    test_account: strictObject(
+      {
+        login_url: z.string().max(2048),
+        email: z.string().max(320),
+        password: z.string().max(200),
+        reactivate_url: z.string().max(2048).optional().describe('Test-only page that re-subscribes the test account.'),
+      },
+      'test_account',
+    )
       .optional()
-      .describe('A TEST subscriber account the scanner logs in with to try cancelling online.'),
+      .describe('A TEST subscriber account the scanner logs in with to try cancelling online (echoed back without the password).'),
     platform: z.enum(['stripe', 'shopify', 'recharge', 'chargebee', 'recurly', 'paddle', 'woocommerce', 'custom']).optional(),
     jurisdictions: z.array(z.string().max(10)).max(60).optional(),
     monitoring_interval_minutes: z.number().int().min(0).optional(),
@@ -1600,7 +1824,7 @@ const getSiteStatus: ToolDef = {
   name: 'get_site_status',
   title: 'Get a site\'s compliance status',
   description:
-    'Where a site stands: one status (Compliant, Needs a fix, Not set up yet, Not checked yet, Your call) and the to-do list: the compliance plan\'s ordered open tasks, as on the dashboard. Use it for "am I compliant?"; get_task gives each change.',
+    'Where a site stands: one status (Checks pass, N fixes needed, Not set up yet, Not checked yet, Your call) and the to-do list: the compliance plan\'s ordered open tasks, as on the dashboard. Use it for "am I compliant?"; get_task gives each change.',
   input: { site: siteId.optional() },
   scopes: ['sites:read'],
   annotations: { ...ro, title: 'Site status' },
@@ -1644,12 +1868,26 @@ const getSiteStatus: ToolDef = {
             ? { type: 'fix', message: 'Call get_compliance_plan for the ordered changes.', operation_id: 'retrieveCompliancePlan' }
             : rollStatus === 'your_call' || todo.some((t) => t.status === 'your_call')
               ? { type: 'review', message: 'Some items need a decision from the human: call get_compliance_plan for the questions (each has a recommended answer).', operation_id: 'retrieveCompliancePlan' }
+              : rollStatus === 'compliant' && !todo.length
+                ? // Round 15 (pilot 14, change-guard: "Checks pass · 3 live checks pending" next to "the site is not shown
+                  // as passing yet"): one status, one sentence. When the roll-up says Checks pass, next_action says the
+                  // same; the live checks are named as what completes it, never as a reason it does not pass.
+                  pendingLive.length
+                    ? {
+                        type: 'complete_live_checks',
+                        message: `${plainLabel(label ?? 'Checks pass')}: nothing needs a code change. ${pendingLive.length} live check(s) complete on their own (${pendingLive
+                          .slice(0, 3)
+                          .map((p) => p.what)
+                          .join('; ')}); get_compliance_plan says how each one completes (a proof run, BCC real sends, a test account).`,
+                        operation_id: 'retrieveCompliancePlan',
+                      }
+                    : { type: 'none', message: `${plainLabel(label ?? 'Checks pass')}: every check that applies passes; nothing left to do. Keep monitoring on.` }
               : blocking.length || pendingLive.length || seriousReview.length || todo.length
                 ? // Normal round 4 (nextjs): "nothing left to do — Compliant" next to 2 blocking checks. Never call a site
                   // compliant while a blocking check, a pending live check or an open plan task remains.
                   {
                     type: 'complete_live_checks',
-                    message: `Nothing needs a code change now, but the site is not shown as passing yet: ${[
+                    message: `Nothing needs a code change now, but the site is not shown as passing yet (${plainLabel(label ?? 'Not checked yet')}): ${[
                       todo.length ? `${todo.length} task(s) on the plan (${todo.slice(0, 3).map((t) => t.title).join('; ')})` : '',
                       blocking.length ? `blocking check(s) ${blocking.slice(0, 4).join(', ')}` : '',
                       pendingLive.length ? `${pendingLive.length} live check(s) pending` : '',
@@ -1905,11 +2143,13 @@ interface DisclosureLite {
 }
 
 function toDisclosureTerms(t: Record<string, unknown>): Record<string, unknown> {
-  const out = pick(t, ['merchant_name', 'amount', 'currency', 'interval', 'interval_count', 'trial_days', 'cancel_url', 'cancel_timing']);
+  const out = pick(t, ['merchant_name', 'amount', 'currency', 'interval', 'interval_count', 'trial_days', 'intro_percent_off', 'intro_periods', 'cancel_url', 'cancel_timing']);
+  if (out.merchant_name === undefined && typeof t.brand_name === 'string') out.merchant_name = t.brand_name;
   if (out.amount === undefined && t.price !== undefined) {
     const n = typeof t.price === 'number' ? t.price : Number(String(t.price).replace(/[^0-9.]/g, ''));
     if (Number.isFinite(n) && n > 0) out.amount = Math.round(n * 100);
   }
+  if (typeof t.intro_price === 'number' && t.intro_price >= 0) out.intro_amount = Math.round(t.intro_price * 100);
   return out;
 }
 
@@ -1932,7 +2172,7 @@ function reactSnippet(d: DisclosureLite): string {
 const elementsInstallNotes = [
   'Put script_tag in <head>; put element_html inside the sign-up form directly ABOVE the pay button. It keeps the button disabled until the shopper ticks the (unchecked, required) box.',
   'Your server receives checkbox_consent_id (cons_…) with the form: store it with the subscription (e.g. Stripe metadata.checkbox_consent).',
-  'Do not restyle it below body size or hide it; guard rails restore compliant styles and report what they found.',
+  'Do not restyle it below body size or hide it; guard rails restore the required styles and report what they found.',
 ];
 
 const elementsTermsShape = {
@@ -1949,29 +2189,30 @@ const elementsTermsShape = {
 
 const getCompliantDisclosure: ToolDef = {
   name: 'get_compliant_disclosure',
-  title: 'Generate a compliant disclosure for given terms',
+  title: 'Generate a disclosure that passes the checks for given terms',
   description: [
     'Generates the locked, engine-verified automatic-renewal disclosure for a plan: disclosure_text, consent_label (for an unchecked, required checkbox), button_text and drop-in html. The same wording Checkbox Elements and Fixes use.',
-    'Give the terms: price (major units) or amount (minor), interval, trial_days, cancel_url, merchant_name. Example: {"merchant_name":"Acme","price":19.99,"interval":"month","trial_days":14,"cancel_url":"https://acme.example/account/cancel"}.',
+    'Give the terms: price (major units) or amount (minor), interval, trial_days, cancel_url, merchant_name, promo (intro_price or intro_percent_off, intro_periods). Example: {"merchant_name":"Acme","price":19.99,"interval":"month","trial_days":14,"cancel_url":"https://acme.example/account/cancel"}.',
     'With site (and a key allowed to create disclosures), it also returns the Checkbox Elements snippet (script tag + <checkbox-disclosure> element + React usage) that records each consent as evidence.',
   ].join('\n'),
-  input: { ...elementsTermsShape, interval: z.enum(['day', 'week', 'month', 'year']).describe('Billing interval.'), site: z.string().max(100).optional().describe('Site id (site_…) to also get the Elements snippet for.'), jurisdictions: jurisdictions.optional() },
+  // Round 15 (P4): a promo (intro price) is stated with how long it lasts.
+  input: { ...elementsTermsShape, brand_name: planTermsShape.brand_name, intro_price: planTermsShape.intro_price, intro_percent_off: planTermsShape.intro_percent_off, intro_periods: planTermsShape.intro_periods, interval: z.enum(['day', 'week', 'month', 'year']).describe('Billing interval.'), site: z.string().max(100).optional().describe('Site id (site_…) to also get the Elements snippet for.'), jurisdictions: jurisdictions.optional() },
   scopes: ['checks:read'],
-  annotations: { ...ro, readOnlyHint: false, title: 'Compliant disclosure' },
+  annotations: { ...ro, readOnlyHint: false, title: 'Disclosure that passes the checks' },
   async run(args, { api, key }) {
     if (typeof args.site === 'string' && args.site && keyAllows(key, 'consents:write')) {
       const d = await api.request<DisclosureLite>('POST', '/v1/disclosures', { body: { site: args.site, terms: toDisclosureTerms(args) } });
       return {
-        headline: `Compliant disclosure ${d.id}${d.verification?.passes === undefined ? '' : d.verification.passes ? ' (passes the sign-up checks on your checkout)' : ' (see verification: not every check passes yet)'}.`,
+        headline: `Disclosure ${d.id}${d.verification?.passes === undefined ? '' : d.verification.passes ? ' (passes the sign-up checks on your checkout)' : ' (see verification: not every check passes yet)'}.`,
         notes: [`Disclosure: ${d.text}`, `Consent label: ${d.consent_label}`, ...elementsInstallNotes],
         data: { ...d, react: reactSnippet(d) },
       };
     }
     // No site: generate from the terms with the stateless check (the replacement does not depend on the text checked).
-    const body: Record<string, unknown> = { text: '(no disclosure yet)', ...pick(args, ['merchant_name', 'plan_name', 'price', 'amount', 'currency', 'interval', 'interval_count', 'trial_days', 'cancel_url', 'cancel_timing', 'jurisdictions']) };
+    const body: Record<string, unknown> = { text: '(no disclosure yet)', ...pick(args, ['merchant_name', 'brand_name', 'plan_name', 'price', 'amount', 'currency', 'interval', 'interval_count', 'trial_days', 'intro_price', 'intro_percent_off', 'intro_periods', 'cancel_url', 'cancel_timing', 'jurisdictions']) };
     const r = await api.request<{ replacement: Record<string, unknown> & { disclosure_text: string; consent_label: string; verified: boolean; placeholders?: string[] }; disclaimer?: string }>('POST', '/v1/checks/disclosure', { body });
     return {
-      headline: `Compliant disclosure generated (engine-verified: ${r.replacement.verified}).`,
+      headline: `Suggested disclosure generated (${r.replacement.verified ? 'passes the checks, verified by the rules engine' : 'not fully verified by the rules engine'}).`,
       notes: [
         `Disclosure: ${r.replacement.disclosure_text}`,
         `Consent label: ${r.replacement.consent_label}`,
@@ -1989,7 +2230,7 @@ const getElementsSnippet: ToolDef = {
   title: 'Get the Checkbox Elements snippet for a site',
   description: [
     'Returns paste-ready Checkbox Elements markup for a site: the pinned <script> tag (with SRI) for <head>, the <checkbox-disclosure> element for directly above the pay button, the publishable key, and a React usage example.',
-    'The element renders the locked compliant disclosure with an unchecked, required consent checkbox, gates the pay button, and records each consent (cons_…) in the evidence vault. Terms come from the site\'s billing connection unless you pass them.',
+    'The element renders the locked disclosure (it passes the checks) with an unchecked, required consent checkbox, gates the pay button, and records each consent (cons_…) in the evidence vault. Terms come from the site\'s billing connection unless you pass them.',
     'This creates a disclosure record (write, safe to repeat). Consents themselves are recorded by the browser, never by agents.',
   ].join('\n'),
   input: { site: requiredSite, plan: z.string().max(200).optional().describe('Billing price / plan id (price_…) when the site has several.'), ...elementsTermsShape },
@@ -2205,7 +2446,7 @@ const getNoticeTemplates: ToolDef = {
     site: z.string().max(100).optional().describe('Site (site_…): adds BCC addresses; required with check.'),
     check: z
       .object({
-        kind: emailKind.exclude(['charge_notice']).describe('Notice kind.'),
+        kind: emailKind.describe('Notice kind.'),
         subject: z.string().max(1000).describe('Subject (merge fields allowed).'),
         text: z.string().max(100_000).optional().describe('Plain-text body.'),
         html: z.string().max(100_000).optional().describe('HTML body.'),
@@ -2272,10 +2513,71 @@ const callApi: ToolDef = {
 };
 
 /** Every tool, in the order clients list them. */
+/**
+ * Round 12 (pilot 11, nextjs + agent users): setup_checkbox dropped unknown fields silently; the homepage prompt says
+ * "brand", the schema says merchant_name, so the site was named "localhost" with no warning. Common spellings of the
+ * brand are read as merchant_name; any other unknown field is listed back as ignored.
+ */
+export const SETUP_FIELD_ALIASES: Readonly<Record<string, string>> = Object.freeze({ brand: 'merchant_name', brand_name: 'merchant_name', business_name: 'merchant_name', company_name: 'merchant_name', platform: 'billing_platform' });
+const BILLING_PLATFORMS = new Set(['stripe', 'shopify', 'recharge', 'chargebee', 'recurly', 'paddle', 'woocommerce', 'custom']);
+
+export function normalizeSetupArgs(raw: Record<string, unknown>, known: ReadonlySet<string>): { args: Record<string, unknown>; aliased: string[]; ignored: string[] } {
+  const args: Record<string, unknown> = {};
+  const aliased: string[] = [];
+  const ignored: string[] = [];
+  for (const [k, v] of Object.entries(raw)) if (known.has(k)) args[k] = v;
+  for (const [k, v] of Object.entries(raw)) {
+    if (known.has(k)) continue;
+    const to = SETUP_FIELD_ALIASES[k];
+    const ok = typeof v === 'string' && !!v.trim() && (to !== 'billing_platform' || BILLING_PLATFORMS.has(v.trim().toLowerCase()));
+    if (to && known.has(to) && ok && args[to] === undefined) {
+      args[to] = to === 'billing_platform' ? (v as string).trim().toLowerCase() : (v as string).trim().slice(0, 100);
+      aliased.push(`${k} (read as ${to})`);
+    } else ignored.push(k);
+  }
+  return { args, aliased, ignored };
+}
+
+/** Messages of the API's `warnings` ({ code, message }) on a setup result (or its session). */
+export function apiWarningMessages(data: unknown): string[] {
+  if (!data || typeof data !== 'object') return [];
+  const d = data as { warnings?: unknown; session?: { warnings?: unknown } };
+  const list = Array.isArray(d.warnings) ? d.warnings : Array.isArray(d.session?.warnings) ? d.session!.warnings as unknown[] : [];
+  return list.flatMap((w) => (w && typeof w === 'object' && typeof (w as { message?: unknown }).message === 'string' ? [`Warning: ${(w as { message: string }).message}`] : []));
+}
+
+function acceptingSetupAliases(def: ToolDef): ToolDef {
+  const known = new Set(Object.keys(def.input));
+  return {
+    ...def,
+    passthrough: true,
+    async run(raw, ctx) {
+      const { args, aliased, ignored } = normalizeSetupArgs(raw, known);
+      // Round 18 (item 19, pilot 17): update_setup refuses unknown top-level fields, as it refuses unknown nested ones
+      // (an ignored field read as "saved" to the agent).
+      if (ignored.length && def.name === 'update_setup') {
+        throw new ToolError(unknownArgumentsMessage(def.name, ignored, [...known]), { type: 'fix_request', message: 'Rename or remove those fields and call update_setup again.' });
+      }
+      const out = await def.run(args, ctx);
+      // Pilot round 13: the API's input warnings (plan amounts that look like dollars, or differ from the Stripe Price)
+      // are shown, and kept next to the field warnings below.
+      const apiWarnings = apiWarningMessages(out.data);
+      if (!aliased.length && !ignored.length && !apiWarnings.length) return out;
+      const warnings = [
+        ...apiWarnings,
+        ...(aliased.length ? [`Read ${aliased.join(', ')}.`] : []),
+        ...(ignored.length ? [`Ignored unknown field${ignored.length === 1 ? '' : 's'}: ${ignored.join(', ')}. ${def.name} accepts: ${[...known].filter((k) => k !== 'device_code').join(', ')}.`] : []),
+      ];
+      const data = out.data && typeof out.data === 'object' && !Array.isArray(out.data) ? { ...(out.data as Record<string, unknown>), warnings } : out.data;
+      return { ...out, notes: [...warnings, ...(out.notes ?? [])], data };
+    },
+  };
+}
+
 export const TOOLS: readonly ToolDef[] = [
-  setupCheckbox,
+  acceptingSetupAliases(setupCheckbox),
   getSetupStatus,
-  updateSetup,
+  acceptingSetupAliases(updateSetup),
   completeSetup,
   getCompliancePlan,
   getTask,

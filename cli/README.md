@@ -108,7 +108,7 @@ checkbox verify --wait                    # re-check the whole site
 
 The site comes from `--site`, `$CHECKBOX_SITE`, what `checkbox init` saved for this directory, or your only site.
 `fix --out fix.diff` also writes the diff for `git apply`. `verify` accepts `--html-file` (pre-deploy HTML),
-`--stripe-params <json>` and `--email-file <json>`. Exit codes: `plan --exit-code` 1 while not compliant; `verify` 0 passed,
+`--stripe-params <json>` and `--email-file <json>`. Exit codes: `plan --exit-code` 1 until the checks pass; `verify` 0 passed,
 1 failed, 2 still pending. Docs: https://checkbox.site/docs/cli
 
 Not legal advice: Checkbox is an automated check against its catalog of automatic-renewal laws.
