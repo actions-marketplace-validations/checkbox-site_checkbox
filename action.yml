@@ -44,8 +44,14 @@ inputs:
 
 outputs:
   status:
-    description: pass, fail, needs_review, error or skipped.
+    description: pass, fail, needs_review, error or skipped. needs_review fails the job only with --strict or a "strict" entry; read exit-code or result for the outcome.
     value: ${{ steps.checkbox.outputs.status }}
+  exit-code:
+    description: The exit code of checkbox ci (0 passed; 1 fixes needed; 2 needs review that fails the run, or nothing checked; 3 config error).
+    value: ${{ steps.checkbox.outputs.exit_code }}
+  result:
+    description: The outcome in words, consistent with the exit code (e.g. "passed with items to review (they do not fail this run)").
+    value: ${{ steps.checkbox.outputs.result }}
 
 runs:
   using: composite

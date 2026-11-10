@@ -1,6 +1,6 @@
 {
   "name": "@checkbox-site/node",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "description": "Checkbox Node.js SDK: auto-renewal law and subscription compliance checks (FTC ROSCA, California ARL, New York and other state laws) for Stripe Checkout and other subscription checkouts. Zero dependencies. Published to npm as @checkbox-site/node.",
   "keywords": [
     "subscription",

@@ -760,6 +760,8 @@ const setupCheckbox: ToolDef = {
         headline: `Ask the human to open ${auth.verification_uri_complete} and click Approve (code ${auth.user_code}). It expires in ${Math.round(auth.expires_in / 60)} minutes.`,
         notes: [
           'Tell the human exactly one line, e.g. "Open <link> and click Approve to connect Checkbox (free, no card)." Do not ask them to copy keys.',
+          // Round 32 (pilot 31 item 13): the Stripe key box and the restricted key in the same message (one approval).
+          `${args.billing_platform === 'stripe' ? 'In the same message' : 'If the site sells through Stripe, in the same message'}, ask them to tick “Let your agent store a Stripe test-mode key” on that page and, if the project has no rk_test_ key yet, to create a restricted key in Stripe Test mode (https://dashboard.stripe.com/test/apikeys → Create restricted key, with the permissions the approval page lists) and put it in the project's env file (never in the chat): one approval then covers the key and the test subscription.`,
           `Then call setup_checkbox again with device_code "${auth.device_code}" AND the same facts (site_url, checkout_url, merchant_name, plans, policy URLs): after the approval Checkbox applies them and runs the first checks in that call. Keep the device_code private; it is not shown to the human.`,
         ],
         next: { type: 'wait_for_approval', message: `Call setup_checkbox with device_code "${auth.device_code}" to wait for the approval.`, operation_id: 'createDeviceToken' },
@@ -838,14 +840,14 @@ const getSetupStatus: ToolDef = {
       if (pl) notes.push(pl);
       return { headline: `Re-checked setup session ${id}.`, ...(notes.length ? { notes } : {}), data: withoutLegacyScore(res), next: nextActionOf(res) ?? nextActionOf(res.setup_session) ?? nextActionOf(res.session) };
     }
-    const session = await api.request<{ id: string; status: string; unverified_scan?: unknown; site_plans?: unknown; steps?: Array<{ key?: string; status?: string; title?: string; summary?: string }> }>('GET', `/v1/setup_sessions/${enc(id)}`);
+    const session = await api.request<{ id: string; status: string; unverified_scan?: unknown; site_plans?: unknown; go_live?: GoLiveLite | null; next_action?: { type?: string }; steps?: Array<{ key?: string; status?: string; title?: string; summary?: string }> }>('GET', `/v1/setup_sessions/${enc(id)}`);
     const open = (session.steps ?? []).filter((s) => s.status && !['done', 'skipped', 'not_applicable'].includes(s.status));
     const ro = unverifiedScanNote(session.unverified_scan);
     const plansLine = sitePlansNote(session.site_plans);
     return {
       headline: `Setup session ${session.id}: ${session.status}; ${open.length} checklist step(s) open.`,
       // The policies step says what an unverified preview read (or that the pages wait for domain verification).
-      notes: [...open.slice(0, 8).map((s) => `${s.status}: ${s.title ?? s.key}${s.key === 'policies' && s.summary ? ` (${s.summary.slice(0, 240)})` : ''}`), ...(ro ? [ro] : []), ...(plansLine ? [plansLine] : [])],
+      notes: [...open.slice(0, 8).map((s) => `${s.status}: ${s.title ?? s.key}${s.key === 'policies' && s.summary ? ` (${s.summary.slice(0, 240)})` : ''}`), ...(ro ? [ro] : []), ...(plansLine ? [plansLine] : []), ...(session.next_action?.type === 'done' ? goLiveNotes(session.go_live) : [])],
       data: withoutLegacyScore(session),
     };
   },
@@ -897,20 +899,33 @@ export function summaryEmailLine(status: string | null | undefined, d: { at?: nu
   return 'not sent';
 }
 
+export interface GoLiveLite {
+  summary: string;
+  steps: Array<{ key: string; who: 'person' | 'agent'; text: string; url?: string }>;
+}
+
+/** Round 32 (pilot 31 item 1): the go-live list as notes: what to tell the owner, then each step with who takes it. Pure. */
+export function goLiveNotes(g: GoLiveLite | null | undefined): string[] {
+  if (!g?.steps?.length) return [];
+  return [g.summary, ...g.steps.map((s, i) => `Go live ${i + 1} (${s.who === 'person' ? 'owner' : 'you, the agent'}): ${s.text}${s.url ? ` ${s.url}` : ''}`)];
+}
+
 const completeSetup: ToolDef = {
   name: 'complete_setup',
   title: 'Finish setup and email the human a summary',
   description:
-    'Call once the setup checklist next_action is "done" (or nothing else can be done without the human). Marks the setup finished and emails the person who approved it "<agent> set up Checkbox for <domain>" with what was created, what is still open and a review link. Idempotent: the email is sent once. Monitoring keeps running. Then work through get_compliance_plan.',
+    'Call once the setup checklist next_action is "done" (or nothing else can be done without the human). Marks the setup finished and emails the person who approved it "<agent> set up Checkbox for <domain>" with what was created, what is still open, the go-live steps and a review link. Idempotent: the email is sent once. Monitoring keeps running. In test mode it returns go_live: tell the human go_live.summary ("set up in test mode; N steps before real customers"), never just "done".',
   input: { setup_session: z.string().max(100).optional().describe('Setup session id (setup_…). Default: the newest one.') },
   scopes: ['setup_sessions:write'],
   annotations: { ...write(true), title: 'Complete setup' },
   async run(args, { api }) {
     const id = await resolveSetupSession(api, args.setup_session);
-    const session = await api.request<{ id: string; owner_email?: string | null; owner_email_detail?: { at?: number | null; to?: string | null; error?: string | null } | null; review_url?: string }>('POST', `/v1/setup_sessions/${enc(id)}/complete`, { body: {} });
+    const session = await api.request<{ id: string; owner_email?: string | null; owner_email_detail?: { at?: number | null; to?: string | null; error?: string | null } | null; review_url?: string; go_live?: GoLiveLite | null }>('POST', `/v1/setup_sessions/${enc(id)}/complete`, { body: {} });
+    // Round 32 (pilot 31 item 1): a test-mode setup is "set up in test mode; N steps before real customers", never "done".
+    const live = goLiveNotes(session.go_live);
     return {
-      headline: `Setup ${session.id} completed; summary email: ${summaryEmailLine(session.owner_email, session.owner_email_detail)}.`,
-      notes: session.review_url ? [`Human review page: ${session.review_url}`] : [],
+      headline: `Setup ${session.id} completed${session.go_live ? ` in Stripe test mode (${session.go_live.steps.length} step${session.go_live.steps.length === 1 ? '' : 's'} left before real customers)` : ''}; summary email: ${summaryEmailLine(session.owner_email, session.owner_email_detail)}.`,
+      notes: [...live, ...(session.review_url ? [`Human review page: ${session.review_url}`] : [])],
       data: withoutLegacyScore(session),
     };
   },
@@ -1034,6 +1049,7 @@ const getCompliancePlan: ToolDef = {
         ...(optional.length ? [`Optional suggestions (${plan.protection_level ?? 'balanced'} protection; never block the checks from passing): ${optional.map((t) => t.title).join('; ')}`] : []),
         ...(plan.optional_improvements ? ['Optional (never blocking, not part of compliance): conversion suggestions for this site with `suggest_improvements`.'] : []),
         'Each task below is a summary; call get_task with its id for the full change (diff, copy or params) before applying it.',
+        ...goLiveNotes((plan as { go_live?: GoLiveLite | null }).go_live),
         ...(plan.status === 'compliant' ? await reviewHint(api, site, 'plan_compliant') : []),
       ],
       // Normal-round pilot (sveltekit): the full plan (53K characters) was cut mid-JSON by the client. The plan here is a
@@ -1070,7 +1086,7 @@ interface PrecheckLite {
 export function precheckLines(pre: PrecheckLite | null | undefined, max = 12): string[] {
   const checks = pre?.checks ?? [];
   if (!checks.length) return [];
-  const order: Record<string, number> = { fail: 0, needs_review: 1, missing_data: 1, pass: 2, not_applicable: 3 };
+  const order: Record<string, number> = { fail: 0, needs_review: 1, missing_data: 1, pass: 2, informational: 2, not_applicable: 3 };
   const sorted = [...checks].sort((a, b) => (order[a.status] ?? 1) - (order[b.status] ?? 1));
   const lines = sorted.slice(0, max).map((c) => `${c.check_id}: ${c.status}${c.reason ? ` — ${untrusted(c.reason, 180)}` : ''}${c.fix ? ` Fix: ${untrusted(c.fix, 200)}` : ''}`);
   return [`Pre-check (${pre?.verdict ?? 'n/a'}), per check:`, ...lines, ...(checks.length > max ? [`and ${checks.length - max} more (data.precheck.checks)`] : [])];
@@ -1085,7 +1101,7 @@ const verifyTask: ToolDef = {
     '- page tasks: html = the rendered page HTML (before or after deploy; ≤ ~900 KB). Without it Checkbox fetches the live page.',
     '- Stripe tasks: stripe_checkout_session = exactly the object your code now passes to stripe.checkout.sessions.create.',
     '- email tasks: email = { subject, text and/or html } of the new template.',
-    'Result: verification status passed / failed (with a diff of expected vs observed) / pending (waiting for the confirming scan). Waits up to `wait` seconds. Then follow next_action (usually get_compliance_plan). A verification with checks still needs_review is reported as failed with next_action type needs_review: it is not done.',
+    'Result: verification status passed / failed (with a diff of expected vs observed) / pending (waiting for the confirming scan). Waits up to `wait` seconds. Then follow next_action (usually get_compliance_plan). A verification with checks still needs_review is reported as failed with next_action type needs_review: it is not done. "informational" checks are notes on Stripe\'s own layout: nothing to change.',
   ].join('\n'),
   input: {
     task: z.string().max(100).describe('Task id (task_…).'),
@@ -1254,7 +1270,7 @@ const startTestRun: ToolDef = {
   name: 'start_test_run',
   title: 'Run a synthetic test subscription (test mode)',
   description: [
-    'Observes the WHOLE subscription lifecycle, not just the checkout: in the billing platform\'s TEST mode Checkbox subscribes a test customer (card 4242…) whose email is a Checkbox inbox, waits for your acknowledgment email, fast-forwards a Stripe test clock through every legal notice window before trial end and renewal (collecting reminder emails), then cancels online and waits for the cancellation confirmation. Nothing is charged.',
+    'Observes the WHOLE subscription lifecycle in the billing platform\'s TEST mode: subscribes a test customer (card 4242…) with a Checkbox inbox email, waits for the acknowledgment, fast-forwards a Stripe test clock through each notice window before trial end and renewal (collecting reminders), then cancels online and waits for the confirmation. Nothing is charged.',
     'Needs a Stripe TEST-mode restricted key (rk_test_…) stored for the site: store it yourself with store_stripe_test_key (one key for checks, fixes and test runs; live keys stay with the human in the dashboard). Never ask the human to paste a key into the chat. If missing, the error\'s next_action says so. For non-Stripe sites use type "generic".',
     'Usually 1-2 minutes (real_checkout: a few): poll get_test_run (its next_action says when, and minutes_left estimates the rest). Each step reports observations, check results and agent-readable fixes; apply them and run again.',
     'mode "real_checkout" is the PROOF run: the shopper buys through the merchant\'s own checkout on its test deployment (stripe.checkout_url or stripe.payment_link), so the merchant\'s webhook handlers and email code fire; give stripe.test_account + stripe.cancel_url when customers cancel in the app. A step is "passed" only with evidence; "warning" means needs review.',
@@ -1469,8 +1485,10 @@ const checkEmail: ToolDef = {
   scopes: ['checks:read'],
   annotations: { ...ro, title: 'Check email' },
   async run(args, { api }) {
-    const r = await api.request<CheckSummary & { plan?: string; required_by?: string[]; template?: { verified?: boolean; remaining_checks?: string[] } }>('POST', '/v1/checks/email', { body: { ...args, kind: checkKind(args.kind) } });
-    const notes = checkNotes(r, 8, r.template?.verified ? { by: 'template (subject + text or html; add your greeting and sign-off around it if you like)', except: r.template.remaining_checks ?? [] } : undefined);
+    const r = await api.request<CheckSummary & { plan?: string; required_by?: string[]; template?: { verified?: boolean; remaining_checks?: string[]; placeholders?: string[] } }>('POST', '/v1/checks/email', { body: { ...args, kind: checkKind(args.kind) } });
+    // Round 32 (pilot 31): a template with values left to fill ({{support_contact}}, {{cancel_url}}) passes once they are filled.
+    const toFill = r.template?.placeholders ?? [];
+    const notes = checkNotes(r, 8, r.template?.verified ? { by: `template (subject + text or html; add your greeting and sign-off around it if you like${toFill.length ? `; replace ${toFill.join(', ')} with your real value${toFill.length === 1 ? '' : 's'} first, or pass them in terms` : ''})`, except: r.template.remaining_checks ?? [] } : undefined);
     notes.unshift(r.required_by?.length ? `Legally required for this plan by: ${citationList(r.required_by, (r as { requirements?: Array<{ id: string; citation: string }> }).requirements)}.` : 'Not legally required for this plan (still good practice).');
     return { headline: verdictHeadline(`Email (${String(args.kind)}${r.plan ? `, plan ${untrusted(r.plan, 60)}` : ''})`, r), notes, data: slimCheckResult(r as unknown as Record<string, unknown>) };
   },
@@ -1656,7 +1674,7 @@ const suggestImprovements: ToolDef = {
   name: 'suggest_improvements',
   title: 'Suggest conversion improvements that keep the checks passing',
   description: [
-    'OPTIONAL, after compliance: concrete ways to make the checkout page, Stripe Checkout, lifecycle emails and the cancellation flow convert or retain better WITHOUT breaking automatic-renewal laws. Deterministic library; every after-example was run through Checkbox\'s own checks for the merchant\'s states before it is offered.',
+    'OPTIONAL, after the checks pass: concrete ways to make the checkout, Stripe Checkout, lifecycle emails and cancellation flow convert or retain better WITHOUT breaking automatic-renewal laws. Every after-example passed Checkbox\'s own checks for the merchant\'s states.',
     'Each suggestion gives apply.where + apply.content (the exact copy, Stripe JSON patch or flow change to make), apply.instructions, preconditions that must be true (never apply one whose precondition is false), and guardrails with catalog requirement ids (e.g. California / Colorado click-to-cancel next to any save offer, Minnesota ask-first). Never invent figures or add urgency, pre-checked boxes or obstacles.',
     'With a site id (or one site in this mode): suggestions from what Checkbox observed. Or send the copy you are writing: terms + any of disclosure, page_html, stripe_checkout_session_params, emails, cancellation_flow (as in the check_* tools).',
     'Surfaces whose compliance checks fail are held: fix them first (get_compliance_plan). Suggestions never block and never count toward compliance. After applying one, re-run the check named in verification.operation_id on the real copy.',
@@ -2019,7 +2037,7 @@ const getFinding: ToolDef = {
   annotations: { ...ro, title: 'Finding' },
   async run(args, { api, key }) {
     const id = String(args.finding);
-    const finding = await api.request<{ id: string; title: string; status: string; severity: string; check_id: string; compliance?: ComplianceWire }>('GET', `/v1/findings/${enc(id)}`);
+    const finding = await api.request<{ id: string; title: string; status: string; severity: string; check_id: string; state?: string; compliance?: ComplianceWire }>('GET', `/v1/findings/${enc(id)}`);
     const fix = keyAllows(key, 'fixes:read')
       ? await optional(api.request<Record<string, unknown>>('GET', `/v1/findings/${enc(id)}/fix`, { query: pick(args, ['target', 'cancel_url', 'plan']) as Record<string, string> }))
       : { unavailable: 'This key has no fixes:read permission.' };
@@ -2027,10 +2045,24 @@ const getFinding: ToolDef = {
       headline: `${finding.severity.toUpperCase()} ${finding.id} [${finding.compliance?.label ?? finding.status}] ${finding.check_id}: ${finding.title}`,
       notes: [complianceBullet(finding.check_id, finding.compliance, finding.status, finding.title)].filter((x): x is string => !!x),
       data: { finding, fix },
-      next: nextActionOf(fix) ?? { type: 'apply_fix', message: 'Apply fix (or the matching task from get_compliance_plan), then call verify_site.', operation_id: 'verifySite' },
+      next: findingNext(finding, nextActionOf(fix)),
     };
   },
 };
+
+/**
+ * Round 32 (pilot 31, codex: get_finding on a not_applicable / resolved finding said "apply_fix … verify_site"). Next
+ * follows the finding's status: nothing to fix for a finding that passes, does not apply or is resolved. Pure, exported
+ * for tests.
+ */
+export function findingNext(finding: { status: string; state?: string; compliance?: { status?: string } | null }, fromFix: NextAction | null): NextAction {
+  const settled = finding.status === 'pass' || finding.status === 'not_applicable' || finding.state === 'resolved' || finding.compliance?.status === 'compliant' || finding.compliance?.status === 'not_applicable' || finding.compliance?.status === 'verified_live';
+  if (settled) {
+    const why = finding.state === 'resolved' ? 'resolved' : finding.status === 'not_applicable' || finding.compliance?.status === 'not_applicable' ? 'not applicable to this site' : 'passing';
+    return { type: 'continue', message: `Nothing to fix: this finding is ${why}. Continue with get_compliance_plan for what is left.`, operation_id: 'retrieveCompliancePlan' };
+  }
+  return fromFix ?? { type: 'apply_fix', message: 'Apply fix (or the matching task from get_compliance_plan), then call verify_site.', operation_id: 'verifySite' };
+}
 
 interface ShopifyPublicationLite {
   id: string;

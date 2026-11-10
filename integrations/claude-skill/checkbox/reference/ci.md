@@ -29,7 +29,11 @@ again. Use the plans and merchant facts you already sent to Checkbox.
   statically, nothing runs); `"module": "file.ts#export"` when a function builds them (it is called with `"args"`);
   `"file"` for a JSON file.
 - Emails: `"file"` for .html / .txt / .md templates (first line `Subject: …` or the HTML `<title>`); `"module"` for
-  templates rendered in code (React Email: an export returning `{ subject, html }` rendered with sample props).
+  templates rendered in code (React Email: an export returning `{ subject, html }` rendered with sample props). A
+  template with merge tags (`{{price}}`, `{{interval}}`) needs `"merge_tags": { "price": "plan.price", "interval":
+  "plan.interval" }` on its entry (values are filled from the entry's plan; no render module needed).
+- Each Checkout call sells one plan: one entry per call with its `"plan"`. Never pair a call with a plan its Price id
+  contradicts; `checkbox ci` refuses such a pairing (exit 3) instead of offering a fix.
 - Disclosure text that lives inside a component: move it to a .txt file the component imports, or check the built
   page under `"pages"` (`"file"`: static HTML; `"url"`: a preview, only with `--online`).
 - Several plans: every disclosure, page and email names its `"plan"`.
