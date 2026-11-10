@@ -387,6 +387,45 @@ UnverifiedScanValue = TypedDict(
 UnverifiedScan = Optional["UnverifiedScanValue"]
 
 
+GoLiveValueStepsItem = TypedDict(
+    "GoLiveValueStepsItem",
+    {
+        #: Stable step key.
+        "key": Literal["verify_domain", "stripe_terms_url", "live_stripe_key", "live_checkout", "promote_site"],
+        #: Who takes the step: person (only the owner can: DNS, the Stripe Dashboard, live keys) or agent (a code change).
+        "who": Literal["person", "agent"],
+        #: The step in plain words.
+        "text": str,
+        #: Where the person does it, when there is one fixed place. (optional)
+        "url": str,
+    },
+    total=False,
+)
+
+
+#: Test mode only: the steps left before real customers are covered, with who takes each (the compliance plan's go_live). When next_action is done, report "set up in test mode; N steps before real customers" (go_live.summary), never a plain done. Null in live mode or before the first checks.
+GoLiveValue = TypedDict(
+    "GoLiveValue",
+    {
+        #: Everything Checkbox observed came from Stripe test mode.
+        "mode": Literal["test"],
+        #: Heading.
+        "title": str,
+        #: One sentence before the steps.
+        "lead": str,
+        #: The steps, in order.
+        "steps": List["GoLiveValueStepsItem"],
+        #: What the agent tells the person instead of "done": set up in test mode, N steps left before real customers.
+        "summary": str,
+    },
+    total=False,
+)
+
+
+#: Test mode only: the steps left before real customers are covered, with who takes each (the compliance plan's go_live). When next_action is done, report "set up in test mode; N steps before real customers" (go_live.summary), never a plain done. Null in live mode or before the first checks.
+GoLive = Optional["GoLiveValue"]
+
+
 #: One step of the setup checklist.
 SetupStep = TypedDict(
     "SetupStep",
@@ -770,6 +809,7 @@ SetupSession = TypedDict(
         #: Latest verdict of the test-mode site.
         "compliance": Optional["SetupSessionCompliance"],
         "unverified_scan": "UnverifiedScan",
+        "go_live": "GoLive",
         #: The setup checklist, in order.
         "steps": List["SetupStep"],
         "next_action": "SetupNextAction",
@@ -821,6 +861,8 @@ SetupSessionUpdateProject = TypedDict(
         "env_file": str,
         #: Static files directory (for /.well-known). (optional)
         "public_dir": str,
+        #: The email library the project sends with (nodemailer, resend, @sendgrid/mail…), or "none" when nothing in it sends email (a static site): the plan then offers Checkbox Notices first for the required emails. (optional)
+        "mailer": str,
         #: Where checkout sessions / payment links are created: an ARRAY of { file, kind, line?, snippet? } objects, one per place (not a string), e.g. [{"file": "app.py", "line": 40, "kind": "stripe_checkout_session"}]. (optional)
         "checkout_code": List["SetupCodeRef"],
         #: Where the subscribe / pay buttons are rendered. (optional)
@@ -982,6 +1024,7 @@ SetupVerification = TypedDict(
         "domain_verified": Optional["SetupVerificationDomainVerified"],
         #: While the domain is not verified: the read-only scan of the site's own public pages (no checkout submitted).
         "unverified_scan": Optional["SetupVerificationUnverifiedScan"],
+        "next_action": "SetupNextAction",
         "setup_session": "SetupSession",
     },
     total=False,
@@ -2631,7 +2674,7 @@ Task = TypedDict(
         "change": "TaskChange",
         #: How to verify the task.
         "verify": "TaskVerify",
-        #: What Checkbox needs before it can give the exact change (observation: it has not seen the page / email yet; facts: plan, price, cancel URL or merchant name). The title stays the same either way.
+        #: What Checkbox needs before it can give the exact change or verify it (observation: it has not seen the page / email yet; facts: plan, price, cancel URL or merchant name; verify_domain: the site's domain is not verified yet, so Checkbox cannot visit it to verify this task: do the verify_domain task first). The title stays the same either way.
         "blocked_on": Optional[str],
         #: Done / declined tasks: verified (its checks pass), no_longer_applicable (its checks no longer apply, e.g. the data source changed), superseded, declined, decided (the owner confirmed a decision, e.g. New York notices by email only: closed, but its checks are not verified).
         "closed_reason": Optional[Literal["verified", "no_longer_applicable", "superseded", "declined", "decided"]],
@@ -2835,6 +2878,8 @@ CompliancePlan = TypedDict(
         "next_action": "PlanNextAction",
         #: Every open owner choice as ONE batched question (who sends the required emails, plus each question task such as the New York notice channel). Ask it once, early, in one message; the plan's next_action says the same. Absent when there is none. (optional)
         "owner_questions": "CompliancePlanOwnerQuestions",
+        #: (optional)
+        "go_live": "GoLive",
         #: Evidence level per required email kind. A plan never reaches status compliant on template_checked emails.
         "email_verification": List["CompliancePlanEmailVerificationItem"],
         #: Rules / catalog version of the evaluation.
@@ -3060,7 +3105,7 @@ AnsweredTask = TypedDict(
         "change": "AnsweredTaskChange",
         #: How to verify the task.
         "verify": "AnsweredTaskVerify",
-        #: What Checkbox needs before it can give the exact change (observation: it has not seen the page / email yet; facts: plan, price, cancel URL or merchant name). The title stays the same either way.
+        #: What Checkbox needs before it can give the exact change or verify it (observation: it has not seen the page / email yet; facts: plan, price, cancel URL or merchant name; verify_domain: the site's domain is not verified yet, so Checkbox cannot visit it to verify this task: do the verify_domain task first). The title stays the same either way.
         "blocked_on": Optional[str],
         #: Done / declined tasks: verified (its checks pass), no_longer_applicable (its checks no longer apply, e.g. the data source changed), superseded, declined, decided (the owner confirmed a decision, e.g. New York notices by email only: closed, but its checks are not verified).
         "closed_reason": Optional[Literal["verified", "no_longer_applicable", "superseded", "declined", "decided"]],
@@ -3112,11 +3157,26 @@ VerificationCheck = TypedDict(
         "check_id": str,
         #: Status the task needs.
         "expected": str,
-        #: Status observed (pass, fail, needs_review, not_applicable, unknown).
+        #: Status observed (pass, fail, needs_review, missing_data, not_checked, not_applicable, unknown, or informational: a note on a part that is not yours to change, such as Stripe's own hosted page layout; it never holds a verification back).
         "observed": str,
         #: Where the observation comes from: evaluation, static_fetch, html, stripe_params, email, policy_fetch.
         "source": str,
         #: What was observed.
+        "detail": str,
+    },
+    total=False,
+)
+
+
+#: Set when newer evidence settled the task after this verification finished (status superseded).
+VerificationSuperseded = TypedDict(
+    "VerificationSuperseded",
+    {
+        #: The task's status in the current plan.
+        "task_status": str,
+        #: What settled the task: a test run (run_…) or the latest evaluation.
+        "by": str,
+        #: In words: what this verification found and what settled the task since.
         "detail": str,
     },
     total=False,
@@ -3142,7 +3202,7 @@ VerificationPrecheckChecksItem = TypedDict(
     {
         #: Check id.
         "check_id": str,
-        #: Pre-check result: pass, fail, needs_review or not_applicable.
+        #: Pre-check result: pass, fail, needs_review, not_applicable, or informational (a note on Stripe's own hosted page layout: nothing to change, never holds the verification back).
         "status": str,
         #: What the pre-check found, in one line.
         "reason": str,
@@ -3192,8 +3252,10 @@ Verification = TypedDict(
         "task": Optional[str],
         #: One task or the whole site.
         "scope": Literal["task", "site"],
-        #: pending (waiting for the confirming scan / re-evaluation), passed (Checkbox observed the expected result: every check passes or does not apply), passed_with_gaps (nothing observed fails, but some checks could not be observed: observed missing_data — not verified), passed_with_notes (nothing observed fails and the task counts as passing, but a check is still needs_review on a part that is not yours to change, such as Stripe's own page layout: see checks), not_checked (a task whose checks could only not be observed yet: nothing to change in the code; next_action says what evidence to provide), pending_live_check (an email whose content passes but that Checkbox has not seen sent for a real event yet: nothing to change; it completes on the first real send or a proof run), failed (it did not: see diff).
-        "status": Literal["pending", "passed", "passed_with_gaps", "passed_with_notes", "not_checked", "pending_live_check", "failed"],
+        #: pending (waiting for the confirming scan / re-evaluation), passed (Checkbox observed the expected result: every check passes or does not apply), passed_with_gaps (nothing observed fails, but some checks could not be observed: observed missing_data — not verified), passed_with_notes (nothing observed fails and the task counts as passing, but a check is still needs_review on a part that is not yours to change, such as Stripe's own page layout: see checks), not_checked (a task whose checks could only not be observed yet: nothing to change in the code; next_action says what evidence to provide), pending_live_check (an email whose content passes but that Checkbox has not seen sent for a real event yet: nothing to change; it completes on the first real send or a proof run), failed (it did not: see diff), superseded (this verification did not pass, but newer evidence, such as a test run or a later evaluation, settled the task since: see superseded and follow next_action; nothing to change for it).
+        "status": Literal["pending", "passed", "passed_with_gaps", "passed_with_notes", "not_checked", "pending_live_check", "failed", "superseded"],
+        #: Set when newer evidence settled the task after this verification finished (status superseded). (optional)
+        "superseded": Optional["VerificationSuperseded"],
         #: How it was re-checked.
         "method": Literal["page_fetch", "policy_refetch", "stripe_params", "email_copy", "platform_sync", "attestation", "evaluation", "test_run"],
         #: What this verification checked, in words: "the params you sent", "Checkout Sessions read from Stripe", "registered configs", "the HTML you sent", "the email copy you sent (plan …)", "the live page …, fetched now"…
@@ -6958,7 +7020,7 @@ TestRunStep = TypedDict(
         "observations": Dict[str, Any],
         #: Evidence records (screenshots, page captures, raw emails) behind the step.
         "evidence": List[str],
-        #: Warning or failure code of the step (stable): key_missing, key_not_test_mode, key_invalid, key_permission_missing, checkout_config_missing, price_not_in_test_mode, checkout_session_failed, checkout_page_unreadable, checkout_not_completed, subscription_create_failed, test_clock_failed, no_email_received_within, reminder_not_received, portal_not_configured, cancel_not_completed, cancellation_email_not_received, checkout_url_missing, real_checkout_not_completed, payment_link_not_found, webhook_not_delivered, reminder_outside_window, reminder_timing_not_observed, cancel_flow_not_configured, cancel_not_confirmed_in_stripe, acknowledgment_content_incomplete, cancel_replaced_by_other_subscription, not_judged, scan_config_missing, domain_not_verified, scanner_failed, stripe_api_error, timeout, canceled, internal_error.
+        #: Warning or failure code of the step (stable): key_missing, key_not_test_mode, key_invalid, key_permission_missing, checkout_config_missing, price_not_in_test_mode, checkout_session_failed, checkout_page_unreadable, checkout_not_completed, subscription_create_failed, test_clock_failed, no_email_received_within, reminder_not_received, portal_not_configured, cancel_not_completed, cancellation_email_not_received, checkout_url_missing, real_checkout_not_completed, payment_link_not_found, webhook_not_delivered, reminder_outside_window, reminder_timing_not_observed, cancel_flow_not_configured, cancel_not_confirmed_in_stripe, acknowledgment_content_incomplete, required_notice_skipped, cancel_replaced_by_other_subscription, not_judged, scan_config_missing, domain_not_verified, scanner_failed, stripe_api_error, timeout, canceled, internal_error.
         "code": Optional[str],
         "fix": "TestRunFix",
     },
@@ -6993,7 +7055,7 @@ TestRunWaitingFor = TypedDict(
 TestRunFailure = TypedDict(
     "TestRunFailure",
     {
-        #: Stable failure code: key_missing, key_not_test_mode, key_invalid, key_permission_missing, checkout_config_missing, price_not_in_test_mode, checkout_session_failed, checkout_page_unreadable, checkout_not_completed, subscription_create_failed, test_clock_failed, no_email_received_within, reminder_not_received, portal_not_configured, cancel_not_completed, cancellation_email_not_received, checkout_url_missing, real_checkout_not_completed, payment_link_not_found, webhook_not_delivered, reminder_outside_window, reminder_timing_not_observed, cancel_flow_not_configured, cancel_not_confirmed_in_stripe, acknowledgment_content_incomplete, cancel_replaced_by_other_subscription, not_judged, scan_config_missing, domain_not_verified, scanner_failed, stripe_api_error, timeout, canceled, internal_error.
+        #: Stable failure code: key_missing, key_not_test_mode, key_invalid, key_permission_missing, checkout_config_missing, price_not_in_test_mode, checkout_session_failed, checkout_page_unreadable, checkout_not_completed, subscription_create_failed, test_clock_failed, no_email_received_within, reminder_not_received, portal_not_configured, cancel_not_completed, cancellation_email_not_received, checkout_url_missing, real_checkout_not_completed, payment_link_not_found, webhook_not_delivered, reminder_outside_window, reminder_timing_not_observed, cancel_flow_not_configured, cancel_not_confirmed_in_stripe, acknowledgment_content_incomplete, required_notice_skipped, cancel_replaced_by_other_subscription, not_judged, scan_config_missing, domain_not_verified, scanner_failed, stripe_api_error, timeout, canceled, internal_error.
         "code": str,
         #: What went wrong.
         "message": str,
@@ -7055,6 +7117,22 @@ TestRunResultMonitoring = TypedDict(
 )
 
 
+TestRunResultNoticesSkippedItem = TypedDict(
+    "TestRunResultNoticesSkippedItem",
+    {
+        #: Notice kind.
+        "kind": str,
+        #: skipped or failed.
+        "status": str,
+        #: Why Checkbox Notices did not send it.
+        "reason": Optional[str],
+        #: The step that reports it (now a warning, code required_notice_skipped).
+        "step": str,
+    },
+    total=False,
+)
+
+
 #: Outcome of a finished run.
 TestRunResult = TypedDict(
     "TestRunResult",
@@ -7065,6 +7143,8 @@ TestRunResult = TypedDict(
         "checks": List["TestRunResultChecksItem"],
         #: What the run added to the site's continuous monitoring (provenance test_run).
         "monitoring": "TestRunResultMonitoring",
+        #: Notices Checkbox Notices owed the run's subscriber (an applicable law requires them) but skipped or failed to send. Not empty: the run is not a clean pass, and the setup is not "all set".
+        "notices_skipped": List["TestRunResultNoticesSkippedItem"],
     },
     total=False,
 )

@@ -270,6 +270,29 @@ export type UnverifiedScan = {
   note: string;
 } | null;
 
+/** Test mode only: the steps left before real customers are covered, with who takes each (the compliance plan's go_live). When next_action is done, report "set up in test mode; N steps before real customers" (go_live.summary), never a plain done. Null in live mode or before the first checks. */
+export type GoLive = {
+  /** Everything Checkbox observed came from Stripe test mode. */
+  mode: "test";
+  /** Heading. */
+  title: string;
+  /** One sentence before the steps. */
+  lead: string;
+  /** The steps, in order. */
+  steps: Array<{
+    /** Stable step key. */
+    key: "verify_domain" | "stripe_terms_url" | "live_stripe_key" | "live_checkout" | "promote_site";
+    /** Who takes the step: person (only the owner can: DNS, the Stripe Dashboard, live keys) or agent (a code change). */
+    who: "person" | "agent";
+    /** The step in plain words. */
+    text: string;
+    /** Where the person does it, when there is one fixed place. */
+    url?: string;
+  }>;
+  /** What the agent tells the person instead of "done": set up in test mode, N steps left before real customers. */
+  summary: string;
+} | null;
+
 /** One step of the setup checklist. */
 export interface SetupStep {
   /** Stable step key. */
@@ -519,6 +542,7 @@ export interface SetupSession {
     }>;
   } | null;
   unverified_scan: UnverifiedScan;
+  go_live: GoLive;
   /** The setup checklist, in order. */
   steps: Array<SetupStep>;
   next_action: SetupNextAction;
@@ -591,6 +615,8 @@ export interface SetupSessionUpdate {
     env_file?: string;
     /** Static files directory (for /.well-known). */
     public_dir?: string;
+    /** The email library the project sends with (nodemailer, resend, @sendgrid/mail…), or "none" when nothing in it sends email (a static site): the plan then offers Checkbox Notices first for the required emails. */
+    mailer?: string;
     /** Where checkout sessions / payment links are created: an ARRAY of { file, kind, line?, snippet? } objects, one per place (not a string), e.g. [{"file": "app.py", "line": 40, "kind": "stripe_checkout_session"}]. */
     checkout_code?: Array<SetupCodeRef>;
     /** Where the subscribe / pay buttons are rendered. */
@@ -670,6 +696,7 @@ export interface SetupVerification {
     /** Why not (limits: one per site per 24 h, three unverified sites per account in 30 days). */
     reason: string | null;
   } | null;
+  next_action: SetupNextAction;
   setup_session: SetupSession;
 }
 
@@ -1752,7 +1779,7 @@ export interface Task {
     /** What Checkbox must observe for the task to be done. */
     expected: string;
   };
-  /** What Checkbox needs before it can give the exact change (observation: it has not seen the page / email yet; facts: plan, price, cancel URL or merchant name). The title stays the same either way. */
+  /** What Checkbox needs before it can give the exact change or verify it (observation: it has not seen the page / email yet; facts: plan, price, cancel URL or merchant name; verify_domain: the site's domain is not verified yet, so Checkbox cannot visit it to verify this task: do the verify_domain task first). The title stays the same either way. */
   blocked_on: string | null;
   /** Done / declined tasks: verified (its checks pass), no_longer_applicable (its checks no longer apply, e.g. the data source changed), superseded, declined, decided (the owner confirmed a decision, e.g. New York notices by email only: closed, but its checks are not verified). */
   closed_reason: "verified" | "no_longer_applicable" | "superseded" | "declined" | "decided" | null;
@@ -1901,6 +1928,7 @@ export interface CompliancePlan {
       on_answer: Record<string, string>;
     }>;
   };
+  go_live?: GoLive;
   /** Evidence level per required email kind. A plan never reaches status compliant on template_checked emails. */
   email_verification: Array<{
     /** Email kind (acknowledgment, trial_ending, renewal_reminder, annual_terms, charge_notice, price_change, cancellation_confirmation). */
@@ -1967,7 +1995,7 @@ export interface VerificationCheck {
   check_id: string;
   /** Status the task needs. */
   expected: string;
-  /** Status observed (pass, fail, needs_review, not_applicable, unknown). */
+  /** Status observed (pass, fail, needs_review, missing_data, not_checked, not_applicable, unknown, or informational: a note on a part that is not yours to change, such as Stripe's own hosted page layout; it never holds a verification back). */
   observed: string;
   /** Where the observation comes from: evaluation, static_fetch, html, stripe_params, email, policy_fetch. */
   source: string;
@@ -1989,8 +2017,17 @@ export interface Verification {
   task: string | null;
   /** One task or the whole site. */
   scope: "task" | "site";
-  /** pending (waiting for the confirming scan / re-evaluation), passed (Checkbox observed the expected result: every check passes or does not apply), passed_with_gaps (nothing observed fails, but some checks could not be observed: observed missing_data — not verified), passed_with_notes (nothing observed fails and the task counts as passing, but a check is still needs_review on a part that is not yours to change, such as Stripe's own page layout: see checks), not_checked (a task whose checks could only not be observed yet: nothing to change in the code; next_action says what evidence to provide), pending_live_check (an email whose content passes but that Checkbox has not seen sent for a real event yet: nothing to change; it completes on the first real send or a proof run), failed (it did not: see diff). */
-  status: "pending" | "passed" | "passed_with_gaps" | "passed_with_notes" | "not_checked" | "pending_live_check" | "failed";
+  /** pending (waiting for the confirming scan / re-evaluation), passed (Checkbox observed the expected result: every check passes or does not apply), passed_with_gaps (nothing observed fails, but some checks could not be observed: observed missing_data — not verified), passed_with_notes (nothing observed fails and the task counts as passing, but a check is still needs_review on a part that is not yours to change, such as Stripe's own page layout: see checks), not_checked (a task whose checks could only not be observed yet: nothing to change in the code; next_action says what evidence to provide), pending_live_check (an email whose content passes but that Checkbox has not seen sent for a real event yet: nothing to change; it completes on the first real send or a proof run), failed (it did not: see diff), superseded (this verification did not pass, but newer evidence, such as a test run or a later evaluation, settled the task since: see superseded and follow next_action; nothing to change for it). */
+  status: "pending" | "passed" | "passed_with_gaps" | "passed_with_notes" | "not_checked" | "pending_live_check" | "failed" | "superseded";
+  /** Set when newer evidence settled the task after this verification finished (status superseded). */
+  superseded?: {
+    /** The task's status in the current plan. */
+    task_status: string;
+    /** What settled the task: a test run (run_…) or the latest evaluation. */
+    by: string;
+    /** In words: what this verification found and what settled the task since. */
+    detail: string;
+  } | null;
   /** How it was re-checked. */
   method: "page_fetch" | "policy_refetch" | "stripe_params" | "email_copy" | "platform_sync" | "attestation" | "evaluation" | "test_run";
   /** What this verification checked, in words: "the params you sent", "Checkout Sessions read from Stripe", "registered configs", "the HTML you sent", "the email copy you sent (plan …)", "the live page …, fetched now"… */
@@ -2020,7 +2057,7 @@ export interface Verification {
     checks: Array<{
       /** Check id. */
       check_id: string;
-      /** Pre-check result: pass, fail, needs_review or not_applicable. */
+      /** Pre-check result: pass, fail, needs_review, not_applicable, or informational (a note on Stripe's own hosted page layout: nothing to change, never holds the verification back). */
       status: string;
       /** What the pre-check found, in one line. */
       reason: string;
@@ -4577,7 +4614,7 @@ export interface TestRunStep {
   observations: Record<string, unknown>;
   /** Evidence records (screenshots, page captures, raw emails) behind the step. */
   evidence: Array<string>;
-  /** Warning or failure code of the step (stable): key_missing, key_not_test_mode, key_invalid, key_permission_missing, checkout_config_missing, price_not_in_test_mode, checkout_session_failed, checkout_page_unreadable, checkout_not_completed, subscription_create_failed, test_clock_failed, no_email_received_within, reminder_not_received, portal_not_configured, cancel_not_completed, cancellation_email_not_received, checkout_url_missing, real_checkout_not_completed, payment_link_not_found, webhook_not_delivered, reminder_outside_window, reminder_timing_not_observed, cancel_flow_not_configured, cancel_not_confirmed_in_stripe, acknowledgment_content_incomplete, cancel_replaced_by_other_subscription, not_judged, scan_config_missing, domain_not_verified, scanner_failed, stripe_api_error, timeout, canceled, internal_error. */
+  /** Warning or failure code of the step (stable): key_missing, key_not_test_mode, key_invalid, key_permission_missing, checkout_config_missing, price_not_in_test_mode, checkout_session_failed, checkout_page_unreadable, checkout_not_completed, subscription_create_failed, test_clock_failed, no_email_received_within, reminder_not_received, portal_not_configured, cancel_not_completed, cancellation_email_not_received, checkout_url_missing, real_checkout_not_completed, payment_link_not_found, webhook_not_delivered, reminder_outside_window, reminder_timing_not_observed, cancel_flow_not_configured, cancel_not_confirmed_in_stripe, acknowledgment_content_incomplete, required_notice_skipped, cancel_replaced_by_other_subscription, not_judged, scan_config_missing, domain_not_verified, scanner_failed, stripe_api_error, timeout, canceled, internal_error. */
   code: string | null;
   fix: TestRunFix;
 }
@@ -4633,7 +4670,7 @@ export interface TestRun {
   steps: Array<TestRunStep>;
   /** Why the run stopped (failed / canceled runs). */
   failure: {
-    /** Stable failure code: key_missing, key_not_test_mode, key_invalid, key_permission_missing, checkout_config_missing, price_not_in_test_mode, checkout_session_failed, checkout_page_unreadable, checkout_not_completed, subscription_create_failed, test_clock_failed, no_email_received_within, reminder_not_received, portal_not_configured, cancel_not_completed, cancellation_email_not_received, checkout_url_missing, real_checkout_not_completed, payment_link_not_found, webhook_not_delivered, reminder_outside_window, reminder_timing_not_observed, cancel_flow_not_configured, cancel_not_confirmed_in_stripe, acknowledgment_content_incomplete, cancel_replaced_by_other_subscription, not_judged, scan_config_missing, domain_not_verified, scanner_failed, stripe_api_error, timeout, canceled, internal_error. */
+    /** Stable failure code: key_missing, key_not_test_mode, key_invalid, key_permission_missing, checkout_config_missing, price_not_in_test_mode, checkout_session_failed, checkout_page_unreadable, checkout_not_completed, subscription_create_failed, test_clock_failed, no_email_received_within, reminder_not_received, portal_not_configured, cancel_not_completed, cancellation_email_not_received, checkout_url_missing, real_checkout_not_completed, payment_link_not_found, webhook_not_delivered, reminder_outside_window, reminder_timing_not_observed, cancel_flow_not_configured, cancel_not_confirmed_in_stripe, acknowledgment_content_incomplete, required_notice_skipped, cancel_replaced_by_other_subscription, not_judged, scan_config_missing, domain_not_verified, scanner_failed, stripe_api_error, timeout, canceled, internal_error. */
     code: string;
     /** What went wrong. */
     message: string;
@@ -4676,6 +4713,17 @@ export interface TestRun {
       /** Why something was kept in the run report only. */
       notes: Array<string>;
     };
+    /** Notices Checkbox Notices owed the run's subscriber (an applicable law requires them) but skipped or failed to send. Not empty: the run is not a clean pass, and the setup is not "all set". */
+    notices_skipped: Array<{
+      /** Notice kind. */
+      kind: string;
+      /** skipped or failed. */
+      status: string;
+      /** Why Checkbox Notices did not send it. */
+      reason: string | null;
+      /** The step that reports it (now a warning, code required_notice_skipped). */
+      step: string;
+    }>;
   } | null;
   /** Stripe test-mode objects of the run (type stripe). */
   stripe: {

@@ -994,6 +994,98 @@
         ],
         "description": "While the domain is not verified: the newest read-only scan of the site's own public pages (labeled \"unverified scan\": no checkout submitted, not evidence, replaced by the full scan after verification). Null otherwise."
       },
+      "GoLive": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "test"
+            ],
+            "description": "Everything Checkbox observed came from Stripe test mode.",
+            "example": "test"
+          },
+          "title": {
+            "type": "string",
+            "description": "Heading.",
+            "example": "Go live for real customers"
+          },
+          "lead": {
+            "type": "string",
+            "description": "One sentence before the steps.",
+            "example": "These results are from Stripe test mode. To check what real subscribers see:"
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "key": {
+                  "type": "string",
+                  "enum": [
+                    "verify_domain",
+                    "stripe_terms_url",
+                    "live_stripe_key",
+                    "live_checkout",
+                    "promote_site"
+                  ],
+                  "description": "Stable step key.",
+                  "example": "live_stripe_key"
+                },
+                "who": {
+                  "type": "string",
+                  "enum": [
+                    "person",
+                    "agent"
+                  ],
+                  "description": "Who takes the step: person (only the owner can: DNS, the Stripe Dashboard, live keys) or agent (a code change).",
+                  "example": "person"
+                },
+                "text": {
+                  "type": "string",
+                  "description": "The step in plain words.",
+                  "example": "Switch the dashboard to Live mode and connect your live Stripe key (rk_live_…)…"
+                },
+                "url": {
+                  "type": "string",
+                  "description": "Where the person does it, when there is one fixed place.",
+                  "example": "https://dashboard.stripe.com/settings/public"
+                }
+              },
+              "required": [
+                "key",
+                "who",
+                "text"
+              ]
+            },
+            "description": "The steps, in order.",
+            "example": [
+              {
+                "key": "live_stripe_key",
+                "who": "person",
+                "text": "Switch the dashboard to Live mode and connect your live Stripe key (rk_live_…)…",
+                "url": "https://dashboard.stripe.com/settings/public"
+              }
+            ]
+          },
+          "summary": {
+            "type": "string",
+            "description": "What the agent tells the person instead of \"done\": set up in test mode, N steps left before real customers.",
+            "example": "Set up in Stripe test mode: the results describe test data only. 4 steps are left before real customers are covered (3 for the owner, 1 for you (the agent); go_live.steps lists them)."
+          }
+        },
+        "required": [
+          "mode",
+          "title",
+          "lead",
+          "steps",
+          "summary"
+        ],
+        "description": "Test mode only: the steps left before real customers are covered, with who takes each (the compliance plan's go_live). When next_action is done, report \"set up in test mode; N steps before real customers\" (go_live.summary), never a plain done. Null in live mode or before the first checks."
+      },
       "SetupStep": {
         "type": "object",
         "properties": {
@@ -2041,6 +2133,9 @@
           "unverified_scan": {
             "$ref": "#/components/schemas/UnverifiedScan"
           },
+          "go_live": {
+            "$ref": "#/components/schemas/GoLive"
+          },
           "steps": {
             "type": "array",
             "items": {
@@ -2140,6 +2235,7 @@
           "site_plans",
           "compliance",
           "unverified_scan",
+          "go_live",
           "steps",
           "next_action",
           "owner_notified",
@@ -2342,6 +2438,12 @@
                 "description": "Static files directory (for /.well-known).",
                 "example": "public"
               },
+              "mailer": {
+                "type": "string",
+                "maxLength": 60,
+                "description": "The email library the project sends with (nodemailer, resend, @sendgrid/mail…), or \"none\" when nothing in it sends email (a static site): the plan then offers Checkbox Notices first for the required emails.",
+                "example": "resend"
+              },
               "checkout_code": {
                 "type": "array",
                 "items": {
@@ -2382,6 +2484,7 @@
               "layout_file": "app/layout.tsx",
               "env_file": ".env.local",
               "public_dir": "public",
+              "mailer": "resend",
               "checkout_code": [
                 {
                   "file": "app/api/checkout/route.ts",
@@ -2560,6 +2663,20 @@
                   },
                   "error": null,
                   "note": "Unverified scan: Checkbox only loaded public pages of this site…"
+                },
+                "go_live": {
+                  "mode": "test",
+                  "title": "Go live for real customers",
+                  "lead": "These results are from Stripe test mode. To check what real subscribers see:",
+                  "steps": [
+                    {
+                      "key": "live_stripe_key",
+                      "who": "person",
+                      "text": "Switch the dashboard to Live mode and connect your live Stripe key (rk_live_…)…",
+                      "url": "https://dashboard.stripe.com/settings/public"
+                    }
+                  ],
+                  "summary": "Set up in Stripe test mode: the results describe test data only. 4 steps are left before real customers are covered (3 for the owner, 1 for you (the agent); go_live.steps lists them)."
                 },
                 "steps": [],
                 "next_action": {
@@ -2801,6 +2918,38 @@
             "description": "While the domain is not verified: the read-only scan of the site's own public pages (no checkout submitted).",
             "example": null
           },
+          "next_action": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SetupNextAction"
+              },
+              {
+                "description": "The same as setup_session.next_action, at the top level: what to do now."
+              }
+            ],
+            "example": {
+              "type": "install_snippet",
+              "message": "Add <script async src=\"https://app.checkbox.site/s.js\" data-key=\"k3y9\"></script> to the <head> of your homepage, pricing, checkout and account pages, then report snippet_installed_in.",
+              "operation_id": "updateSetupSession",
+              "mcp_tool": "update_setup",
+              "endpoint": "POST /v1/sites/{site}/test_credentials",
+              "command": "checkbox init --verify --json",
+              "url": "https://dashboard.stripe.com/test/apikeys",
+              "dns": {
+                "type": "TXT",
+                "name": "_checkbox-verify.acme.com",
+                "value": "checkbox-verify=3f9a1c2e"
+              },
+              "well_known": {
+                "url": "https://acme.com/.well-known/checkbox-verify.txt",
+                "content": "3f9a1c2e"
+              },
+              "meta_tag": {
+                "url": "https://acme.com/",
+                "html": "<meta name=\"checkbox-verify\" content=\"3f9a1c2e\">"
+              }
+            }
+          },
           "setup_session": {
             "$ref": "#/components/schemas/SetupSession"
           }
@@ -2813,6 +2962,7 @@
           "evaluated",
           "domain_verified",
           "unverified_scan",
+          "next_action",
           "setup_session"
         ],
         "description": "Result of verifySetupSession, with the updated session."
@@ -8108,7 +8258,7 @@
               "string",
               "null"
             ],
-            "description": "What Checkbox needs before it can give the exact change (observation: it has not seen the page / email yet; facts: plan, price, cancel URL or merchant name). The title stays the same either way.",
+            "description": "What Checkbox needs before it can give the exact change or verify it (observation: it has not seen the page / email yet; facts: plan, price, cancel URL or merchant name; verify_domain: the site's domain is not verified yet, so Checkbox cannot visit it to verify this task: do the verify_domain task first). The title stays the same either way.",
             "example": null
           },
           "closed_reason": {
@@ -8962,6 +9112,31 @@
               ]
             }
           },
+          "go_live": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/GoLive"
+              },
+              {
+                "type": "object",
+                "description": "Test mode only: the steps left before real customers are covered, with who takes each. When next_action is done, report \"set up in test mode; N steps before real customers\" (go_live.summary), never a plain done. Absent in live mode."
+              }
+            ],
+            "example": {
+              "mode": "test",
+              "title": "Go live for real customers",
+              "lead": "These results are from Stripe test mode. To check what real subscribers see:",
+              "steps": [
+                {
+                  "key": "live_stripe_key",
+                  "who": "person",
+                  "text": "Switch the dashboard to Live mode and connect your live Stripe key (rk_live_…)…",
+                  "url": "https://dashboard.stripe.com/settings/public"
+                }
+              ],
+              "summary": "Set up in Stripe test mode: the results describe test data only. 4 steps are left before real customers are covered (3 for the owner, 1 for you (the agent); go_live.steps lists them)."
+            }
+          },
           "email_verification": {
             "type": "array",
             "items": {
@@ -9265,7 +9440,7 @@
           },
           "observed": {
             "type": "string",
-            "description": "Status observed (pass, fail, needs_review, not_applicable, unknown).",
+            "description": "Status observed (pass, fail, needs_review, missing_data, not_checked, not_applicable, unknown, or informational: a note on a part that is not yours to change, such as Stripe's own hosted page layout; it never holds a verification back).",
             "example": "fail"
           },
           "source": {
@@ -9340,10 +9515,45 @@
               "passed_with_notes",
               "not_checked",
               "pending_live_check",
-              "failed"
+              "failed",
+              "superseded"
             ],
-            "description": "pending (waiting for the confirming scan / re-evaluation), passed (Checkbox observed the expected result: every check passes or does not apply), passed_with_gaps (nothing observed fails, but some checks could not be observed: observed missing_data — not verified), passed_with_notes (nothing observed fails and the task counts as passing, but a check is still needs_review on a part that is not yours to change, such as Stripe's own page layout: see checks), not_checked (a task whose checks could only not be observed yet: nothing to change in the code; next_action says what evidence to provide), pending_live_check (an email whose content passes but that Checkbox has not seen sent for a real event yet: nothing to change; it completes on the first real send or a proof run), failed (it did not: see diff).",
+            "description": "pending (waiting for the confirming scan / re-evaluation), passed (Checkbox observed the expected result: every check passes or does not apply), passed_with_gaps (nothing observed fails, but some checks could not be observed: observed missing_data — not verified), passed_with_notes (nothing observed fails and the task counts as passing, but a check is still needs_review on a part that is not yours to change, such as Stripe's own page layout: see checks), not_checked (a task whose checks could only not be observed yet: nothing to change in the code; next_action says what evidence to provide), pending_live_check (an email whose content passes but that Checkbox has not seen sent for a real event yet: nothing to change; it completes on the first real send or a proof run), failed (it did not: see diff), superseded (this verification did not pass, but newer evidence, such as a test run or a later evaluation, settled the task since: see superseded and follow next_action; nothing to change for it).",
             "example": "pending"
+          },
+          "superseded": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "task_status": {
+                "type": "string",
+                "description": "The task's status in the current plan.",
+                "example": "done"
+              },
+              "by": {
+                "type": "string",
+                "description": "What settled the task: a test run (run_…) or the latest evaluation.",
+                "example": "run_5ea8de6c045d4078a5bb7d845980ffd2"
+              },
+              "detail": {
+                "type": "string",
+                "description": "In words: what this verification found and what settled the task since.",
+                "example": "This verification could not observe a cancellation; test run run_5ea8… cancelled online since, and the plan shows the task done."
+              }
+            },
+            "required": [
+              "task_status",
+              "by",
+              "detail"
+            ],
+            "description": "Set when newer evidence settled the task after this verification finished (status superseded).",
+            "example": {
+              "task_status": "done",
+              "by": "run_5ea8de6c045d4078a5bb7d845980ffd2",
+              "detail": "This verification could not observe a cancellation; test run run_5ea8… cancelled online since, and the plan shows the task done."
+            }
           },
           "method": {
             "type": "string",
@@ -9461,7 +9671,7 @@
                     },
                     "status": {
                       "type": "string",
-                      "description": "Pre-check result: pass, fail, needs_review or not_applicable.",
+                      "description": "Pre-check result: pass, fail, needs_review, not_applicable, or informational (a note on Stripe's own hosted page layout: nothing to change, never holds the verification back).",
                       "example": "fail"
                     },
                     "reason": {
@@ -9750,6 +9960,11 @@
                 "task": "task_3f9a1c2e7b4d4e0f9a8b7c6d5e4f3a2b",
                 "scope": "task",
                 "status": "pending",
+                "superseded": {
+                  "task_status": "done",
+                  "by": "run_5ea8de6c045d4078a5bb7d845980ffd2",
+                  "detail": "This verification could not observe a cancellation; test run run_5ea8… cancelled online since, and the plan shows the task done."
+                },
                 "method": "page_fetch",
                 "checked": "the params you sent",
                 "precheck": {
@@ -13091,7 +13306,7 @@
           "short_disclosure_text": {
             "type": "string",
             "description": "The same terms as one short line, verified by the engine like disclosure_text (present only when it passes every targeted check); disclosure_text is then the fuller version.",
-            "example": "Renews automatically every month at $19.99 until you cancel. Cancel anytime online at https://acme.example/cancel."
+            "example": "Renews automatically every month at $19.99 (plus applicable taxes) until you cancel. Cancel anytime online at https://acme.example/cancel."
           },
           "consent_label": {
             "type": "string",
@@ -16091,7 +16306,7 @@
             "example": [
               {
                 "disclosure_text": "Your Acme subscription automatically renews every month at $19.99 …",
-                "short_disclosure_text": "Renews automatically every month at $19.99 until you cancel. Cancel anytime online at https://acme.example/cancel.",
+                "short_disclosure_text": "Renews automatically every month at $19.99 (plus applicable taxes) until you cancel. Cancel anytime online at https://acme.example/cancel.",
                 "consent_label": "I agree that my Acme subscription renews automatically …",
                 "button_text": "Subscribe — $19.99/month, renews automatically",
                 "html": "<div class=\"checkbox-renewal-terms\">…</div>",
@@ -21381,7 +21596,7 @@
               "string",
               "null"
             ],
-            "description": "Warning or failure code of the step (stable): key_missing, key_not_test_mode, key_invalid, key_permission_missing, checkout_config_missing, price_not_in_test_mode, checkout_session_failed, checkout_page_unreadable, checkout_not_completed, subscription_create_failed, test_clock_failed, no_email_received_within, reminder_not_received, portal_not_configured, cancel_not_completed, cancellation_email_not_received, checkout_url_missing, real_checkout_not_completed, payment_link_not_found, webhook_not_delivered, reminder_outside_window, reminder_timing_not_observed, cancel_flow_not_configured, cancel_not_confirmed_in_stripe, acknowledgment_content_incomplete, cancel_replaced_by_other_subscription, not_judged, scan_config_missing, domain_not_verified, scanner_failed, stripe_api_error, timeout, canceled, internal_error.",
+            "description": "Warning or failure code of the step (stable): key_missing, key_not_test_mode, key_invalid, key_permission_missing, checkout_config_missing, price_not_in_test_mode, checkout_session_failed, checkout_page_unreadable, checkout_not_completed, subscription_create_failed, test_clock_failed, no_email_received_within, reminder_not_received, portal_not_configured, cancel_not_completed, cancellation_email_not_received, checkout_url_missing, real_checkout_not_completed, payment_link_not_found, webhook_not_delivered, reminder_outside_window, reminder_timing_not_observed, cancel_flow_not_configured, cancel_not_confirmed_in_stripe, acknowledgment_content_incomplete, required_notice_skipped, cancel_replaced_by_other_subscription, not_judged, scan_config_missing, domain_not_verified, scanner_failed, stripe_api_error, timeout, canceled, internal_error.",
             "example": "no_email_received_within"
           },
           "fix": {
@@ -21604,7 +21819,7 @@
             "properties": {
               "code": {
                 "type": "string",
-                "description": "Stable failure code: key_missing, key_not_test_mode, key_invalid, key_permission_missing, checkout_config_missing, price_not_in_test_mode, checkout_session_failed, checkout_page_unreadable, checkout_not_completed, subscription_create_failed, test_clock_failed, no_email_received_within, reminder_not_received, portal_not_configured, cancel_not_completed, cancellation_email_not_received, checkout_url_missing, real_checkout_not_completed, payment_link_not_found, webhook_not_delivered, reminder_outside_window, reminder_timing_not_observed, cancel_flow_not_configured, cancel_not_confirmed_in_stripe, acknowledgment_content_incomplete, cancel_replaced_by_other_subscription, not_judged, scan_config_missing, domain_not_verified, scanner_failed, stripe_api_error, timeout, canceled, internal_error.",
+                "description": "Stable failure code: key_missing, key_not_test_mode, key_invalid, key_permission_missing, checkout_config_missing, price_not_in_test_mode, checkout_session_failed, checkout_page_unreadable, checkout_not_completed, subscription_create_failed, test_clock_failed, no_email_received_within, reminder_not_received, portal_not_configured, cancel_not_completed, cancellation_email_not_received, checkout_url_missing, real_checkout_not_completed, payment_link_not_found, webhook_not_delivered, reminder_outside_window, reminder_timing_not_observed, cancel_flow_not_configured, cancel_not_confirmed_in_stripe, acknowledgment_content_incomplete, required_notice_skipped, cancel_replaced_by_other_subscription, not_judged, scan_config_missing, domain_not_verified, scanner_failed, stripe_api_error, timeout, canceled, internal_error.",
                 "example": "price_not_in_test_mode"
               },
               "message": {
@@ -21777,12 +21992,52 @@
                   "reminder_events": 1,
                   "notes": []
                 }
+              },
+              "notices_skipped": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "description": "Notice kind.",
+                      "example": "price_change"
+                    },
+                    "status": {
+                      "type": "string",
+                      "description": "skipped or failed.",
+                      "example": "skipped"
+                    },
+                    "reason": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Why Checkbox Notices did not send it.",
+                      "example": "the notice window closed before it could be sent"
+                    },
+                    "step": {
+                      "type": "string",
+                      "description": "The step that reports it (now a warning, code required_notice_skipped).",
+                      "example": "renewal"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "status",
+                    "reason",
+                    "step"
+                  ]
+                },
+                "description": "Notices Checkbox Notices owed the run's subscriber (an applicable law requires them) but skipped or failed to send. Not empty: the run is not a clean pass, and the setup is not \"all set\".",
+                "example": []
               }
             },
             "required": [
               "summary",
               "checks",
-              "monitoring"
+              "monitoring",
+              "notices_skipped"
             ],
             "description": "Outcome of a finished run.",
             "example": {
@@ -21799,7 +22054,8 @@
                 "emails_counted": 3,
                 "reminder_events": 1,
                 "notes": []
-              }
+              },
+              "notices_skipped": []
             }
           },
           "stripe": {
@@ -22281,7 +22537,8 @@
                     "emails_counted": 3,
                     "reminder_events": 1,
                     "notes": []
-                  }
+                  },
+                  "notices_skipped": []
                 },
                 "stripe": {
                   "test_clock": "clock_1Q…",
@@ -34023,6 +34280,11 @@
                             "task": "task_3f9a1c2e7b4d4e0f9a8b7c6d5e4f3a2b",
                             "scope": "task",
                             "status": "pending",
+                            "superseded": {
+                              "task_status": "done",
+                              "by": "run_5ea8de6c045d4078a5bb7d845980ffd2",
+                              "detail": "This verification could not observe a cancellation; test run run_5ea8… cancelled online since, and the plan shows the task done."
+                            },
                             "method": "page_fetch",
                             "checked": "the params you sent",
                             "precheck": {
@@ -34507,7 +34769,8 @@
                                 "emails_counted": 3,
                                 "reminder_events": 1,
                                 "notes": []
-                              }
+                              },
+                              "notices_skipped": []
                             },
                             "stripe": {
                               "test_clock": "clock_1Q…",
@@ -34686,7 +34949,8 @@
                                 "emails_counted": 3,
                                 "reminder_events": 1,
                                 "notes": []
-                              }
+                              },
+                              "notices_skipped": []
                             },
                             "stripe": {
                               "test_clock": "clock_1Q…",
