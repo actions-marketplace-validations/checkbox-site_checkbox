@@ -67,13 +67,15 @@ Config reference, exit codes and an example summary: https://checkbox.site/docs/
 ## Credentials
 
 Only `--online` checks and the account commands need a key. Resolution order: `--api-key` flag → `CHECKBOX_API_KEY`
-→ `CHECKBOX_SECRET_KEY` → the key saved by `checkbox login` (`~/.config/checkbox/config.json`, honouring
+→ `CHECKBOX_SECRET_KEY` (environment) → `CHECKBOX_SECRET_KEY` in this project's `.env.local` / `.env` /
+`.checkbox/keys.env` (the working folder, then parent folders up to the repository root) → the key saved by `checkbox login` (`~/.config/checkbox/config.json`, honouring
 `XDG_CONFIG_HOME`; `CHECKBOX_CONFIG_DIR` overrides; file mode 0600). The API base is `--api-base` →
-`CHECKBOX_API_BASE` → stored `api_base` → `https://app.checkbox.site`.
+`CHECKBOX_API_BASE` → stored `api_base` → `https://app.checkbox.site`. When a project key and a different saved login
+both exist, the CLI prints which one it used (stderr), and `checkbox whoami` shows `key_source` and `key_file`.
 
 | Command | What it does |
 |---|---|
-| `checkbox init [--yes] [--json]` | one browser approval (device login), then keys in `.env.local`, snippet in the root layout, site + Terms / policies registered, Stripe test subscription (with permission), first checks, owner email; `--verify` re-checks after a deploy; `--ci` only adds CI (`checkbox ci init`) |
+| `checkbox init [--yes] [--json]` | one browser approval (device login), then keys in `.env.local` (not when that file is tracked by git or the folder is deployed as it is: the key then stays only in `~/.config/checkbox/config.json`), the SRI-pinned snippet in the root layout, site + Terms / policies registered, Stripe test subscription (with permission; only a Stripe restricted TEST key, `rk_test_…` in `STRIPE_RESTRICTED_KEY`, is used: `sk_test_` and live keys are refused with how to make one), first checks, owner email; `--verify` re-checks after a deploy; `--ci` only adds CI (`checkbox ci init`) |
 | `checkbox login [--api-key <key>\|--stdin]` | verifies the key with `GET /v1/account`, then saves it |
 | `checkbox whoami` | account, mode (test/live) and where the key came from |
 | `checkbox logout` | forgets the stored key |

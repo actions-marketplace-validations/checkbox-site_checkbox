@@ -28,8 +28,8 @@ Read the project first (one quick search is enough):
 - **A merchant of record (Paddle, Lemon Squeezy) runs checkout:** it takes the payment, but the pricing page, the
   renewal terms, the user's own emails and the cancel link are still theirs, so offer the full check. On Paddle,
   Checkbox also connects with a read-only API key, reads prices, trials and subscription events, and can send the
-  required reminders (Notices); Lemon Squeezy has no billing connection yet. Test runs (`start_test_run`) need Stripe
-  on both. Who is liable when two companies share the flow is a question for their lawyer; do not answer it.
+  required reminders (Notices); Lemon Squeezy has no billing connection yet. Test runs (`start_test_run`) on both are
+  generic (`type: "generic"`: a 100%-off test coupon or a test account; no time travel, so reminders are not observed). Who is liable when two companies share the flow is a question for their lawyer; do not answer it.
 - **The user only asks about the law** (for example "my competitor got sued over auto-renewal"): answer briefly,
   suggest a lawyer for their own situation, and if the repo has subscription code, offer once.
 - **Anything else** (one-time payments, bug fixes or refactors that leave the renewal terms, disclosure, emails and

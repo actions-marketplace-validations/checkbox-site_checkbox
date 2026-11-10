@@ -289,7 +289,7 @@
           "url": {
             "type": "string",
             "description": "Documentation or dashboard URL for the step.",
-            "example": "https://dashboard.stripe.com/test/apikeys/create"
+            "example": "https://dashboard.stripe.com/test/apikeys"
           },
           "dns": {
             "type": "object",
@@ -519,8 +519,8 @@
             "type": "string",
             "maxLength": 24,
             "pattern": "^(sk|rk)_test_…[A-Za-z0-9]{4}$",
-            "description": "A HINT of the Stripe TEST key found in the project, never the key. Format: \"sk_test_\" or \"rk_test_\", the ellipsis character \"…\" (U+2026), then the key's last 4 characters, e.g. \"sk_test_…a1b2\". The human is asked once whether Checkbox may use it for synthetic test subscriptions.",
-            "example": "sk_test_…a1b2"
+            "description": "A HINT of the Stripe restricted TEST key found in the project, never the key. Format: \"rk_test_\", the ellipsis character \"…\" (U+2026), then the key's last 4 characters, e.g. \"rk_test_…a1b2\". The human is asked once whether Checkbox may use it. Agents may store restricted test keys (rk_test_) only: an \"sk_test_\" hint (sent by older CLIs) is accepted and ignored, because a full secret key is refused on every path.",
+            "example": "rk_test_…a1b2"
           }
         },
         "additionalProperties": false,
@@ -1056,7 +1056,7 @@
               "mcp_tool": "update_setup",
               "endpoint": "POST /v1/sites/{site}/test_credentials",
               "command": "checkbox init --verify --json",
-              "url": "https://dashboard.stripe.com/test/apikeys/create",
+              "url": "https://dashboard.stripe.com/test/apikeys",
               "dns": {
                 "type": "TXT",
                 "name": "_checkbox-verify.acme.com",
@@ -1605,8 +1605,8 @@
                   "string",
                   "null"
                 ],
-                "description": "Hint of the key the CLI found (never the key).",
-                "example": "sk_test_…a1b2"
+                "description": "Hint of the restricted test key the CLI found (never the key).",
+                "example": "rk_test_…a1b2"
               },
               "test_credential_stored": {
                 "type": "boolean",
@@ -1633,8 +1633,8 @@
                   },
                   "create_url": {
                     "type": "string",
-                    "description": "Where to create it.",
-                    "example": "https://dashboard.stripe.com/test/apikeys/create"
+                    "description": "Stripe API keys page (Test mode); click \"Create restricted key\" there.",
+                    "example": "https://dashboard.stripe.com/test/apikeys"
                   },
                   "permissions": {
                     "type": "array",
@@ -1686,7 +1686,7 @@
                 "example": {
                   "recommended": true,
                   "reason": "Give Checkbox a restricted test key with only these permissions.",
-                  "create_url": "https://dashboard.stripe.com/test/apikeys/create",
+                  "create_url": "https://dashboard.stripe.com/test/apikeys",
                   "permissions": [
                     {
                       "resource": "Test clocks",
@@ -1707,13 +1707,13 @@
             "description": "Stripe test mode for lifecycle test runs.",
             "example": {
               "test_key_consent": true,
-              "test_key_hint": "sk_test_…a1b2",
+              "test_key_hint": "rk_test_…a1b2",
               "test_credential_stored": false,
               "checkout_configs": 1,
               "restricted_key": {
                 "recommended": true,
                 "reason": "Give Checkbox a restricted test key with only these permissions.",
-                "create_url": "https://dashboard.stripe.com/test/apikeys/create",
+                "create_url": "https://dashboard.stripe.com/test/apikeys",
                 "permissions": [
                   {
                     "resource": "Test clocks",
@@ -1737,7 +1737,7 @@
               },
               "status": {
                 "type": "string",
-                "description": "queued, running, succeeded, failed or canceled.",
+                "description": "queued, running, succeeded, incomplete (no step failed, but a step could not finish), failed or canceled.",
                 "example": "running"
               },
               "status_label": {
@@ -2501,13 +2501,13 @@
                 "policies": [],
                 "stripe": {
                   "test_key_consent": true,
-                  "test_key_hint": "sk_test_…a1b2",
+                  "test_key_hint": "rk_test_…a1b2",
                   "test_credential_stored": false,
                   "checkout_configs": 1,
                   "restricted_key": {
                     "recommended": true,
                     "reason": "Give Checkbox a restricted test key with only these permissions.",
-                    "create_url": "https://dashboard.stripe.com/test/apikeys/create",
+                    "create_url": "https://dashboard.stripe.com/test/apikeys",
                     "permissions": [
                       {
                         "resource": "Test clocks",
@@ -2569,7 +2569,7 @@
                   "mcp_tool": "update_setup",
                   "endpoint": "POST /v1/sites/{site}/test_credentials",
                   "command": "checkbox init --verify --json",
-                  "url": "https://dashboard.stripe.com/test/apikeys/create",
+                  "url": "https://dashboard.stripe.com/test/apikeys",
                   "dns": {
                     "type": "TXT",
                     "name": "_checkbox-verify.acme.com",
@@ -8469,8 +8469,8 @@
           },
           "status_label": {
             "type": "string",
-            "description": "The plan status in words to show a person: action_required \"Fixes needed\", verifying \"Checking your changes\", compliant \"Checks pass\", blocked \"Your call\"; while an agent works the site and everything left waits for a deploy or the owner (next_action done_for_now): \"Waiting on deploy and you\" or \"Waiting on deploy\". Show this, never the machine value (`compliant` is a status name, not a legal conclusion).",
-            "example": "Fixes needed"
+            "description": "The plan status in words to show a person, from the same counts as the summary (\"1 fix needed · 2 to set up\", \"1 decision for you\"; else action_required \"Fixes needed\", blocked \"Your call\"), \"Checks still running (N)\" while checks are still running (verifying), compliant \"Checks pass\"; while an agent works the site and everything left waits for a deploy or the owner (next_action done_for_now): \"Waiting on deploy and you\" or \"Waiting on deploy\". Show this, never the machine value (`compliant` is a status name, not a legal conclusion).",
+            "example": "1 fix needed · 2 to set up"
           },
           "evaluation": {
             "type": [
@@ -9569,8 +9569,8 @@
               "string",
               "null"
             ],
-            "description": "The plan status in words to show a person: action_required \"Fixes needed\", verifying \"Checking your changes\", compliant \"Checks pass\", blocked \"Your call\"; while an agent works the site and everything left waits for a deploy or the owner (next_action done_for_now): \"Waiting on deploy and you\" or \"Waiting on deploy\". Show this, never the machine value (`compliant` is a status name, not a legal conclusion).",
-            "example": "Fixes needed"
+            "description": "The plan status in words to show a person, from the same counts as the summary (\"1 fix needed · 2 to set up\", \"1 decision for you\"; else action_required \"Fixes needed\", blocked \"Your call\"), \"Checks still running (N)\" while checks are still running (verifying), compliant \"Checks pass\"; while an agent works the site and everything left waits for a deploy or the owner (next_action done_for_now): \"Waiting on deploy and you\" or \"Waiting on deploy\". Show this, never the machine value (`compliant` is a status name, not a legal conclusion).",
+            "example": "1 fix needed · 2 to set up"
           },
           "next_action": {
             "$ref": "#/components/schemas/PlanNextAction"
@@ -9719,7 +9719,7 @@
           },
           "recheck": {
             "type": "boolean",
-            "description": "Re-check a task that is already done (or declined) instead of returning its last result: Checkbox evaluates the site again now and queues a confirming scan, so a regression shows up (pilot: a cancel page switched to phone-only stayed \"passed\").",
+            "description": "Kept for compatibility: a task that is already done (or declined) is always re-checked now (Stripe re-read, registered checkout configs judged again, a fresh evaluation or a confirming scan), never answered from its last result. A task closed without anything observed passing (superseded, no longer applicable, or a person's decision) answers not_checked: nothing to verify.",
             "example": true
           }
         }
@@ -9787,7 +9787,7 @@
                   }
                 ],
                 "plan_status": "action_required",
-                "plan_status_label": "Fixes needed",
+                "plan_status_label": "1 fix needed · 2 to set up",
                 "next_action": {
                   "type": "apply_task",
                   "description": "Apply task_… (add the renewal terms above the Subscribe button in app/checkout/page.tsx), then call verifyTask.",
@@ -18034,12 +18034,12 @@
           "version": {
             "type": "string",
             "description": "Semver of the bundle.",
-            "example": "1.5.6"
+            "example": "1.5.7"
           },
           "url": {
             "type": "string",
             "description": "Immutable URL of this version.",
-            "example": "https://app.checkbox.site/v1/elements/1.5.6/elements.js"
+            "example": "https://app.checkbox.site/v1/elements/1.5.7/elements.js"
           },
           "integrity": {
             "type": "string",
@@ -18081,8 +18081,8 @@
             "description": "Every released version, newest first.",
             "example": [
               {
-                "version": "1.5.6",
-                "url": "https://app.checkbox.site/v1/elements/1.5.6/elements.js",
+                "version": "1.5.7",
+                "url": "https://app.checkbox.site/v1/elements/1.5.7/elements.js",
                 "integrity": "sha384-…",
                 "size": 33000
               }
@@ -18572,7 +18572,7 @@
               "null"
             ],
             "description": "elements.js version.",
-            "example": "1.5.6"
+            "example": "1.5.7"
           },
           "client_timestamp": {
             "type": [
@@ -19089,7 +19089,7 @@
             "type": "string",
             "maxLength": 20,
             "description": "elements.js version that rendered the disclosure.",
-            "example": "1.5.6"
+            "example": "1.5.7"
           },
           "presentation": {
             "$ref": "#/components/schemas/ConsentPresentationInput"
@@ -19214,7 +19214,7 @@
                 "customer_reference": "cs_test_a1b2c3",
                 "client_reference": null,
                 "source": "elements",
-                "element_version": "1.5.6",
+                "element_version": "1.5.7",
                 "client_timestamp": null,
                 "presentation": {
                   "violations": [],
@@ -21457,10 +21457,11 @@
               "queued",
               "running",
               "succeeded",
+              "incomplete",
               "failed",
               "canceled"
             ],
-            "description": "succeeded means the run finished and no step failed (steps may still have warnings to review); failed means it stopped early, or finished with a failed step (see failure and steps[].fix).",
+            "description": "succeeded means the run finished every step and no step failed (steps may still have warnings to review); incomplete means no step failed, but a step could not finish what it set out to observe (for example the online cancellation could not be completed): not a pass; failed means it stopped early, or finished with a failed step (see failure and steps[].fix).",
             "example": "running"
           },
           "status_label": {
@@ -23008,8 +23009,8 @@
           },
           "status_label": {
             "type": "string",
-            "description": "The plan status in words to show a person: action_required \"Fixes needed\", verifying \"Checking your changes\", compliant \"Checks pass\", blocked \"Your call\"; while an agent works the site and everything left waits for a deploy or the owner (next_action done_for_now): \"Waiting on deploy and you\" or \"Waiting on deploy\". Show this, never the machine value (`compliant` is a status name, not a legal conclusion).",
-            "example": "Fixes needed"
+            "description": "The plan status in words to show a person, from the same counts as the summary (\"1 fix needed · 2 to set up\", \"1 decision for you\"; else action_required \"Fixes needed\", blocked \"Your call\"), \"Checks still running (N)\" while checks are still running (verifying), compliant \"Checks pass\"; while an agent works the site and everything left waits for a deploy or the owner (next_action done_for_now): \"Waiting on deploy and you\" or \"Waiting on deploy\". Show this, never the machine value (`compliant` is a status name, not a legal conclusion).",
+            "example": "1 fix needed · 2 to set up"
           },
           "summary": {
             "type": "string",
@@ -29124,7 +29125,7 @@
       "post": {
         "operationId": "checkStripeCheckoutSession",
         "summary": "Check Stripe Checkout Session params",
-        "description": "Pass exactly the object your code gives stripe.checkout.sessions.create (plus merchant.merchant_name and merchant.cancel_url, and merchant.price/interval when line_items use a Price id). Checkbox models the Stripe-hosted page those params render and returns findings plus `correction`: a JSON Patch (RFC 6902) and the full corrected params (custom_text.submit with the renewal terms, consent_collection.terms_of_service = \"required\", custom_text.terms_of_service_acceptance as the consent label), verified by the engine. Stripe's own small grey styling keeps \"clear and conspicuous\" at needs_review on any Stripe-hosted page; also show the terms on your page before redirecting. Stateless and deterministic: nothing is stored, the same input on the same as_of date gives the same verdicts. Every verdict comes from the Checkbox rules engine over the legal catalog (federal ROSCA / EFTA plus the state automatic-renewal laws); the response carries rules_version, catalog_version and a disclaimer (not legal advice). Read `verdict`, then `next_action`: it tells you exactly what to change and to call the check again until verdict is pass.",
+        "description": "Body: `{ params, merchant }` (or `{ params, site }`). `params` is exactly the object your code gives stripe.checkout.sessions.create; `merchant` adds merchant_name, cancel_url, and price/interval when line_items use a Price id. Checkbox models the Stripe-hosted page those params render and returns findings plus `correction`: a JSON Patch (RFC 6902) and the full corrected params (custom_text.submit with the renewal terms, consent_collection.terms_of_service = \"required\", custom_text.terms_of_service_acceptance as the consent label), verified by the engine. Stripe's own small grey styling keeps \"clear and conspicuous\" at needs_review on any Stripe-hosted page; also show the terms on your page before redirecting. Stateless and deterministic: nothing is stored, the same input on the same as_of date gives the same verdicts. Every verdict comes from the Checkbox rules engine over the legal catalog (federal ROSCA / EFTA plus the state automatic-renewal laws); the response carries rules_version, catalog_version and a disclaimer (not legal advice). Read `verdict`, then `next_action`: it tells you exactly what to change and to call the check again until verdict is pass.",
         "tags": [
           "Checks"
         ],
@@ -29778,7 +29779,7 @@
             "schema": {
               "type": "string",
               "description": "Semver, e.g. 1.0.0.",
-              "example": "1.5.6"
+              "example": "1.5.7"
             },
             "required": true,
             "name": "version",
@@ -31578,7 +31579,7 @@
       "post": {
         "operationId": "createStripeCheckoutConfig",
         "summary": "Register the Checkout Session params your code uses",
-        "description": "Registers exactly the object your code passes to stripe.checkout.sessions.create (customer, URLs and secrets are not needed and are ignored; `warnings` says what was not stored). It is judged exactly like checkStripeCheckoutSession, discounts included. A config with the same name, or for the same Price ids, replaces the older one (`replaced`). Test runs mirror it into Stripe test mode; when it matches your latest live checkout, the scanned test page counts as an observation of your live checkout. Re-register after changing your checkout code, then call createTestRun.",
+        "description": "Registers exactly the object your code passes to stripe.checkout.sessions.create, as `params` (that object sent alone as the body is accepted too; customer, URLs and secrets are not needed and are ignored; `warnings` says what was not stored). It is judged exactly like checkStripeCheckoutSession, discounts included. A config with the same name, or for the same Price ids, replaces the older one (`replaced`). Test runs mirror it into Stripe test mode; when it matches your latest live checkout, the scanned test page counts as an observation of your live checkout. Re-register after changing your checkout code, then call createTestRun.",
         "tags": [
           "Test runs"
         ],
@@ -32045,7 +32046,7 @@
       "post": {
         "operationId": "createTestRun",
         "summary": "Start a lifecycle test run",
-        "description": "Starts a synthetic test subscription in TEST mode and returns it queued. Stripe runs mirror your checkout into a test-mode Checkout Session, subscribe a test customer (card 4242) whose email is a Checkbox inbox, wait for your acknowledgment, advance a test clock through every legal notice window before trial end and renewal, cancel online in the customer portal and wait for the confirmation; then delete the test clock. Usually takes 2-4 minutes (longer when your own emails are slow to arrive): poll retrieveTestRun (next_action says when) or listen for test_run.completed. Each step reports observations, check results and agent-readable fixes; apply them and run again to verify.",
+        "description": "Starts a synthetic test subscription in TEST mode and returns it queued. Stripe runs mirror your checkout into a test-mode Checkout Session, subscribe a test customer (card 4242) whose email is a Checkbox inbox, wait for your acknowledgment, advance a test clock through every legal notice window before trial end and renewal, cancel online in the customer portal and wait for the confirmation; then delete the test clock. Usually takes 1-2 minutes; a real_checkout run a few minutes (longer when your own emails are slow to arrive): poll retrieveTestRun (next_action says when) or listen for test_run.completed. Each step reports observations, check results and agent-readable fixes; apply them and run again to verify.",
         "tags": [
           "Test runs"
         ],
@@ -33905,7 +33906,7 @@
                             "livemode": false,
                             "site": "site_3f9a1c2e7b4d4e0f9a8b7c6d5e4f3a2b",
                             "status": "action_required",
-                            "status_label": "Fixes needed",
+                            "status_label": "1 fix needed · 2 to set up",
                             "summary": "StreamMax fails 4 critical checks…",
                             "counts": {
                               "open": 3,
@@ -34059,7 +34060,7 @@
                               }
                             ],
                             "plan_status": "action_required",
-                            "plan_status_label": "Fixes needed",
+                            "plan_status_label": "1 fix needed · 2 to set up",
                             "next_action": {
                               "type": "apply_task",
                               "description": "Apply task_… (add the renewal terms above the Subscribe button in app/checkout/page.tsx), then call verifyTask.",
@@ -36085,7 +36086,7 @@
                             "customer_reference": "cs_test_a1b2c3",
                             "client_reference": null,
                             "source": "elements",
-                            "element_version": "1.5.6",
+                            "element_version": "1.5.7",
                             "client_timestamp": null,
                             "presentation": {
                               "violations": [],
