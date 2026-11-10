@@ -1,18 +1,26 @@
 {
   "name": "@checkbox-site/mcp",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "Checkbox MCP server: auto-renewal law and subscription compliance checks for AI agents (FTC ROSCA, California ARL, New York and other states) on Stripe Checkout params, pricing pages, disclosures and emails. Remote at https://app.checkbox.site/mcp, or local stdio.",
   "keywords": [
+    "checkbox",
+    "mcp",
+    "mcp-server",
+    "model-context-protocol",
+    "ai-agent",
+    "stripe",
+    "stripe-checkout",
     "subscription",
     "subscription-compliance",
-    "subscription compliance",
     "auto-renewal",
-    "auto renewal",
-    "autorenewal",
     "automatic-renewal",
     "compliance",
     "rosca",
     "click-to-cancel",
+    "ci",
+    "subscription compliance",
+    "auto renewal",
+    "autorenewal",
     "california-arl",
     "auto-renewal-law",
     "auto-renewal-compliance",
@@ -21,14 +29,8 @@
     "stripe-subscriptions",
     "ftc",
     "negative-option",
-    "stripe",
-    "stripe-checkout",
     "checkout",
-    "cancellation",
-    "mcp",
-    "model-context-protocol",
-    "mcp-server",
-    "ai-agent"
+    "cancellation"
   ],
   "mcpName": "site.checkbox/checkbox",
   "license": "MIT",
@@ -75,7 +77,7 @@
     "prepack": "npm run build"
   },
   "dependencies": {
-    "@checkbox-site/node": "^0.2.3",
+    "@checkbox-site/node": "^0.2.4",
     "@modelcontextprotocol/sdk": "^1.32.2",
     "zod": "^4.6.7"
   }

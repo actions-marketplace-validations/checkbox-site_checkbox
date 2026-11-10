@@ -75,7 +75,7 @@ both exist, the CLI prints which one it used (stderr), and `checkbox whoami` sho
 
 | Command | What it does |
 |---|---|
-| `checkbox init [--yes] [--json]` | one browser approval (device login), then keys in `.env.local`, snippet in the root layout, site + Terms / policies registered, Stripe test subscription (with permission; only a Stripe restricted TEST key, `rk_test_…` in `STRIPE_RESTRICTED_KEY`, is used: `sk_test_` and live keys are refused with how to make one), first checks, owner email; `--verify` re-checks after a deploy; `--ci` only adds CI (`checkbox ci init`) |
+| `checkbox init [--yes] [--json]` | one browser approval (device login), then keys in `.env.local` (not when that file is tracked by git or the folder is deployed as it is: the key then stays only in `~/.config/checkbox/config.json`), the SRI-pinned snippet in the root layout, site + Terms / policies registered, Stripe test subscription (with permission; only a Stripe restricted TEST key, `rk_test_…` in `STRIPE_RESTRICTED_KEY`, is used: `sk_test_` and live keys are refused with how to make one), first checks, owner email; `--verify` re-checks after a deploy; `--ci` only adds CI (`checkbox ci init`) |
 | `checkbox login [--api-key <key>\|--stdin]` | verifies the key with `GET /v1/account`, then saves it |
 | `checkbox whoami` | account, mode (test/live) and where the key came from |
 | `checkbox logout` | forgets the stored key |

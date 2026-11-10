@@ -827,7 +827,7 @@ const getSetupStatus: ToolDef = {
     const id = await resolveSetupSession(api, args.setup_session);
     if (args.verify) {
       if (!keyAllows(key, 'setup_sessions:write')) throw new ToolError('verify=true needs a key with setup_sessions write access; call again without verify.');
-      const res = await api.request<{ session?: { id: string; next_action?: NextAction }; domain_verified?: { domain: string; method: string } | null; unverified_scan?: { queued?: boolean; reason?: string | null } | null; setup_session?: { unverified_scan?: unknown } } & Record<string, unknown>>('POST', `/v1/setup_sessions/${enc(id)}/verify`, { body: {} });
+      const res = await api.request<{ session?: { id: string; next_action?: NextAction }; domain_verified?: { domain: string; method: string } | null; unverified_scan?: { queued?: boolean; reason?: string | null } | null; setup_session?: { unverified_scan?: unknown; next_action?: NextAction } } & Record<string, unknown>>('POST', `/v1/setup_sessions/${enc(id)}/verify`, { body: {} });
       const notes: string[] = [];
       if (res.domain_verified) notes.push(`Domain verified: ${res.domain_verified.method === 'snippet' ? `the Checkbox snippet is live on ${res.domain_verified.domain}` : `${res.domain_verified.domain} (${res.domain_verified.method})`}.`);
       if (res.unverified_scan?.queued) notes.push('First read-only scan queued (unverified: no checkout is submitted until you verify the domain).');
@@ -836,7 +836,7 @@ const getSetupStatus: ToolDef = {
       if (ro && !res.unverified_scan?.queued) notes.push(ro);
       const pl = sitePlansNote((res.setup_session as { site_plans?: unknown } | undefined)?.site_plans);
       if (pl) notes.push(pl);
-      return { headline: `Re-checked setup session ${id}.`, ...(notes.length ? { notes } : {}), data: withoutLegacyScore(res), next: nextActionOf(res) ?? nextActionOf(res.session) };
+      return { headline: `Re-checked setup session ${id}.`, ...(notes.length ? { notes } : {}), data: withoutLegacyScore(res), next: nextActionOf(res) ?? nextActionOf(res.setup_session) ?? nextActionOf(res.session) };
     }
     const session = await api.request<{ id: string; status: string; unverified_scan?: unknown; site_plans?: unknown; steps?: Array<{ key?: string; status?: string; title?: string; summary?: string }> }>('GET', `/v1/setup_sessions/${enc(id)}`);
     const open = (session.steps ?? []).filter((s) => s.status && !['done', 'skipped', 'not_applicable'].includes(s.status));

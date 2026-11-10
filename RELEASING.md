@@ -35,7 +35,9 @@ release workflow (it only runs on full versions, `v*.*.*`):
 git tag -f v1 && git push -f origin v1
 ```
 
-Publish the CLI version named in `action.yml` before moving `v1`. Marketplace: draft a release from the `v1` tag and
+Publish the CLI version named in `action.yml` before moving `v1`, and move `v1` on every CLI release: users pinned to
+`@v1` run whatever CLI the tagged `action.yml` names until the tag moves. Checkbox's release check reads `action.yml`
+at the `v1` tag and fails when it names an older CLI than the newest on npm. Marketplace: draft a release from the `v1` tag and
 tick "Publish this Action to the GitHub Marketplace" (category Continuous integration).
 
 ## One-time setup

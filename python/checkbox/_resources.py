@@ -2936,7 +2936,7 @@ class StripeCheckoutConfigsResource(Resource):
     def create(self, site: str, params: Optional["types.CreateStripeCheckoutConfigParams"] = None, /, *, request_options: Optional[RequestOptions] = None, **kwargs: Any) -> "types.StripeCheckoutConfig":
         """Register the Checkout Session params your code uses.
 
-        Registers exactly the object your code passes to stripe.checkout.sessions.create (customer, URLs and secrets are not needed and are ignored; `warnings` says what was not stored). It is judged exactly like checkStripeCheckoutSession, discounts included. A config with the same name, or for the same Price ids, replaces the older one (`replaced`). Test runs mirror it into Stripe test mode; when it matches your latest live checkout, the scanned test page counts as an observation of your live checkout. Re-register after changing your checkout code, then call createTestRun.
+        Registers exactly the object your code passes to stripe.checkout.sessions.create, as `params` (that object sent alone as the body is accepted too; customer, URLs and secrets are not needed and are ignored; `warnings` says what was not stored). It is judged exactly like checkStripeCheckoutSession, discounts included. A config with the same name, or for the same Price ids, replaces the older one (`replaced`). Test runs mirror it into Stripe test mode; when it matches your latest live checkout, the scanned test page counts as an observation of your live checkout. Re-register after changing your checkout code, then call createTestRun.
 
         Parameters can be given as a dict (positional) or as keyword arguments.
 

@@ -140,7 +140,7 @@ export interface DeviceAuthorizationParams {
   merchant_name?: string;
   /** Also ask for live-mode keys (live mode activates after domain verification). */
   live?: boolean;
-  /** A HINT of the Stripe TEST key found in the project, never the key. Format: "sk_test_" or "rk_test_", the ellipsis character "…" (U+2026), then the key's last 4 characters, e.g. "sk_test_…a1b2". The human is asked once whether Checkbox may use it for synthetic test subscriptions. */
+  /** A HINT of the Stripe restricted TEST key found in the project, never the key. Format: "rk_test_", the ellipsis character "…" (U+2026), then the key's last 4 characters, e.g. "rk_test_…a1b2". The human is asked once whether Checkbox may use it. Agents may store restricted test keys (rk_test_) only: an "sk_test_" hint (sent by older CLIs) is accepted and ignored, because a full secret key is refused on every path. */
   stripe_test_key_hint?: string;
 }
 
@@ -406,7 +406,7 @@ export interface SetupSession {
   stripe: {
     /** Whether the human ticked “Let your agent store a Stripe test-mode key” on the approval page (device login or OAuth connection). False: the agent may not store one (createTestCredential answers test_key_declined); the human adds it in the dashboard. Sessions started with a key the human made in the dashboard: true. */
     test_key_consent: boolean;
-    /** Hint of the key the CLI found (never the key). */
+    /** Hint of the restricted test key the CLI found (never the key). */
     test_key_hint: string | null;
     /** Whether a Stripe test-mode key is stored for test runs. */
     test_credential_stored: boolean;
@@ -418,7 +418,7 @@ export interface SetupSession {
       recommended: boolean;
       /** Why. */
       reason: string;
-      /** Where to create it. */
+      /** Stripe API keys page (Test mode); click "Create restricted key" there. */
       create_url: string;
       /** The one key checklist: every permission Checkbox uses (checks, fixes after the human approves, test runs). */
       permissions: Array<{
@@ -435,7 +435,7 @@ export interface SetupSession {
   test_run: {
     /** Unique identifier of the test run (run_…). */
     id: string;
-    /** queued, running, succeeded, failed or canceled. */
+    /** queued, running, succeeded, incomplete (no step failed, but a step could not finish), failed or canceled. */
     status: string;
     /** The result in plain words, as the test run says it ("Finished with 2 warnings to review"). succeeded with warnings is not a clean pass. */
     status_label?: string;
@@ -1830,7 +1830,7 @@ export interface CompliancePlan {
   site: string;
   /** action_required (an agent can apply open tasks now), verifying (changes applied; waiting for confirming observations), compliant (every required check passes or only waits for a live check — an automated assessment, not a legal determination; see compliance.pending_live_checks and coverage), blocked (only human answers ("Your call") or declined critical tasks remain). */
   status: "action_required" | "verifying" | "compliant" | "blocked";
-  /** The plan status in words to show a person: action_required "Fixes needed", verifying "Checking your changes", compliant "Checks pass", blocked "Your call"; while an agent works the site and everything left waits for a deploy or the owner (next_action done_for_now): "Waiting on deploy and you" or "Waiting on deploy". Show this, never the machine value (`compliant` is a status name, not a legal conclusion). */
+  /** The plan status in words to show a person, from the same counts as the summary ("1 fix needed · 2 to set up", "1 decision for you"; else action_required "Fixes needed", blocked "Your call"), "Checks still running (N)" while checks are still running (verifying), compliant "Checks pass"; while an agent works the site and everything left waits for a deploy or the owner (next_action done_for_now): "Waiting on deploy and you" or "Waiting on deploy". Show this, never the machine value (`compliant` is a status name, not a legal conclusion). */
   status_label?: string;
   /** The evaluation the plan was built from (null before the first check). */
   evaluation: string | null;
@@ -2036,7 +2036,7 @@ export interface Verification {
   diff: Array<VerificationCheck>;
   /** Plan status after this verification (null while pending). */
   plan_status: "action_required" | "verifying" | "compliant" | "blocked" | null;
-  /** The plan status in words to show a person: action_required "Fixes needed", verifying "Checking your changes", compliant "Checks pass", blocked "Your call"; while an agent works the site and everything left waits for a deploy or the owner (next_action done_for_now): "Waiting on deploy and you" or "Waiting on deploy". Show this, never the machine value (`compliant` is a status name, not a legal conclusion). */
+  /** The plan status in words to show a person, from the same counts as the summary ("1 fix needed · 2 to set up", "1 decision for you"; else action_required "Fixes needed", blocked "Your call"), "Checks still running (N)" while checks are still running (verifying), compliant "Checks pass"; while an agent works the site and everything left waits for a deploy or the owner (next_action done_for_now): "Waiting on deploy and you" or "Waiting on deploy". Show this, never the machine value (`compliant` is a status name, not a legal conclusion). */
   plan_status_label?: string | null;
   next_action: PlanNextAction;
   /** When it was requested. Unix timestamp in seconds. */
@@ -4596,8 +4596,8 @@ export interface TestRun {
   type: "stripe" | "generic";
   /** Stripe runs: mirror (Checkbox mirrors your checkout into test mode and moves a test clock through trial and renewal) or real_checkout (the shopper buys through YOUR checkout on your test deployment, so your own webhook handlers and email code fire: the proof that your real system works). null for generic runs. */
   mode: "mirror" | "real_checkout" | null;
-  /** succeeded means the run finished and no step failed (steps may still have warnings to review); failed means it stopped early, or finished with a failed step (see failure and steps[].fix). */
-  status: "queued" | "running" | "succeeded" | "failed" | "canceled";
+  /** succeeded means the run finished every step and no step failed (steps may still have warnings to review); incomplete means no step failed, but a step could not finish what it set out to observe (for example the online cancellation could not be completed): not a pass; failed means it stopped early, or finished with a failed step (see failure and steps[].fix). */
+  status: "queued" | "running" | "succeeded" | "incomplete" | "failed" | "canceled";
   /** The status in plain words, counting steps: "Finished with 6 warnings to review", "Finished with 1 failed step", "Finished: every observed step passed". succeeded with warnings is not a clean pass. */
   status_label: string;
   /** Internal phase (prepare, checkout, await_ack, advance, settle, cancel, await_cancel_email, finalize, done). */
@@ -4932,7 +4932,7 @@ export interface CompliancePlanSummary {
   site: string;
   /** action_required (an agent can apply open tasks now), verifying (changes applied; waiting for confirming observations), compliant (every required check passes or only waits for a live check — an automated assessment, not a legal determination; see compliance.pending_live_checks and coverage), blocked (only human answers ("Your call") or declined critical tasks remain). */
   status: "action_required" | "verifying" | "compliant" | "blocked";
-  /** The plan status in words to show a person: action_required "Fixes needed", verifying "Checking your changes", compliant "Checks pass", blocked "Your call"; while an agent works the site and everything left waits for a deploy or the owner (next_action done_for_now): "Waiting on deploy and you" or "Waiting on deploy". Show this, never the machine value (`compliant` is a status name, not a legal conclusion). */
+  /** The plan status in words to show a person, from the same counts as the summary ("1 fix needed · 2 to set up", "1 decision for you"; else action_required "Fixes needed", blocked "Your call"), "Checks still running (N)" while checks are still running (verifying), compliant "Checks pass"; while an agent works the site and everything left waits for a deploy or the owner (next_action done_for_now): "Waiting on deploy and you" or "Waiting on deploy". Show this, never the machine value (`compliant` is a status name, not a legal conclusion). */
   status_label?: string;
   /** Two or three sentences for an LLM: where the site stands and what comes next. */
   summary: string;
