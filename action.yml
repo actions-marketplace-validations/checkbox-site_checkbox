@@ -36,7 +36,7 @@ inputs:
     required: false
     # Always a version that is on npm (scripts/public-repos/published-versions.json "published"; the release check
     # fails otherwise). Raise it together with that file, after the new CLI is published (packages/cli/RELEASING.md).
-    default: "0.4.5"
+    default: "0.4.6"
   node-version:
     description: Node.js version (22+ runs TypeScript "module" entries without tsx).
     required: false
