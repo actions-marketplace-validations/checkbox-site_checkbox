@@ -1689,7 +1689,7 @@
             "properties": {
               "test_key_consent": {
                 "type": "boolean",
-                "description": "Whether the human ticked “Let your agent store a Stripe test-mode key” on the approval page (device login or OAuth connection). False: the agent may not store one (createTestCredential answers test_key_declined); the human adds it in the dashboard. Sessions started with a key the human made in the dashboard: true.",
+                "description": "Whether the human ticked the box “Let your agent store a Stripe test-mode restricted key for this project” (agent sign-in) or “Let this app store a Stripe test-mode restricted key for your sites” (app connection) (checkbox id consent-stripe-test-key) on the approval page (device login or OAuth connection). False: the agent may not store one (createTestCredential answers test_key_declined); the human adds it in the dashboard. Sessions started with a key the human made in the dashboard: true.",
                 "example": true
               },
               "test_key_hint": {
@@ -1972,8 +1972,13 @@
             "properties": {
               "evaluated": {
                 "type": "integer",
-                "description": "When it was evaluated. Unix timestamp in seconds.",
+                "description": "When it was evaluated (Unix seconds; a time, not a count). Unix timestamp in seconds.",
                 "example": 1793318400
+              },
+              "evaluated_at": {
+                "type": "string",
+                "description": "The same time as evaluated, in ISO 8601.",
+                "example": "2026-11-10T20:04:22.000Z"
               },
               "failing": {
                 "type": "integer",
@@ -2105,6 +2110,7 @@
             },
             "required": [
               "evaluated",
+              "evaluated_at",
               "failing",
               "needs_review",
               "label",
@@ -2114,6 +2120,7 @@
             "description": "Latest verdict of the test-mode site.",
             "example": {
               "evaluated": 1793318400,
+              "evaluated_at": "2026-11-10T20:04:22.000Z",
               "failing": 3,
               "needs_review": 2,
               "label": "1 fix needed · 1 to set up",
@@ -2502,9 +2509,21 @@
             }
           },
           "snippet_installed_in": {
-            "type": "string",
-            "maxLength": 500,
-            "description": "File the snippet tag was added to.",
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "maxLength": 300
+                },
+                "maxItems": 20
+              }
+            ],
+            "description": "File the snippet tag was added to, or a list of files (e.g. [\"app/layout.tsx\", \"app/account/layout.tsx\"]).",
             "example": "app/layout.tsx"
           },
           "env_written": {
@@ -2629,6 +2648,7 @@
                 "site_plans": [],
                 "compliance": {
                   "evaluated": 1793318400,
+                  "evaluated_at": "2026-11-10T20:04:22.000Z",
                   "failing": 3,
                   "needs_review": 2,
                   "label": "1 fix needed · 1 to set up",
@@ -2950,6 +2970,14 @@
               }
             }
           },
+          "steps": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SetupStep"
+            },
+            "description": "The same as setup_session.steps, at the top level: the setup checklist, in order.",
+            "example": []
+          },
           "setup_session": {
             "$ref": "#/components/schemas/SetupSession"
           }
@@ -2963,6 +2991,7 @@
           "domain_verified",
           "unverified_scan",
           "next_action",
+          "steps",
           "setup_session"
         ],
         "description": "Result of verifySetupSession, with the updated session."
@@ -8614,8 +8643,19 @@
               "compliant",
               "blocked"
             ],
-            "description": "action_required (an agent can apply open tasks now), verifying (changes applied; waiting for confirming observations), compliant (every required check passes or only waits for a live check — an automated assessment, not a legal determination; see compliance.pending_live_checks and coverage), blocked (only human answers (\"Your call\") or declined critical tasks remain).",
+            "description": "action_required (an agent can apply open tasks now), verifying (changes applied; waiting for confirming observations), compliant (every required check passes or only waits for a live check — an automated assessment, not a legal determination; see compliance.pending_live_checks and coverage), blocked (only human answers (\"Your call\") or declined critical tasks remain). The value \"compliant\" is kept so published SDKs keep working; prefer checks_status (\"checks_pass\") and show status_label to people: never tell anyone the site \"is compliant\".",
             "example": "action_required"
+          },
+          "checks_status": {
+            "type": "string",
+            "enum": [
+              "action_required",
+              "verifying",
+              "checks_pass",
+              "blocked"
+            ],
+            "description": "The same as status, with \"checks_pass\" in place of the older value \"compliant\" (every required check passes or only waits for a live check: an automated assessment, not a legal determination). Read this one in new code.",
+            "example": "checks_pass"
           },
           "status_label": {
             "type": "string",
@@ -9515,10 +9555,11 @@
               "passed_with_notes",
               "not_checked",
               "pending_live_check",
+              "needs_review",
               "failed",
               "superseded"
             ],
-            "description": "pending (waiting for the confirming scan / re-evaluation), passed (Checkbox observed the expected result: every check passes or does not apply), passed_with_gaps (nothing observed fails, but some checks could not be observed: observed missing_data — not verified), passed_with_notes (nothing observed fails and the task counts as passing, but a check is still needs_review on a part that is not yours to change, such as Stripe's own page layout: see checks), not_checked (a task whose checks could only not be observed yet: nothing to change in the code; next_action says what evidence to provide), pending_live_check (an email whose content passes but that Checkbox has not seen sent for a real event yet: nothing to change; it completes on the first real send or a proof run), failed (it did not: see diff), superseded (this verification did not pass, but newer evidence, such as a test run or a later evaluation, settled the task since: see superseded and follow next_action; nothing to change for it).",
+            "description": "pending (waiting for the confirming scan / re-evaluation), passed (Checkbox observed the expected result: every check passes or does not apply), passed_with_gaps (nothing observed fails, but some checks could not be observed: observed missing_data — not verified), passed_with_notes (nothing observed fails and the task counts as passing, but a check is still needs_review on a part that is not yours to change, such as Stripe's own page layout: see checks), not_checked (a task whose checks could only not be observed yet: nothing to change in the code; next_action says what evidence to provide), pending_live_check (an email whose content passes but that Checkbox has not seen sent for a real event yet: nothing to change; it completes on the first real send or a proof run), needs_review (nothing observed fails, but a check is still undecided, e.g. a cancellation not tried yet or a styling estimate: not done; next_action says what decides it), failed (a check was observed failing: see diff), superseded (this verification did not pass, but newer evidence, such as a test run or a later evaluation, settled the task since: see superseded and follow next_action; nothing to change for it).",
             "example": "pending"
           },
           "superseded": {
@@ -21676,7 +21717,7 @@
               "failed",
               "canceled"
             ],
-            "description": "succeeded means the run finished every step and no step failed (steps may still have warnings to review); incomplete means no step failed, but a step could not finish what it set out to observe (for example the online cancellation could not be completed): not a pass; failed means it stopped early, or finished with a failed step (see failure and steps[].fix).",
+            "description": "succeeded means the run finished every step and no step failed (steps may still have warnings to review); incomplete means no step failed, but a step could not finish what it set out to observe (for example the online cancellation could not be completed, or a required email never arrived): not a pass; failed means it stopped early, or finished with a failed step (see failure and steps[].fix).",
             "example": "running"
           },
           "status_label": {
@@ -21802,6 +21843,22 @@
             ],
             "description": "When it finished. Unix timestamp in seconds.",
             "example": 1793318400
+          },
+          "completed": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "The same as finished (the name verifications use): when the run finished; null while it runs. Unix timestamp in seconds.",
+            "example": 1793318400
+          },
+          "duration_seconds": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "How long the run took, from started (or created) to finished, in seconds; null while it runs.",
+            "example": 56
           },
           "steps": {
             "type": "array",
@@ -22447,6 +22504,8 @@
           "created",
           "started",
           "finished",
+          "completed",
+          "duration_seconds",
           "steps",
           "failure",
           "result",
@@ -22498,6 +22557,8 @@
                 "created": 1793318400,
                 "started": 1793318400,
                 "finished": 1793318400,
+                "completed": 1793318400,
+                "duration_seconds": 56,
                 "steps": [],
                 "failure": {
                   "code": "price_not_in_test_mode",
@@ -23261,7 +23322,7 @@
               "compliant",
               "blocked"
             ],
-            "description": "action_required (an agent can apply open tasks now), verifying (changes applied; waiting for confirming observations), compliant (every required check passes or only waits for a live check — an automated assessment, not a legal determination; see compliance.pending_live_checks and coverage), blocked (only human answers (\"Your call\") or declined critical tasks remain).",
+            "description": "action_required (an agent can apply open tasks now), verifying (changes applied; waiting for confirming observations), compliant (every required check passes or only waits for a live check — an automated assessment, not a legal determination; see compliance.pending_live_checks and coverage), blocked (only human answers (\"Your call\") or declined critical tasks remain). The value \"compliant\" is kept so published SDKs keep working; prefer checks_status (\"checks_pass\") and show status_label to people: never tell anyone the site \"is compliant\".",
             "example": "action_required"
           },
           "status_label": {
@@ -31557,7 +31618,7 @@
       "post": {
         "operationId": "createTestCredential",
         "summary": "Store a billing test-mode key",
-        "description": "Stores the site's Stripe TEST-mode restricted key (rk_test_…), after checking it with Stripe the way the dashboard's Connect Stripe does. An agent may call this itself once the owner approved the setup; every store is logged on the site's setup timeline and Billing connection line, and the human can revoke it in one click. Live keys are refused (test_key_not_test_mode: a human adds live keys in the dashboard); the owner must have ticked \"Let your agent store a Stripe test-mode key\" on the approval page of the agent's sign-in or connection (else test_key_declined); a key whose Stripe account looks like another site's is refused with billing_account_mismatch (with confirm_account_mismatch: true the key is connected on hold until a person confirms the account in the dashboard; only a person can confirm it); secret keys (sk_test_…) are refused (test_key_not_restricted). On a test-mode site without a Stripe connection the key also becomes the site's Stripe connection: one key for checks, fixes (only after the human approves each) and test runs. The key's checklist: Customers: Write, Products: Read, Prices: Read, Coupons: Read, Subscriptions: Write, Test clocks: Write, Customer portal: Write, Checkout Sessions: Write, Payment Links: Write, Webhook Endpoints: Write. Replaces an existing key. Next: createTestRun.",
+        "description": "Stores the site's Stripe TEST-mode restricted key (rk_test_…), after checking it with Stripe the way the dashboard's Connect Stripe does. An agent may call this itself once the owner approved the setup; every store is logged on the site's setup timeline and Billing connection line, and the human can revoke it in one click. Live keys are refused (test_key_not_test_mode: a human adds live keys in the dashboard); the owner must have ticked the box “Let your agent store a Stripe test-mode restricted key for this project” (agent sign-in) or “Let this app store a Stripe test-mode restricted key for your sites” (app connection) (checkbox id consent-stripe-test-key) on the approval page of the agent's sign-in or connection (else test_key_declined); a key whose Stripe account looks like another site's is refused with billing_account_mismatch (with confirm_account_mismatch: true the key is connected on hold until a person confirms the account in the dashboard; only a person can confirm it); secret keys (sk_test_…) are refused (test_key_not_restricted). On a test-mode site without a Stripe connection the key also becomes the site's Stripe connection: one key for checks, fixes (only after the human approves each) and test runs. The key's checklist: Customers: Write, Products: Read, Prices: Read, Coupons: Read, Subscriptions: Write, Test clocks: Write, Customer portal: Write, Checkout Sessions: Write, Payment Links: Write, Webhook Endpoints: Write. Replaces an existing key. Next: createTestRun.",
         "tags": [
           "Test runs"
         ],
@@ -34730,6 +34791,8 @@
                             "created": 1793318400,
                             "started": 1793318400,
                             "finished": 1793318400,
+                            "completed": 1793318400,
+                            "duration_seconds": 56,
                             "steps": [],
                             "failure": {
                               "code": "price_not_in_test_mode",
@@ -34910,6 +34973,8 @@
                             "created": 1793318400,
                             "started": 1793318400,
                             "finished": 1793318400,
+                            "completed": 1793318400,
+                            "duration_seconds": 56,
                             "steps": [],
                             "failure": {
                               "code": "price_not_in_test_mode",
@@ -37030,7 +37095,7 @@
     "test_key_declined": {
       "status": 403,
       "type": "permission_error",
-      "description": "The owner did not tick “Let your agent store a Stripe test-mode key” on the approval page of this agent's sign-in (device login) or connection (OAuth). Nothing was stored. Ask them to allow it on the approval page (sign in again) or to add the key themselves in the dashboard."
+      "description": "The owner did not tick “Let your agent store a Stripe test-mode restricted key for this project” (agent sign-in, device login) or “Let this app store a Stripe test-mode restricted key for your sites” (app connection, OAuth) on the approval page (checkbox id consent-stripe-test-key). Nothing was stored. Ask them to allow it on the approval page (sign in again) or to add the key themselves in the dashboard."
     },
     "test_key_rejected": {
       "status": 400,

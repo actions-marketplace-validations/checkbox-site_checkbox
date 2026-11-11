@@ -617,7 +617,7 @@ SetupSessionStripeRestrictedKey = TypedDict(
 SetupSessionStripe = TypedDict(
     "SetupSessionStripe",
     {
-        #: Whether the human ticked “Let your agent store a Stripe test-mode key” on the approval page (device login or OAuth connection). False: the agent may not store one (createTestCredential answers test_key_declined); the human adds it in the dashboard. Sessions started with a key the human made in the dashboard: true.
+        #: Whether the human ticked the box “Let your agent store a Stripe test-mode restricted key for this project” (agent sign-in) or “Let this app store a Stripe test-mode restricted key for your sites” (app connection) (checkbox id consent-stripe-test-key) on the approval page (device login or OAuth connection). False: the agent may not store one (createTestCredential answers test_key_declined); the human adds it in the dashboard. Sessions started with a key the human made in the dashboard: true.
         "test_key_consent": bool,
         #: Hint of the restricted test key the CLI found (never the key).
         "test_key_hint": Optional[str],
@@ -730,8 +730,10 @@ SetupSessionComplianceTodoItem = TypedDict(
 SetupSessionCompliance = TypedDict(
     "SetupSessionCompliance",
     {
-        #: When it was evaluated. Unix timestamp in seconds.
+        #: When it was evaluated (Unix seconds; a time, not a count). Unix timestamp in seconds.
         "evaluated": int,
+        #: The same time as evaluated, in ISO 8601.
+        "evaluated_at": str,
         #: Deprecated: open failing findings (per check). Read `label` (counted in tasks) and `todo` instead.
         "failing": int,
         #: Deprecated: open needs-review findings (per check). Read `label` (counted in tasks) and `todo` instead.
@@ -900,8 +902,8 @@ SetupSessionUpdate = TypedDict(
         "plans": List["SetupPlan"],
         #: Facts about the builder's codebase. (optional)
         "project": "SetupSessionUpdateProject",
-        #: File the snippet tag was added to. (optional)
-        "snippet_installed_in": str,
+        #: File the snippet tag was added to, or a list of files (e.g. ["app/layout.tsx", "app/account/layout.tsx"]). (optional)
+        "snippet_installed_in": Union[str, List[str]],
         #: File the API keys were written to (never committed). (optional)
         "env_written": str,
         #: Live-mode site (site_…) you created with the live key, so the checklist tracks its domain verification. (optional)
@@ -1025,6 +1027,8 @@ SetupVerification = TypedDict(
         #: While the domain is not verified: the read-only scan of the site's own public pages (no checkout submitted).
         "unverified_scan": Optional["SetupVerificationUnverifiedScan"],
         "next_action": "SetupNextAction",
+        #: The same as setup_session.steps, at the top level: the setup checklist, in order.
+        "steps": List["SetupStep"],
         "setup_session": "SetupSession",
     },
     total=False,
@@ -2852,8 +2856,10 @@ CompliancePlan = TypedDict(
         "livemode": bool,
         #: The site.
         "site": str,
-        #: action_required (an agent can apply open tasks now), verifying (changes applied; waiting for confirming observations), compliant (every required check passes or only waits for a live check — an automated assessment, not a legal determination; see compliance.pending_live_checks and coverage), blocked (only human answers ("Your call") or declined critical tasks remain).
+        #: action_required (an agent can apply open tasks now), verifying (changes applied; waiting for confirming observations), compliant (every required check passes or only waits for a live check — an automated assessment, not a legal determination; see compliance.pending_live_checks and coverage), blocked (only human answers ("Your call") or declined critical tasks remain). The value "compliant" is kept so published SDKs keep working; prefer checks_status ("checks_pass") and show status_label to people: never tell anyone the site "is compliant".
         "status": Literal["action_required", "verifying", "compliant", "blocked"],
+        #: The same as status, with "checks_pass" in place of the older value "compliant" (every required check passes or only waits for a live check: an automated assessment, not a legal determination). Read this one in new code. (optional)
+        "checks_status": Literal["action_required", "verifying", "checks_pass", "blocked"],
         #: The plan status in words to show a person, from the same counts as the summary ("1 fix needed · 2 to set up", "1 decision for you"; else action_required "Fixes needed", blocked "Your call"), "Checks still running (N)" while checks are still running (verifying), compliant "Checks pass"; while an agent works the site and everything left waits for a deploy or the owner (next_action done_for_now): "Waiting on deploy and you" or "Waiting on deploy". Show this, never the machine value (`compliant` is a status name, not a legal conclusion). (optional)
         "status_label": str,
         #: The evaluation the plan was built from (null before the first check).
@@ -3252,8 +3258,8 @@ Verification = TypedDict(
         "task": Optional[str],
         #: One task or the whole site.
         "scope": Literal["task", "site"],
-        #: pending (waiting for the confirming scan / re-evaluation), passed (Checkbox observed the expected result: every check passes or does not apply), passed_with_gaps (nothing observed fails, but some checks could not be observed: observed missing_data — not verified), passed_with_notes (nothing observed fails and the task counts as passing, but a check is still needs_review on a part that is not yours to change, such as Stripe's own page layout: see checks), not_checked (a task whose checks could only not be observed yet: nothing to change in the code; next_action says what evidence to provide), pending_live_check (an email whose content passes but that Checkbox has not seen sent for a real event yet: nothing to change; it completes on the first real send or a proof run), failed (it did not: see diff), superseded (this verification did not pass, but newer evidence, such as a test run or a later evaluation, settled the task since: see superseded and follow next_action; nothing to change for it).
-        "status": Literal["pending", "passed", "passed_with_gaps", "passed_with_notes", "not_checked", "pending_live_check", "failed", "superseded"],
+        #: pending (waiting for the confirming scan / re-evaluation), passed (Checkbox observed the expected result: every check passes or does not apply), passed_with_gaps (nothing observed fails, but some checks could not be observed: observed missing_data — not verified), passed_with_notes (nothing observed fails and the task counts as passing, but a check is still needs_review on a part that is not yours to change, such as Stripe's own page layout: see checks), not_checked (a task whose checks could only not be observed yet: nothing to change in the code; next_action says what evidence to provide), pending_live_check (an email whose content passes but that Checkbox has not seen sent for a real event yet: nothing to change; it completes on the first real send or a proof run), needs_review (nothing observed fails, but a check is still undecided, e.g. a cancellation not tried yet or a styling estimate: not done; next_action says what decides it), failed (a check was observed failing: see diff), superseded (this verification did not pass, but newer evidence, such as a test run or a later evaluation, settled the task since: see superseded and follow next_action; nothing to change for it).
+        "status": Literal["pending", "passed", "passed_with_gaps", "passed_with_notes", "not_checked", "pending_live_check", "needs_review", "failed", "superseded"],
         #: Set when newer evidence settled the task after this verification finished (status superseded). (optional)
         "superseded": Optional["VerificationSuperseded"],
         #: How it was re-checked.
@@ -7269,7 +7275,7 @@ TestRun = TypedDict(
         "type": Literal["stripe", "generic"],
         #: Stripe runs: mirror (Checkbox mirrors your checkout into test mode and moves a test clock through trial and renewal) or real_checkout (the shopper buys through YOUR checkout on your test deployment, so your own webhook handlers and email code fire: the proof that your real system works). null for generic runs.
         "mode": Optional[Literal["mirror", "real_checkout"]],
-        #: succeeded means the run finished every step and no step failed (steps may still have warnings to review); incomplete means no step failed, but a step could not finish what it set out to observe (for example the online cancellation could not be completed): not a pass; failed means it stopped early, or finished with a failed step (see failure and steps[].fix).
+        #: succeeded means the run finished every step and no step failed (steps may still have warnings to review); incomplete means no step failed, but a step could not finish what it set out to observe (for example the online cancellation could not be completed, or a required email never arrived): not a pass; failed means it stopped early, or finished with a failed step (see failure and steps[].fix).
         "status": Literal["queued", "running", "succeeded", "incomplete", "failed", "canceled"],
         #: The status in plain words, counting steps: "Finished with 6 warnings to review", "Finished with 1 failed step", "Finished: every observed step passed". succeeded with warnings is not a clean pass.
         "status_label": str,
@@ -7287,6 +7293,10 @@ TestRun = TypedDict(
         "started": Optional[int],
         #: When it finished. Unix timestamp in seconds.
         "finished": Optional[int],
+        #: The same as finished (the name verifications use): when the run finished; null while it runs. Unix timestamp in seconds.
+        "completed": Optional[int],
+        #: How long the run took, from started (or created) to finished, in seconds; null while it runs.
+        "duration_seconds": Optional[int],
         #: Lifecycle steps in order.
         "steps": List["TestRunStep"],
         #: Why the run stopped (failed / canceled runs).
@@ -7618,7 +7628,7 @@ CompliancePlanSummary = TypedDict(
         "livemode": bool,
         #: The site.
         "site": str,
-        #: action_required (an agent can apply open tasks now), verifying (changes applied; waiting for confirming observations), compliant (every required check passes or only waits for a live check — an automated assessment, not a legal determination; see compliance.pending_live_checks and coverage), blocked (only human answers ("Your call") or declined critical tasks remain).
+        #: action_required (an agent can apply open tasks now), verifying (changes applied; waiting for confirming observations), compliant (every required check passes or only waits for a live check — an automated assessment, not a legal determination; see compliance.pending_live_checks and coverage), blocked (only human answers ("Your call") or declined critical tasks remain). The value "compliant" is kept so published SDKs keep working; prefer checks_status ("checks_pass") and show status_label to people: never tell anyone the site "is compliant".
         "status": Literal["action_required", "verifying", "compliant", "blocked"],
         #: The plan status in words to show a person, from the same counts as the summary ("1 fix needed · 2 to set up", "1 decision for you"; else action_required "Fixes needed", blocked "Your call"), "Checks still running (N)" while checks are still running (verifying), compliant "Checks pass"; while an agent works the site and everything left waits for a deploy or the owner (next_action done_for_now): "Waiting on deploy and you" or "Waiting on deploy". Show this, never the machine value (`compliant` is a status name, not a legal conclusion). (optional)
         "status_label": str,
@@ -9826,7 +9836,7 @@ ERROR_CODES: Dict[str, Dict[str, Any]] = {
     "test_key_missing": {"status": 400, "type": "invalid_request_error", "description": "A Stripe test run needs a Stripe TEST-mode key stored for the site: the agent stores the restricted test key (rk_test_…) with createTestCredential, or a person adds it in the dashboard."},
     "test_key_not_test_mode": {"status": 400, "type": "invalid_request_error", "description": "The billing key is a live-mode (or malformed) key. Agents only store TEST-mode restricted keys (rk_test_…); a human adds live keys in the Checkbox dashboard."},
     "test_key_not_restricted": {"status": 400, "type": "invalid_request_error", "description": "The key is a full Stripe secret key (sk_test_… or sk_live_…), which is refused on every connect path (createTestCredential, connectBillingPlatform, the dashboard). Use a restricted key (rk_test_…) with the permissions on Checkbox's key checklist instead; `message` lists them."},
-    "test_key_declined": {"status": 403, "type": "permission_error", "description": "The owner did not tick “Let your agent store a Stripe test-mode key” on the approval page of this agent's sign-in (device login) or connection (OAuth). Nothing was stored. Ask them to allow it on the approval page (sign in again) or to add the key themselves in the dashboard."},
+    "test_key_declined": {"status": 403, "type": "permission_error", "description": "The owner did not tick “Let your agent store a Stripe test-mode restricted key for this project” (agent sign-in, device login) or “Let this app store a Stripe test-mode restricted key for your sites” (app connection, OAuth) on the approval page (checkbox id consent-stripe-test-key). Nothing was stored. Ask them to allow it on the approval page (sign in again) or to add the key themselves in the dashboard."},
     "test_key_rejected": {"status": 400, "type": "invalid_request_error", "description": "Stripe rejected the test-mode key or it lacks a permission test runs need; `message` names it."},
     "authorization_pending": {"status": 400, "type": "invalid_request_error", "description": "Device login: the human has not approved yet. Keep polling createDeviceToken every `interval` seconds."},
     "slow_down": {"status": 400, "type": "rate_limit_error", "description": "Device login: polling too fast. Add 5 seconds to the interval and keep polling."},

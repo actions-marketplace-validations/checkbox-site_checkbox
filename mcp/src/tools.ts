@@ -593,9 +593,27 @@ async function setupOverOAuth(
     data: (() => {
       const doc = { ...session, ...(fresh ?? {}) } as Record<string, unknown> & { install?: { snippet_key?: unknown }; publishable_key?: unknown };
       const keys = labelledPublicKeys(doc.install?.snippet_key, doc.publishable_key);
-      return withoutLegacyScore({ ...doc, ...(keys.length ? { public_keys: keys } : {}), ...(firstCheck ? { first_check: firstCheck } : {}) });
+      return compactSetupDoc(withoutLegacyScore({ ...doc, ...(keys.length ? { public_keys: keys } : {}), ...(firstCheck ? { first_check: firstCheck } : {}) }));
     })(),
   };
+}
+
+/**
+ * Round 33 (pilot 32 item 22, new-app: setup_checkbox answered with about 30 KB on the first call): the first setup
+ * response leaves out what the agent does not need yet. The go-live steps become their one-line summary (get_compliance_plan
+ * and complete_setup carry them in full), and once the Stripe key is stored its permission checklist is dropped. Pure.
+ */
+export function compactSetupDoc<T>(doc: T): T {
+  if (!doc || typeof doc !== 'object') return doc;
+  const d = { ...(doc as Record<string, unknown>) };
+  const g = d.go_live as { summary?: unknown; steps?: unknown[] } | null | undefined;
+  if (g && typeof g === 'object' && Array.isArray(g.steps)) d.go_live = { summary: g.summary ?? null, steps: g.steps.length, full: 'get_compliance_plan (go_live) or complete_setup' };
+  const st = d.stripe as { test_credential_stored?: unknown; restricted_key?: { permissions?: unknown[] } & Record<string, unknown> } | undefined;
+  if (st && st.test_credential_stored === true && st.restricted_key && Array.isArray(st.restricted_key.permissions)) {
+    const { permissions: _p, ...rk } = st.restricted_key;
+    d.stripe = { ...st, restricted_key: rk };
+  }
+  return d as T;
 }
 
 /**
@@ -761,7 +779,7 @@ const setupCheckbox: ToolDef = {
         notes: [
           'Tell the human exactly one line, e.g. "Open <link> and click Approve to connect Checkbox (free, no card)." Do not ask them to copy keys.',
           // Round 32 (pilot 31 item 13): the Stripe key box and the restricted key in the same message (one approval).
-          `${args.billing_platform === 'stripe' ? 'In the same message' : 'If the site sells through Stripe, in the same message'}, ask them to tick “Let your agent store a Stripe test-mode key” on that page and, if the project has no rk_test_ key yet, to create a restricted key in Stripe Test mode (https://dashboard.stripe.com/test/apikeys → Create restricted key, with the permissions the approval page lists) and put it in the project's env file (never in the chat): one approval then covers the key and the test subscription.`,
+          `${args.billing_platform === 'stripe' ? 'In the same message' : 'If the site sells through Stripe, in the same message'}, ask them to tick the box “Let your agent store a Stripe test-mode restricted key for this project” on that page and, if the project has no rk_test_ key yet, to create a restricted key in Stripe Test mode (https://dashboard.stripe.com/test/apikeys → Create restricted key, with the permissions the approval page lists) and put it in the project's env file (never in the chat): one approval then covers the key and the test subscription.`,
           `Then call setup_checkbox again with device_code "${auth.device_code}" AND the same facts (site_url, checkout_url, merchant_name, plans, policy URLs): after the approval Checkbox applies them and runs the first checks in that call. Keep the device_code private; it is not shown to the human.`,
         ],
         next: { type: 'wait_for_approval', message: `Call setup_checkbox with device_code "${auth.device_code}" to wait for the approval.`, operation_id: 'createDeviceToken' },
@@ -782,7 +800,7 @@ const setupCheckbox: ToolDef = {
       notes,
       data: (() => {
         const keys = labelledPublicKeys((session as { install?: { snippet_key?: unknown } }).install?.snippet_key, (session as { publishable_key?: unknown }).publishable_key);
-        return keys.length ? { ...withoutLegacyScore(session), public_keys: keys } : withoutLegacyScore(session);
+        return compactSetupDoc(keys.length ? { ...withoutLegacyScore(session), public_keys: keys } : withoutLegacyScore(session));
       })(),
     };
   },
@@ -1092,6 +1110,27 @@ export function precheckLines(pre: PrecheckLite | null | undefined, max = 12): s
   return [`Pre-check (${pre?.verdict ?? 'n/a'}), per check:`, ...lines, ...(checks.length > max ? [`and ${checks.length - max} more (data.precheck.checks)`] : [])];
 }
 
+interface FinalCheckLite {
+  check_id: string;
+  observed: string;
+  detail?: string;
+}
+
+/**
+ * Round 33 (pilot 32 item 10, new-app: the PASSED_WITH_NOTES text listed the stale pre-check bullets (needs_review)
+ * while the final checks lived only in the JSON): a finished verification is summarized from its FINAL checks; the
+ * pre-check lines show only while it is pending or when it has no final checks. Pure, exported for tests.
+ */
+export function verificationLines(v: { status: string; precheck?: PrecheckLite | null; checks?: FinalCheckLite[] | null }, max = 12): string[] {
+  const checks = v.checks ?? [];
+  if (v.status === 'pending' || !checks.length) return precheckLines(v.precheck, max);
+  const order: Record<string, number> = { fail: 0, needs_review: 1, missing_data: 1, pass: 2, informational: 2, not_applicable: 3 };
+  const sorted = [...checks].sort((a, b) => (order[a.observed] ?? 1) - (order[b.observed] ?? 1));
+  const lines = sorted.slice(0, max).map((c) => `${c.check_id}: ${c.observed}${c.detail ? ` — ${untrusted(c.detail, 180)}` : ''}`);
+  const pre = v.precheck?.verdict && v.precheck.checks?.length ? [`(The pre-check's estimate, ${v.precheck.verdict}, is superseded by these final checks: data.precheck keeps it.)`] : [];
+  return ['Final checks:', ...lines, ...(checks.length > max ? [`and ${checks.length - max} more (data.checks)`] : []), ...pre];
+}
+
 const verifyTask: ToolDef = {
   name: 'verify_task',
   title: 'Verify a task after applying its change',
@@ -1101,7 +1140,7 @@ const verifyTask: ToolDef = {
     '- page tasks: html = the rendered page HTML (before or after deploy; ≤ ~900 KB). Without it Checkbox fetches the live page.',
     '- Stripe tasks: stripe_checkout_session = exactly the object your code now passes to stripe.checkout.sessions.create.',
     '- email tasks: email = { subject, text and/or html } of the new template.',
-    'Result: verification status passed / failed (with a diff of expected vs observed) / pending (waiting for the confirming scan). Waits up to `wait` seconds. Then follow next_action (usually get_compliance_plan). A verification with checks still needs_review is reported as failed with next_action type needs_review: it is not done. "informational" checks are notes on Stripe\'s own layout: nothing to change.',
+    'Result: verification status passed / needs_review / failed (with a diff of expected vs observed) / pending (waiting for the confirming scan). Waits up to `wait` seconds. Then follow next_action (usually get_compliance_plan). Status needs_review: nothing failed, but a check is still undecided; it is not done: follow next_action. "informational" checks are notes on Stripe\'s own layout: nothing to change.',
   ].join('\n'),
   input: {
     task: z.string().max(100).describe('Task id (task_…).'),
@@ -1127,7 +1166,7 @@ const verifyTask: ToolDef = {
   async run(args, { api }) {
     const body = pick(args, ['html', 'stripe_checkout_session', 'stripe_checkout_sessions', 'email', 'plan', 'price_id', 'recheck']);
     if (body.email && typeof body.email === 'object' && (body.email as { kind?: unknown }).kind) body.email = { ...(body.email as object), kind: checkKind((body.email as { kind?: unknown }).kind) };
-    const v = await api.request<{ id: string; site?: string; status: string; checked?: string; diff?: unknown[]; plan_status?: string | null; plan_status_label?: string | null; next_action?: NextAction | null; precheck?: PrecheckLite | null }>('POST', `/v1/tasks/${enc(String(args.task))}/verify`, {
+    const v = await api.request<{ id: string; site?: string; status: string; checked?: string; diff?: unknown[]; plan_status?: string | null; plan_status_label?: string | null; next_action?: NextAction | null; precheck?: PrecheckLite | null; checks?: FinalCheckLite[] | null }>('POST', `/v1/tasks/${enc(String(args.task))}/verify`, {
       query: { wait: (args.wait as number | undefined) ?? 25 },
       body,
     });
@@ -1135,7 +1174,7 @@ const verifyTask: ToolDef = {
     return {
       headline: `Verification ${v.id} of ${String(args.task)}: ${statusLine(v.status)}${v.plan_status ? `; plan is now ${planStatusWords(v.plan_status, v.plan_status_label)}` : ''}.${v.checked ? ` Checked: ${untrusted(v.checked, 300)}.` : ''}`,
       notes: [
-        ...precheckLines(v.precheck),
+        ...verificationLines(v),
         ...((v.status === 'failed' || v.status === 'not_checked') && v.next_action?.type === 'verify_domain'
           ? ['The domain is not verified yet. Waiting for the human to publish the DNS record / file / meta tag or install the snippet; don\'t retry until they say it\'s done. Nothing to change in the code.']
           : v.next_action?.type === 'retry_later'
@@ -1145,6 +1184,8 @@ const verifyTask: ToolDef = {
             [v.next_action.description ?? 'Checkbox Notices sends this email: nothing to add to your code. Continue with the next task.']
           : v.next_action?.type === 'bcc_then_continue'
           ? ['The copy is checked; the task closes when the first real email arrives with the BCC. Add the BCC to your sending code and continue with the next task (no need to poll).']
+          : v.status === 'needs_review'
+          ? ['Nothing failed, but a check is still undecided: it is not done. Follow Next (it says what decides it).']
           : v.status === 'failed'
           ? ['The change did not satisfy the check: read diff (expected vs observed), fix the code, and call verify_task again.']
           : v.status === 'not_checked'
@@ -1214,8 +1255,8 @@ const getVerification: ToolDef = {
   scopes: ['compliance_plans:read'],
   annotations: { ...ro, title: 'Verification' },
   async run(args, { api }) {
-    const v = await api.request<{ id: string; status: string; precheck?: PrecheckLite | null }>('GET', `/v1/verifications/${enc(String(args.verification))}`, { query: { wait: (args.wait as number | undefined) ?? 0 } });
-    const notes = precheckLines(v.precheck);
+    const v = await api.request<{ id: string; status: string; precheck?: PrecheckLite | null; checks?: FinalCheckLite[] | null }>('GET', `/v1/verifications/${enc(String(args.verification))}`, { query: { wait: (args.wait as number | undefined) ?? 0 } });
+    const notes = verificationLines(v);
     return { headline: `Verification ${v.id}: ${statusLine(v.status)}.`, ...(notes.length ? { notes } : {}), data: v };
   },
 };
