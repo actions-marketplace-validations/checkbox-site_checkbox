@@ -391,7 +391,7 @@ GoLiveValueStepsItem = TypedDict(
     "GoLiveValueStepsItem",
     {
         #: Stable step key.
-        "key": Literal["verify_domain", "stripe_terms_url", "live_stripe_key", "live_checkout", "promote_site"],
+        "key": Literal["verify_domain", "stripe_terms_url", "live_stripe_key", "live_portal_cancel", "live_checkout", "deactivate_old_live_link", "promote_site"],
         #: Who takes the step: person (only the owner can: DNS, the Stripe Dashboard, live keys) or agent (a code change).
         "who": Literal["person", "agent"],
         #: The step in plain words.
@@ -1008,6 +1008,67 @@ SetupVerificationUnverifiedScan = TypedDict(
 )
 
 
+SetupVerificationComplianceTopFindingsItem = TypedDict(
+    "SetupVerificationComplianceTopFindingsItem",
+    {
+        #: Unique identifier of the finding (fnd_…).
+        "id": str,
+        #: Check id.
+        "check_id": str,
+        #: fail or needs_review.
+        "status": str,
+        #: critical, high, medium or low.
+        "severity": str,
+        #: What is wrong.
+        "title": str,
+    },
+    total=False,
+)
+
+
+SetupVerificationComplianceTodoItem = TypedDict(
+    "SetupVerificationComplianceTodoItem",
+    {
+        #: Plan task id (task_…); its findings are the evidence.
+        "task": str,
+        #: Task key.
+        "key": str,
+        #: Task title, the same as in the plan.
+        "title": str,
+        #: The status the site roll-up counts the task under.
+        "status": Literal["needs_fix", "not_set_up", "your_call", "not_checked"],
+        #: Needs a fix, Not set up yet, Your call or Not checked yet.
+        "label": str,
+    },
+    total=False,
+)
+
+
+#: The same as setup_session.compliance, at the top level: the site's status label and to-do list after this re-check (null before the first evaluation).
+SetupVerificationCompliance = TypedDict(
+    "SetupVerificationCompliance",
+    {
+        #: When it was evaluated (Unix seconds; a time, not a count). Unix timestamp in seconds.
+        "evaluated": int,
+        #: The same time as evaluated, in ISO 8601.
+        "evaluated_at": str,
+        #: Deprecated: open failing findings (per check). Read `label` (counted in tasks) and `todo` instead.
+        "failing": int,
+        #: Deprecated: open needs-review findings (per check). Read `label` (counted in tasks) and `todo` instead.
+        "needs_review": int,
+        #: The site roll-up label, the same everywhere (dashboard, plan, emails): "2 fixes needed · 1 your call", "Checks pass · 2 live checks pending".
+        "label": Optional[str],
+        #: The site roll-up status: needs_fix, your_call, incomplete, compliant or not_checked.
+        "status": Optional[str],
+        #: Deprecated: open findings (evidence). The to-do list is `todo` (the compliance plan's ordered open tasks).
+        "top_findings": List["SetupVerificationComplianceTopFindingsItem"],
+        #: The to-do list: the compliance plan's ordered open required tasks (same titles, order and counts as the dashboard, MCP get_site_status and the summary email). (optional)
+        "todo": List["SetupVerificationComplianceTodoItem"],
+    },
+    total=False,
+)
+
+
 #: Result of verifySetupSession, with the updated session.
 SetupVerification = TypedDict(
     "SetupVerification",
@@ -1029,6 +1090,8 @@ SetupVerification = TypedDict(
         "next_action": "SetupNextAction",
         #: The same as setup_session.steps, at the top level: the setup checklist, in order.
         "steps": List["SetupStep"],
+        #: The same as setup_session.compliance, at the top level: the site's status label and to-do list after this re-check (null before the first evaluation).
+        "compliance": Optional["SetupVerificationCompliance"],
         "setup_session": "SetupSession",
     },
     total=False,
@@ -1854,7 +1917,7 @@ SiteTestAccount = TypedDict(
         "login_url": str,
         #: Test account email.
         "email": str,
-        #: Test account password (write-only; encrypted at rest).
+        #: Test account password (write-only; encrypted at rest). Leave it out for an email-only login (no password field); the stored password is kept when one was saved before. (optional)
         "password": str,
         #: Custom login steps. (optional)
         "login_steps": List["ScanStep"],
@@ -4518,13 +4581,13 @@ DisclosureCheckParams = TypedDict(
         "trial_days": int,
         #: Intro / first-period price in major units ("$34.50 for your first box, then $69 every 2 weeks"). Or give `intro_amount` in minor units. (optional)
         "intro_price": Union[float, str],
-        #: Intro / first-period price in minor units. (optional)
+        #: Intro / first-period price in minor units (999 = $9.99), like `amount`. Units never mix: price / intro_price are major units, amount / intro_amount / intro_amount_off are minor units; with `price` in major units, a value under 100 that reads like major units is refused with both ways to send it. (optional)
         "intro_amount": int,
         #: How many billing periods the intro price lasts (default 1). (optional)
         "intro_periods": int,
         #: Intro discount as a percentage off the recurring price (a Stripe coupon's percent_off: 20 for "20% off your first month"). Lasts `intro_periods` billing periods. Give one of intro_price / intro_amount, intro_percent_off or intro_amount_off. (optional)
         "intro_percent_off": float,
-        #: Intro discount as an amount off in minor units (a Stripe coupon's amount_off: 200 for $2.00 off). Lasts `intro_periods` billing periods. (optional)
+        #: Intro discount as an amount off in minor units (a Stripe coupon's amount_off: 200 for $2.00 off), like `amount`, even when the price is sent as `price` in major units. Lasts `intro_periods` billing periods. (optional)
         "intro_amount_off": int,
         #: https URL where subscribers cancel online (used in generated text; a {{cancel_url}} placeholder otherwise). (optional)
         "cancel_url": str,
@@ -4540,6 +4603,8 @@ DisclosureCheckParams = TypedDict(
         "placement": "DisclosureCheckParamsPlacement",
         #: The consent checkbox, if any. Omitted = no checkbox. (optional)
         "consent": "DisclosureCheckParamsConsent",
+        #: Where the shopper pays: own_page (a form on this page), stripe_checkout or payment_link (a Stripe-hosted page that collects consent, so no checkbox is needed next to this text; consent is then left to that page and checked with checkStripeCheckoutSession / checkStripePaymentLink). With site, the site's checkout type is used when absent (declared, or Stripe Checkout when the site has a registered Stripe Checkout config). (optional)
+        "checkout_type": Literal["own_page", "stripe_checkout", "payment_link"],
         #: Evaluate the law as of this date (YYYY-MM-DD, default today). (optional)
         "as_of": str,
         #: Round 23: a site of yours (site_…): the disclosure is judged against the plan it states among the site's plans (the connected Stripe Prices win over plans typed in setup), with the site's merchant name, cancellation URL and jurisdictions, as verifyTask judges it. Plan fields you send are replaced by the plan's. "none" judges only what you send. (optional)
@@ -4702,13 +4767,13 @@ CheckPlanTerms = TypedDict(
         "trial_days": int,
         #: Intro / first-period price in major units ("$34.50 for your first box, then $69 every 2 weeks"). Or give `intro_amount` in minor units. (optional)
         "intro_price": Union[float, str],
-        #: Intro / first-period price in minor units. (optional)
+        #: Intro / first-period price in minor units (999 = $9.99), like `amount`. Units never mix: price / intro_price are major units, amount / intro_amount / intro_amount_off are minor units; with `price` in major units, a value under 100 that reads like major units is refused with both ways to send it. (optional)
         "intro_amount": int,
         #: How many billing periods the intro price lasts (default 1). (optional)
         "intro_periods": int,
         #: Intro discount as a percentage off the recurring price (a Stripe coupon's percent_off: 20 for "20% off your first month"). Lasts `intro_periods` billing periods. Give one of intro_price / intro_amount, intro_percent_off or intro_amount_off. (optional)
         "intro_percent_off": float,
-        #: Intro discount as an amount off in minor units (a Stripe coupon's amount_off: 200 for $2.00 off). Lasts `intro_periods` billing periods. (optional)
+        #: Intro discount as an amount off in minor units (a Stripe coupon's amount_off: 200 for $2.00 off), like `amount`, even when the price is sent as `price` in major units. Lasts `intro_periods` billing periods. (optional)
         "intro_amount_off": int,
         #: https URL where subscribers cancel online (used in generated text; a {{cancel_url}} placeholder otherwise). (optional)
         "cancel_url": str,
@@ -4974,13 +5039,13 @@ EmailCheckParamsTerms = TypedDict(
         "trial_days": int,
         #: Intro / first-period price in major units ("$34.50 for your first box, then $69 every 2 weeks"). Or give `intro_amount` in minor units. (optional)
         "intro_price": Union[float, str],
-        #: Intro / first-period price in minor units. (optional)
+        #: Intro / first-period price in minor units (999 = $9.99), like `amount`. Units never mix: price / intro_price are major units, amount / intro_amount / intro_amount_off are minor units; with `price` in major units, a value under 100 that reads like major units is refused with both ways to send it. (optional)
         "intro_amount": int,
         #: How many billing periods the intro price lasts (default 1). (optional)
         "intro_periods": int,
         #: Intro discount as a percentage off the recurring price (a Stripe coupon's percent_off: 20 for "20% off your first month"). Lasts `intro_periods` billing periods. Give one of intro_price / intro_amount, intro_percent_off or intro_amount_off. (optional)
         "intro_percent_off": float,
-        #: Intro discount as an amount off in minor units (a Stripe coupon's amount_off: 200 for $2.00 off). Lasts `intro_periods` billing periods. (optional)
+        #: Intro discount as an amount off in minor units (a Stripe coupon's amount_off: 200 for $2.00 off), like `amount`, even when the price is sent as `price` in major units. Lasts `intro_periods` billing periods. (optional)
         "intro_amount_off": int,
         #: https URL where subscribers cancel online (used in generated text; a {{cancel_url}} placeholder otherwise). (optional)
         "cancel_url": str,
@@ -5200,13 +5265,13 @@ PageCheckParamsPlansItem = TypedDict(
         "trial_days": int,
         #: Intro / first-period price in major units ("$34.50 for your first box, then $69 every 2 weeks"). Or give `intro_amount` in minor units. (optional)
         "intro_price": Union[float, str],
-        #: Intro / first-period price in minor units. (optional)
+        #: Intro / first-period price in minor units (999 = $9.99), like `amount`. Units never mix: price / intro_price are major units, amount / intro_amount / intro_amount_off are minor units; with `price` in major units, a value under 100 that reads like major units is refused with both ways to send it. (optional)
         "intro_amount": int,
         #: How many billing periods the intro price lasts (default 1). (optional)
         "intro_periods": int,
         #: Intro discount as a percentage off the recurring price (a Stripe coupon's percent_off: 20 for "20% off your first month"). Lasts `intro_periods` billing periods. Give one of intro_price / intro_amount, intro_percent_off or intro_amount_off. (optional)
         "intro_percent_off": float,
-        #: Intro discount as an amount off in minor units (a Stripe coupon's amount_off: 200 for $2.00 off). Lasts `intro_periods` billing periods. (optional)
+        #: Intro discount as an amount off in minor units (a Stripe coupon's amount_off: 200 for $2.00 off), like `amount`, even when the price is sent as `price` in major units. Lasts `intro_periods` billing periods. (optional)
         "intro_amount_off": int,
         #: https URL where subscribers cancel online (used in generated text; a {{cancel_url}} placeholder otherwise). (optional)
         "cancel_url": str,
@@ -5637,13 +5702,13 @@ SuggestionsParamsOtherPlansItem = TypedDict(
         "trial_days": int,
         #: Intro / first-period price in major units ("$34.50 for your first box, then $69 every 2 weeks"). Or give `intro_amount` in minor units. (optional)
         "intro_price": Union[float, str],
-        #: Intro / first-period price in minor units. (optional)
+        #: Intro / first-period price in minor units (999 = $9.99), like `amount`. Units never mix: price / intro_price are major units, amount / intro_amount / intro_amount_off are minor units; with `price` in major units, a value under 100 that reads like major units is refused with both ways to send it. (optional)
         "intro_amount": int,
         #: How many billing periods the intro price lasts (default 1). (optional)
         "intro_periods": int,
         #: Intro discount as a percentage off the recurring price (a Stripe coupon's percent_off: 20 for "20% off your first month"). Lasts `intro_periods` billing periods. Give one of intro_price / intro_amount, intro_percent_off or intro_amount_off. (optional)
         "intro_percent_off": float,
-        #: Intro discount as an amount off in minor units (a Stripe coupon's amount_off: 200 for $2.00 off). Lasts `intro_periods` billing periods. (optional)
+        #: Intro discount as an amount off in minor units (a Stripe coupon's amount_off: 200 for $2.00 off), like `amount`, even when the price is sent as `price` in major units. Lasts `intro_periods` billing periods. (optional)
         "intro_amount_off": int,
         #: https URL where subscribers cancel online (used in generated text; a {{cancel_url}} placeholder otherwise). (optional)
         "cancel_url": str,
@@ -9836,7 +9901,7 @@ ERROR_CODES: Dict[str, Dict[str, Any]] = {
     "test_key_missing": {"status": 400, "type": "invalid_request_error", "description": "A Stripe test run needs a Stripe TEST-mode key stored for the site: the agent stores the restricted test key (rk_test_…) with createTestCredential, or a person adds it in the dashboard."},
     "test_key_not_test_mode": {"status": 400, "type": "invalid_request_error", "description": "The billing key is a live-mode (or malformed) key. Agents only store TEST-mode restricted keys (rk_test_…); a human adds live keys in the Checkbox dashboard."},
     "test_key_not_restricted": {"status": 400, "type": "invalid_request_error", "description": "The key is a full Stripe secret key (sk_test_… or sk_live_…), which is refused on every connect path (createTestCredential, connectBillingPlatform, the dashboard). Use a restricted key (rk_test_…) with the permissions on Checkbox's key checklist instead; `message` lists them."},
-    "test_key_declined": {"status": 403, "type": "permission_error", "description": "The owner did not tick “Let your agent store a Stripe test-mode restricted key for this project” (agent sign-in, device login) or “Let this app store a Stripe test-mode restricted key for your sites” (app connection, OAuth) on the approval page (checkbox id consent-stripe-test-key). Nothing was stored. Ask them to allow it on the approval page (sign in again) or to add the key themselves in the dashboard."},
+    "test_key_declined": {"status": 403, "type": "permission_error", "description": "The owner did not tick “Let your agent store a Stripe test-mode restricted key for this project” (agent sign-in, device login) or “Let this app store a Stripe test-mode restricted key for your sites” (app connection, OAuth) on the approval page (checkbox id consent-stripe-test-key). Nothing was stored. next_action.url is a one-click allow page for this agent or app (dashboard /allow-stripe-test-key, signed in, no new sign-in); or the human adds the key themselves in the dashboard."},
     "test_key_rejected": {"status": 400, "type": "invalid_request_error", "description": "Stripe rejected the test-mode key or it lacks a permission test runs need; `message` names it."},
     "authorization_pending": {"status": 400, "type": "invalid_request_error", "description": "Device login: the human has not approved yet. Keep polling createDeviceToken every `interval` seconds."},
     "slow_down": {"status": 400, "type": "rate_limit_error", "description": "Device login: polling too fast. Add 5 seconds to the interval and keep polling."},

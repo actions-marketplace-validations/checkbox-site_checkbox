@@ -45,15 +45,15 @@
     {
       "registryType": "npm",
       "identifier": "@checkbox-site/mcp",
-      "version": "0.2.6",
+      "version": "0.2.7",
       "transport": {
         "type": "stdio"
       },
       "environmentVariables": [
         {
           "name": "CHECKBOX_API_KEY",
-          "description": "Checkbox API key (ck_test_\u2026 or ck_live_\u2026). Free at https://app.checkbox.site/sign-up",
-          "isRequired": true,
+          "description": "Optional. Checkbox API key (ck_test_\u2026 or ck_live_\u2026). Without it, the setup_checkbox tool returns an approval link for the human, then test-mode keys. Free at https://app.checkbox.site/sign-up",
+          "isRequired": false,
           "isSecret": true
         }
       ]

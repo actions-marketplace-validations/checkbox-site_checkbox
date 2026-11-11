@@ -1370,15 +1370,26 @@ const startTestRun: ToolDef = {
   },
 };
 
+const TEST_RUN_MAX_WAIT = 55;
+const TEST_RUN_DONE = new Set(['succeeded', 'incomplete', 'failed', 'canceled']);
+
 const getTestRun: ToolDef = {
   name: 'get_test_run',
   title: 'Get a test run (steps, observations, fixes)',
   description:
-    'A synthetic test subscription with every step (checkout, acknowledgment email, reminders at each legal window, cancellation, confirmation): what was observed, check results, evidence ids and fixes. While running, next_action.type is "wait" and waiting_for says what it waits for (pass wait: 30 to get the answer as soon as the run moves on). When finished, apply the fixes (usually via get_compliance_plan) and start another run to verify. Without test_run, returns the newest run of the site.',
+    'A synthetic test subscription with every step (checkout, acknowledgment email, reminders at each legal window, cancellation, confirmation): what was observed, check results, evidence ids and fixes. While running, next_action.type is "wait" and waiting_for says what it waits for: pass wait: 55 to get the answer as soon as the run finishes (one or two calls per run). When finished, apply the fixes (usually via get_compliance_plan) and start another run to verify. Without test_run, returns the newest run of the site.',
   input: {
     test_run: z.string().max(100).optional().describe('Test run id (run_…). Default: the newest run of the site.'),
     site: siteId.optional(),
-    wait: z.number().int().min(0).max(30).optional().describe('Long-poll: wait up to this many seconds for the run to move on before answering.'),
+    // Round 34 (pilot 33 item 22, core-codex: 25 polls with wait=30 for runs of 1-2 minutes, because each poll answered
+    // on every step): wait up to 55 s (under common 60 s client tool timeouts), answering when the run finishes.
+    wait: z
+      .number()
+      .int()
+      .min(0)
+      .transform((n) => Math.min(TEST_RUN_MAX_WAIT, n))
+      .optional()
+      .describe(`Seconds to wait for the run to finish before answering (0-${TEST_RUN_MAX_WAIT}; larger values wait ${TEST_RUN_MAX_WAIT}). Answers at once when it finishes.`),
   },
   scopes: ['test_runs:read'],
   annotations: { ...ro, title: 'Test run' },
@@ -1390,8 +1401,16 @@ const getTestRun: ToolDef = {
       if (!list.data.length) throw new ToolError(`Site ${site} has no test run yet.`, { type: 'start_test_run', message: 'Call start_test_run.', operation_id: 'createTestRun' });
       id = list.data[0]!.id;
     }
-    const wait = typeof args.wait === 'number' && args.wait > 0 ? Math.min(30, Math.floor(args.wait)) : undefined;
-    const run = await api.request<{ id: string; status: string; status_label?: string; phase?: string; waiting_for?: { what: string; until: number | null; step?: number | null; steps_total?: number | null; minutes_left?: number | null } | null; steps?: Array<{ key?: string; title?: string; status?: string; code?: string }> }>('GET', `/v1/test_runs/${enc(id)}`, wait ? { query: { wait } } : undefined);
+    type RunLite = { id: string; status: string; status_label?: string; phase?: string; next_action?: NextAction | null; waiting_for?: { what: string; until: number | null; step?: number | null; steps_total?: number | null; minutes_left?: number | null } | null; steps?: Array<{ key?: string; title?: string; status?: string; code?: string }> };
+    const wait = typeof args.wait === 'number' && args.wait > 0 ? Math.min(TEST_RUN_MAX_WAIT, Math.floor(args.wait)) : 0;
+    const deadline = Date.now() + wait * 1000;
+    // The API long-polls up to 30 s per call and answers on every step; keep asking until the run finishes or time is up.
+    let run = await api.request<RunLite>('GET', `/v1/test_runs/${enc(id)}`, wait ? { query: { wait: Math.min(30, wait) } } : undefined);
+    for (let left = Math.floor((deadline - Date.now()) / 1000); wait && !TEST_RUN_DONE.has(run.status) && left >= 1; left = Math.floor((deadline - Date.now()) / 1000)) {
+      run = await api.request<RunLite>('GET', `/v1/test_runs/${enc(id)}`, { query: { wait: Math.min(30, left) } });
+    }
+    const running = !TEST_RUN_DONE.has(run.status);
+    const next = running && run.next_action?.type === 'wait' ? { ...run.next_action, message: `${(run.next_action.message ?? '').replace(/\s*Call retrieveTestRun with \?wait=30[^.]*\.?/, '').trim()} Call get_test_run again with wait: ${TEST_RUN_MAX_WAIT}: it answers as soon as the run finishes.`.trim() } : undefined;
     const w = run.waiting_for;
     const progress = w ? [w.step && w.steps_total ? `step ${w.step} of ${w.steps_total}` : '', w.minutes_left ? `about ${w.minutes_left} min left` : ''].filter(Boolean).join(', ') : '';
     const waiting = w ? `Waiting for: ${w.what}${w.until ? ` (until ${new Date(w.until * 1000).toISOString().slice(0, 16).replace('T', ' ')} UTC at the latest)` : ''}${progress ? ` [${progress}]` : ''}` : null;
@@ -1399,6 +1418,7 @@ const getTestRun: ToolDef = {
       headline: `Test run ${run.id}: ${run.status_label ?? statusLine(run.status)}${run.phase && run.status !== 'succeeded' && run.status !== 'failed' ? ` (phase ${run.phase})` : ''}.`,
       notes: [...(waiting ? [waiting] : []), ...(run.steps ?? []).map((s) => `${s.status ?? '?'}: ${s.title ?? s.key}${s.code ? ` (${s.code})` : ''}`)].slice(0, 13),
       data: run,
+      ...(next ? { next } : {}),
     };
   },
 };
@@ -1412,8 +1432,8 @@ const checkDisclosure: ToolDef = {
   title: 'Check checkout disclosure text',
   description: [
     'Before shipping a checkout: checks the automatic-renewal disclosure shown next to the purchase button against every applicable law (ROSCA, CA, NY, …) and returns per-check verdicts with citations plus a REPLACEMENT verified by the rules engine (disclosure_text, consent_label, button_text, drop-in html and jsx).',
-    'Pass the text exactly as rendered plus the plan terms. Example: {"text":"Renews monthly at $19.99 until you cancel.","price":19.99,"interval":"month","trial_days":14,"cancel_url":"https://acme.example/account/cancel","merchant_name":"Acme","consent":{"checkbox":true,"prechecked":false}}.',
-    'If verdict is fail, put replacement.jsx (React) or .html above the button, then call again with the new text, consent and placement.bold: true (it is semibold). needs_review on styling means a rendered scan must confirm.',
+    'Pass the text exactly as rendered plus the plan terms. Example: {"text":"Renews monthly at $19.99 until you cancel.","price":19.99,"interval":"month","cancel_url":"https://acme.example/account/cancel","consent":{"checkbox":true,"prechecked":false}}.',
+    'If verdict is fail, put replacement.jsx (React) or .html above the button, then call again with the new text, consent and placement.bold: true. needs_review on styling means a rendered scan must confirm.',
   ].join('\n'),
   input: {
     text: z.string().min(1).max(5000).describe('The disclosure shown next to the purchase button, exactly as rendered.'),
@@ -1436,7 +1456,7 @@ const checkDisclosure: ToolDef = {
       'placement',
     )
       .optional()
-      .describe('Where and how the disclosure is shown (defaults: above the button, same page, 14px, high contrast).'),
+      .describe('Defaults: above the button, same page, 14px, high contrast.'),
     consent: strictObject(
       {
         checkbox: z.boolean(),
@@ -1447,7 +1467,8 @@ const checkDisclosure: ToolDef = {
       'consent',
     )
       .optional()
-      .describe('The consent checkbox, if the page has one. Omit when there is none.'),
+      .describe('The consent checkbox, if any.'),
+    checkout_type: z.enum(['own_page', 'stripe_checkout', 'payment_link']).optional().describe('Stripe-hosted: no box here'),
     jurisdictions: jurisdictions.optional(),
     as_of: asOf.optional(),
   },
@@ -1903,7 +1924,7 @@ const updateSite: ToolDef = {
       {
         login_url: z.string().max(2048),
         email: z.string().max(320),
-        password: z.string().max(200),
+        password: z.string().max(200).optional(),
         reactivate_url: z.string().max(2048).optional().describe('Test-only page that re-subscribes the test account.'),
       },
       'test_account',
@@ -2055,8 +2076,11 @@ const listFindings: ToolDef = {
         starting_after: args.starting_after as string | undefined,
       },
     });
+    // Round 34 (pilot 33 item 11, core-new-app: status=fail listed 0 while the plan said "2 fixes needed"): status is
+    // the engine's verdict; the fix count is the status label (a needs_review finding can need a fix).
+    const failNote = args.status === 'fail' && !list.data.length ? ' status=fail is the engine verdict only: a needs_review finding can still be counted as a fix (its label says "Needs a fix"). The fixes to make are the tasks of get_compliance_plan.' : '';
     return {
-      headline: `${list.data.length}${list.has_more ? '+' : ''} finding(s).`,
+      headline: `${list.data.length}${list.has_more ? '+' : ''} finding(s).${failNote}`,
       notes: list.data.map((f) => `${f.severity.toUpperCase()} ${f.id} [${f.compliance?.label ?? f.status}] ${f.check_id}: ${f.title}${f.requirements?.[0] ? ` [${f.requirements[0].citation}]` : ''}`),
       data: list,
     };
