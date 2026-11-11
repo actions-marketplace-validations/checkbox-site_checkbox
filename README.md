@@ -22,7 +22,7 @@ FAIL  disclosure · all jurisdictions · rules 1.4.0 · catalog 2026.11.09.3 · 
 
 Suggested replacement (passes the checks) (verified by the rules engine)
   disclosure:     Renews automatically every month at $19.99 (plus applicable taxes) until you cancel. Cancel anytime online at
-                  https://acme.example/cancel.
+                  https://acme.example/cancel before your next billing date to avoid the next charge.
   checkbox:       I agree that my Acme subscription renews automatically every month at $19.99 (plus applicable taxes) until I
                   cancel, and I understand I can cancel anytime online at https://acme.example/cancel.
 ```

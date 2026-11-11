@@ -1912,7 +1912,7 @@ const updateSite: ToolDef = {
   name: 'update_site',
   title: 'Update a site\'s settings (write)',
   description: [
-    'WRITE: updates a site — the fields plan tasks of change.type "config" ask for (their change.content is this tool\'s input): checkout_url, checkout_steps, test_account { login_url, email, password } (stored encrypted; the response echoes it without the password), name (the merchant name in generated legal copy), platform, jurisdictions, monitoring_interval_minutes, protection_level (minimum = legal floor only; balanced = + recommended suggestions, the default; maximum = + extras; only required items ever affect compliance).',
+    'WRITE: updates a site — the fields plan tasks of change.type "config" ask for (their change.content is this tool\'s input): checkout_url, checkout_steps, checkout_pages, test_account { login_url, email, password } (stored encrypted; the response echoes it without the password), name (the merchant name in generated legal copy), platform, jurisdictions, monitoring_interval_minutes, protection_level.',
     'The response is the site; check checkout.url / checkout.test_account to confirm. Then verify_task the task that asked for it.',
   ].join('\n'),
   input: {
@@ -1920,6 +1920,7 @@ const updateSite: ToolDef = {
     name: z.string().max(200).optional().describe('Merchant / brand name (used in generated disclosures).'),
     checkout_url: z.string().max(2048).optional().describe('Page with the Subscribe / Buy button.'),
     checkout_steps: z.array(z.record(z.string(), z.unknown())).max(20).optional().describe('Steps to reach the purchase button (clicks / fills), as in the API.'),
+    checkout_pages: z.array(z.record(z.string(), z.string())).max(4).optional().describe('[{url,plan}] per plan'),
     test_account: strictObject(
       {
         login_url: z.string().max(2048),
@@ -1940,7 +1941,7 @@ const updateSite: ToolDef = {
   annotations: { ...write(false, true), title: 'Update site' },
   async run(args, { api }) {
     const site = await resolveSite(api, args.site);
-    const body = pick(args, ['name', 'checkout_url', 'checkout_steps', 'test_account', 'platform', 'jurisdictions', 'monitoring_interval_minutes', 'protection_level']);
+    const body = pick(args, ['name', 'checkout_url', 'checkout_steps', 'checkout_pages', 'test_account', 'platform', 'jurisdictions', 'monitoring_interval_minutes', 'protection_level']);
     if (!Object.keys(body).length) throw new ToolError('Pass at least one field to change (e.g. checkout_url, test_account, name).');
     const updated = await api.request<{ id: string; checkout?: { url?: string } }>('POST', `/v1/sites/${enc(site)}`, { body });
     return {
@@ -2066,7 +2067,7 @@ const listFindings: ToolDef = {
   scopes: ['findings:read'],
   annotations: { ...ro, title: 'List findings' },
   async run(args, { api }) {
-    const list = await api.request<ListResponse<{ id: string; check_id: string; title: string; severity: string; status: string; site: string; requirements?: Array<{ citation: string }>; compliance?: { label: string } }>>('GET', '/v1/findings', {
+    const list = await api.request<ListResponse<{ id: string; check_id: string; title: string; severity: string; status: string; site: string; requirements?: Array<{ citation: string }>; compliance?: { label: string }; plan_task?: { id: string; label: string } | null }>>('GET', '/v1/findings', {
       query: {
         site: args.site as string | undefined,
         // Normal round 3: with no filter, every open finding (it returned "0 finding(s)" while 13 were active).
@@ -2081,7 +2082,8 @@ const listFindings: ToolDef = {
     const failNote = args.status === 'fail' && !list.data.length ? ' status=fail is the engine verdict only: a needs_review finding can still be counted as a fix (its label says "Needs a fix"). The fixes to make are the tasks of get_compliance_plan.' : '';
     return {
       headline: `${list.data.length}${list.has_more ? '+' : ''} finding(s).${failNote}`,
-      notes: list.data.map((f) => `${f.severity.toUpperCase()} ${f.id} [${f.compliance?.label ?? f.status}] ${f.check_id}: ${f.title}${f.requirements?.[0] ? ` [${f.requirements[0].citation}]` : ''}`),
+      // Round 35 (pilot 34 item 7): each finding with what the plan says about it (the plan decides what is left to do).
+      notes: list.data.map((f) => `${f.severity.toUpperCase()} ${f.id} [${f.compliance?.label ?? f.status}] ${f.check_id}: ${f.title}${f.requirements?.[0] ? ` [${f.requirements[0].citation}]` : ''}${f.plan_task ? ` — plan: ${f.plan_task.label} (${f.plan_task.id})` : ''}`),
       data: list,
     };
   },
@@ -2102,12 +2104,12 @@ const getFinding: ToolDef = {
   annotations: { ...ro, title: 'Finding' },
   async run(args, { api, key }) {
     const id = String(args.finding);
-    const finding = await api.request<{ id: string; title: string; status: string; severity: string; check_id: string; state?: string; compliance?: ComplianceWire }>('GET', `/v1/findings/${enc(id)}`);
+    const finding = await api.request<{ id: string; title: string; status: string; severity: string; check_id: string; state?: string; compliance?: ComplianceWire; plan_task?: { id: string; label: string } | null }>('GET', `/v1/findings/${enc(id)}`);
     const fix = keyAllows(key, 'fixes:read')
       ? await optional(api.request<Record<string, unknown>>('GET', `/v1/findings/${enc(id)}/fix`, { query: pick(args, ['target', 'cancel_url', 'plan']) as Record<string, string> }))
       : { unavailable: 'This key has no fixes:read permission.' };
     return {
-      headline: `${finding.severity.toUpperCase()} ${finding.id} [${finding.compliance?.label ?? finding.status}] ${finding.check_id}: ${finding.title}`,
+      headline: `${finding.severity.toUpperCase()} ${finding.id} [${finding.compliance?.label ?? finding.status}] ${finding.check_id}: ${finding.title}${finding.plan_task ? ` — plan: ${finding.plan_task.label} (${finding.plan_task.id})` : ''}`,
       notes: [complianceBullet(finding.check_id, finding.compliance, finding.status, finding.title)].filter((x): x is string => !!x),
       data: { finding, fix },
       next: findingNext(finding, nextActionOf(fix)),
