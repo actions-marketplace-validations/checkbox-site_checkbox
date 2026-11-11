@@ -281,7 +281,7 @@ export type GoLive = {
   /** The steps, in order. */
   steps: Array<{
     /** Stable step key. */
-    key: "verify_domain" | "stripe_terms_url" | "live_stripe_key" | "live_portal_cancel" | "live_checkout" | "deactivate_old_live_link" | "promote_site";
+    key: "verify_domain" | "stripe_terms_url" | "live_stripe_key" | "live_portal_cancel" | "live_checkout" | "deactivate_old_live_link" | "swap_test_urls" | "promote_site";
     /** Who takes the step: person (only the owner can: DNS, the Stripe Dashboard, live keys) or agent (a code change). */
     who: "person" | "agent";
     /** The step in plain words. */
@@ -464,6 +464,24 @@ export interface SetupSession {
     status_label?: string;
     /** When it started. Unix timestamp in seconds. */
     created: number;
+  } | null;
+  /** Round 35: the plan's batched owner questions (the same as retrieveCompliancePlan owner_questions), so next_action's "as owner_questions says" can be followed from this response. Null when there is none. */
+  owner_questions?: {
+    /** How to ask them: once, in one message, while the fixes go on. */
+    description: string;
+    /** Every choice only the owner makes, together. */
+    questions: Array<{
+      /** "email_sender" (who sends the required emails), "notices_support_email" / "notices_cancel_timing" (what Checkbox Notices needs before it sends), "stripe_terms_url" (a step only the owner takes in the Stripe Dashboard: the Terms of Service URL Stripe needs before it collects consent, in test mode too), or the id of the task whose question it is. */
+      id: string;
+      /** The question, in plain words for the owner. */
+      text: string;
+      /** The answers. */
+      options: Array<string>;
+      /** The tasks the answer settles. */
+      tasks: Array<string>;
+      /** What the agent does with each answer. */
+      on_answer: Record<string, string>;
+    }>;
   } | null;
   /** The plans Checkbox judges the site against: the declared plans as reconciled with the connected Stripe Prices (Stripe wins), the plans the pay buttons sell and the account's Prices of a declared plan. Empty until a plan is known (updateSetupSession plans[], or connect Stripe). */
   site_plans: Array<{
@@ -1178,6 +1196,13 @@ export interface Site {
     devices: Array<"desktop" | "mobile">;
     /** Number of configured checkout steps. */
     checkout_steps: number;
+    /** The other checkout pages, one per plan (checkout_pages), each loaded on every scan. */
+    pages: Array<{
+      /** The plan's checkout page. */
+      url: string;
+      /** The plan it sells, when given. */
+      plan: string | null;
+    }>;
     /** A synthetic sign-up is configured. */
     completes_purchase: boolean;
     /** A test account for the cancellation test is configured. */
@@ -1322,6 +1347,13 @@ export interface CreateSiteParams {
   terms_url?: string | null;
   /** Steps to reach the final pre-payment screen. */
   checkout_steps?: Array<ScanStep>;
+  /** More checkout pages, one per plan, when each plan has its own (e.g. /checkout?plan=annual next to checkout_url /checkout?plan=monthly). Every scan loads each one and judges it against the plan it sells. At most 4; replaces the stored list; null or [] clears it. */
+  checkout_pages?: Array<{
+    /** A plan's own checkout page, on the checkout page's site. */
+    url: string;
+    /** The plan this page sells (its name as in your plans). */
+    plan?: string;
+  }> | null;
   purchase?: SitePurchase;
   test_account?: SiteTestAccount;
   /** Explicit cancellation steps (otherwise auto-discovered). */
@@ -1354,6 +1386,13 @@ export interface UpdateSiteParams {
   terms_url?: string | null;
   /** Steps to reach the final pre-payment screen. */
   checkout_steps?: Array<ScanStep>;
+  /** More checkout pages, one per plan, when each plan has its own (e.g. /checkout?plan=annual next to checkout_url /checkout?plan=monthly). Every scan loads each one and judges it against the plan it sells. At most 4; replaces the stored list; null or [] clears it. */
+  checkout_pages?: Array<{
+    /** A plan's own checkout page, on the checkout page's site. */
+    url: string;
+    /** The plan this page sells (its name as in your plans). */
+    plan?: string;
+  }> | null;
   purchase?: SitePurchase;
   test_account?: SiteTestAccount;
   /** Explicit cancellation steps (otherwise auto-discovered). */
@@ -1678,6 +1717,17 @@ export interface Finding {
   /** User-facing status. needs_fix (a requirement is clearly not met: `compliance.fix` is the one change), pending_live_check (everything Checkbox can see is right; the live event has not been observed yet — counts as passing the checks), verified_live (observed live: proof run, real BCC'd send, Stripe-confirmed cancellation), your_call (a real decision for a person: `compliance.question`), compliant (passes; grey areas carry a `compliance.note`), not_applicable, not_set_up (no sign the email or setting exists yet: `compliance.fix` is the one-click way to set it up; never counts as passing the checks), not_checked (Checkbox has not tried it yet, e.g. the cancel flow: `compliance.fix` says how; never counts as passing the checks). */
   compliance_status: "needs_fix" | "pending_live_check" | "verified_live" | "your_call" | "compliant" | "not_applicable" | "not_set_up" | "not_checked";
   compliance: ComplianceInfo;
+  /** The compliance plan task this check belongs to and what the plan says about it. The plan decides what is left to do: when compliance and plan_task.label differ (a check pending a live send, a decision you recorded), follow the plan. Null when no task covers the check. */
+  plan_task?: {
+    /** Unique identifier of the task (task_…). */
+    id: string;
+    /** The task title. */
+    title: string;
+    /** The task status in the compliance plan. */
+    status: string;
+    /** What the compliance plan says about it, in its own words (the to-do label, Done, Checks pass · live check pending, ...). */
+    label: string;
+  } | null;
   /** Scan that produced the latest result. */
   scan: string | null;
   /** First time the check was evaluated. Unix timestamp in seconds. */
@@ -1876,8 +1926,8 @@ export interface Task {
   last_verification: {
     /** Unique identifier of the verification (ver_…). */
     id: string;
-    /** Result. */
-    status: "pending" | "passed" | "failed";
+    /** Result. incomplete: every check observed passes, but something the task covers was not given to Checkbox yet (e.g. a plan's Checkout config is not registered); not done. */
+    status: "pending" | "passed" | "incomplete" | "failed";
     /** When it was requested. Unix timestamp in seconds. */
     created: number;
   } | null;
@@ -1895,6 +1945,13 @@ export interface Task {
   verification_level: "not_seen" | "template_checked" | "delivery_seen" | null;
   /** When the task first appeared. Unix timestamp in seconds. */
   first_seen: number;
+  /** Present on an open task that was not in the site's first plan: a later check found it. Tell the human it is new, and what found it. */
+  found_after_first_plan?: {
+    /** When it first appeared. Unix timestamp in seconds. */
+    found: number;
+    /** What found it, in plain words (the scan of your checkout page, the read of your Terms, the Stripe read, ...). */
+    found_by: string;
+  };
   /** When it was done. Unix timestamp in seconds. */
   done_at: number | null;
 }
@@ -1972,7 +2029,7 @@ export interface CompliancePlan {
     description: string;
     /** Every choice only the owner makes, together. */
     questions: Array<{
-      /** "email_sender" (who sends the required emails), "notices_support_email" / "notices_cancel_timing" (what Checkbox Notices needs before it sends), or the id of the task whose question it is. */
+      /** "email_sender" (who sends the required emails), "notices_support_email" / "notices_cancel_timing" (what Checkbox Notices needs before it sends), "stripe_terms_url" (a step only the owner takes in the Stripe Dashboard: the Terms of Service URL Stripe needs before it collects consent, in test mode too), or the id of the task whose question it is. */
       id: string;
       /** The question, in plain words for the owner. */
       text: string;
@@ -2073,8 +2130,8 @@ export interface Verification {
   task: string | null;
   /** One task or the whole site. */
   scope: "task" | "site";
-  /** pending (waiting for the confirming scan / re-evaluation), passed (Checkbox observed the expected result: every check passes or does not apply), passed_with_gaps (nothing observed fails, but some checks could not be observed: observed missing_data — not verified), passed_with_notes (nothing observed fails and the task counts as passing, but a check is still needs_review on a part that is not yours to change, such as Stripe's own page layout: see checks), not_checked (a task whose checks could only not be observed yet: nothing to change in the code; next_action says what evidence to provide), pending_live_check (an email whose content passes but that Checkbox has not seen sent for a real event yet: nothing to change; it completes on the first real send or a proof run), needs_review (nothing observed fails, but a check is still undecided, e.g. a cancellation not tried yet or a styling estimate: not done; next_action says what decides it), failed (a check was observed failing: see diff), superseded (this verification did not pass, but newer evidence, such as a test run or a later evaluation, settled the task since: see superseded and follow next_action; nothing to change for it). */
-  status: "pending" | "passed" | "passed_with_gaps" | "passed_with_notes" | "not_checked" | "pending_live_check" | "needs_review" | "failed" | "superseded";
+  /** pending (waiting for the confirming scan / re-evaluation), passed (Checkbox observed the expected result: every check passes or does not apply), passed_with_gaps (nothing observed fails, but some checks could not be observed: observed missing_data — not verified), passed_with_notes (nothing observed fails and the task counts as passing, but a check is still needs_review on a part that is not yours to change, such as Stripe's own page layout: see checks), not_checked (a task whose checks could only not be observed yet: nothing to change in the code; next_action says what evidence to provide), pending_live_check (an email whose content passes but that Checkbox has not seen sent for a real event yet: nothing to change; it completes on the first real send or a proof run), needs_review (nothing observed fails, but a check is still undecided, e.g. a cancellation not tried yet or a styling estimate: not done; next_action says what decides it), incomplete (every check observed passes, but something the task covers was not given to Checkbox yet, e.g. one plan's Stripe Checkout config is not registered: not done; next_action says what to register), failed (a check was observed failing: see diff), superseded (this verification did not pass, but newer evidence, such as a test run or a later evaluation, settled the task since: see superseded and follow next_action; nothing to change for it). */
+  status: "pending" | "passed" | "passed_with_gaps" | "passed_with_notes" | "not_checked" | "pending_live_check" | "needs_review" | "incomplete" | "failed" | "superseded";
   /** Set when newer evidence settled the task after this verification finished (status superseded). */
   superseded?: {
     /** The task's status in the current plan. */
@@ -2469,6 +2526,8 @@ export interface NoticeSettings {
   real_sends: "test_mode" | "confirmed" | "needs_confirmation" | "off";
   /** Where subscribers cancel online (site domain, hosted cancellation page or billing portal). */
   cancel_url: string | null;
+  /** Round 35: set when every notice links to cancel_url while Checkbox has not seen a working online cancellation (cancel.online_available is not passing). Fix the cancel option there, or point cancel_url at one that works (e.g. the hosted cancellation page). */
+  cancel_url_warning?: string | null;
   /** Hex brand colour. */
   brand_color: string | null;
   /** Mailbox name of the sender. */
@@ -4660,7 +4719,7 @@ export interface TestRunStep {
   checks: Array<{
     /** Machine check id (see listRules / the legal catalog). */
     check_id: string;
-    /** pass, fail, needs_review or not_applicable, judged from this run's observations. */
+    /** pass, fail, needs_review or not_applicable, judged from this run's observations; informational on a step that is informational only (a mirrored page that is not your checkout): listed, never a failure, nothing to fix. */
     status: string;
     /** What was observed. */
     message: string;

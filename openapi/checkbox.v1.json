@@ -1032,6 +1032,7 @@
                     "live_portal_cancel",
                     "live_checkout",
                     "deactivate_old_live_link",
+                    "swap_test_urls",
                     "promote_site"
                   ],
                   "description": "Stable step key.",
@@ -1858,6 +1859,112 @@
               "created": 1793318400
             }
           },
+          "owner_questions": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "description": {
+                "type": "string",
+                "description": "How to ask them: once, in one message, while the fixes go on.",
+                "example": "Ask the human once, now, in one message, every question below (numbered)…"
+              },
+              "questions": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "description": "\"email_sender\" (who sends the required emails), \"notices_support_email\" / \"notices_cancel_timing\" (what Checkbox Notices needs before it sends), \"stripe_terms_url\" (a step only the owner takes in the Stripe Dashboard: the Terms of Service URL Stripe needs before it collects consent, in test mode too), or the id of the task whose question it is.",
+                      "example": "email_sender"
+                    },
+                    "text": {
+                      "type": "string",
+                      "description": "The question, in plain words for the owner.",
+                      "example": "Who sends the required emails (renewal reminder, charge notice): you (your code), or Checkbox Notices?"
+                    },
+                    "options": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "The answers.",
+                      "example": [
+                        "me",
+                        "checkbox"
+                      ]
+                    },
+                    "tasks": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "description": "Unique identifier of the task (task_…).",
+                        "example": "task_3f9a1c2e7b4d4e0f9a8b7c6d5e4f3a2b"
+                      },
+                      "description": "The tasks the answer settles.",
+                      "example": []
+                    },
+                    "on_answer": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "string"
+                      },
+                      "description": "What the agent does with each answer.",
+                      "example": {
+                        "checkbox": "One call: updateNoticeSettings { mode: \"checkbox\", add_kinds: [\"renewal_reminder\"] }."
+                      }
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "text",
+                    "options",
+                    "tasks",
+                    "on_answer"
+                  ]
+                },
+                "description": "Every choice only the owner makes, together.",
+                "example": [
+                  {
+                    "id": "email_sender",
+                    "text": "Who sends the required emails (renewal reminder, charge notice): you (your code), or Checkbox Notices?",
+                    "options": [
+                      "me",
+                      "checkbox"
+                    ],
+                    "tasks": [],
+                    "on_answer": {
+                      "checkbox": "One call: updateNoticeSettings { mode: \"checkbox\", add_kinds: [\"renewal_reminder\"] }."
+                    }
+                  }
+                ]
+              }
+            },
+            "required": [
+              "description",
+              "questions"
+            ],
+            "description": "Round 35: the plan's batched owner questions (the same as retrieveCompliancePlan owner_questions), so next_action's \"as owner_questions says\" can be followed from this response. Null when there is none.",
+            "example": {
+              "description": "Ask the human once, now, in one message, every question below (numbered)…",
+              "questions": [
+                {
+                  "id": "email_sender",
+                  "text": "Who sends the required emails (renewal reminder, charge notice): you (your code), or Checkbox Notices?",
+                  "options": [
+                    "me",
+                    "checkbox"
+                  ],
+                  "tasks": [],
+                  "on_answer": {
+                    "checkbox": "One call: updateNoticeSettings { mode: \"checkbox\", add_kinds: [\"renewal_reminder\"] }."
+                  }
+                }
+              ]
+            }
+          },
           "site_plans": {
             "type": "array",
             "items": {
@@ -2646,6 +2753,23 @@
                   "status": "running",
                   "status_label": "Running",
                   "created": 1793318400
+                },
+                "owner_questions": {
+                  "description": "Ask the human once, now, in one message, every question below (numbered)…",
+                  "questions": [
+                    {
+                      "id": "email_sender",
+                      "text": "Who sends the required emails (renewal reminder, charge notice): you (your code), or Checkbox Notices?",
+                      "options": [
+                        "me",
+                        "checkbox"
+                      ],
+                      "tasks": [],
+                      "on_answer": {
+                        "checkbox": "One call: updateNoticeSettings { mode: \"checkbox\", add_kinds: [\"renewal_reminder\"] }."
+                      }
+                    }
+                  ]
                 },
                 "site_plans": [],
                 "compliance": {
@@ -4929,6 +5053,33 @@
                 "description": "Number of configured checkout steps.",
                 "example": 0
               },
+              "pages": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "url": {
+                      "type": "string",
+                      "description": "The plan's checkout page.",
+                      "example": "https://acme.example/checkout?plan=annual"
+                    },
+                    "plan": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "The plan it sells, when given.",
+                      "example": "Pro annual"
+                    }
+                  },
+                  "required": [
+                    "url",
+                    "plan"
+                  ]
+                },
+                "description": "The other checkout pages, one per plan (checkout_pages), each loaded on every scan.",
+                "example": []
+              },
               "completes_purchase": {
                 "type": "boolean",
                 "description": "A synthetic sign-up is configured.",
@@ -5008,6 +5159,7 @@
               "regions",
               "devices",
               "checkout_steps",
+              "pages",
               "completes_purchase",
               "has_test_account",
               "test_account",
@@ -5028,6 +5180,7 @@
                 "mobile"
               ],
               "checkout_steps": 0,
+              "pages": [],
               "completes_purchase": false,
               "has_test_account": false,
               "test_account": {
@@ -5272,6 +5425,7 @@
                     "mobile"
                   ],
                   "checkout_steps": 0,
+                  "pages": [],
                   "completes_purchase": false,
                   "has_test_account": false,
                   "test_account": {
@@ -5844,6 +5998,40 @@
               }
             ]
           },
+          "checkout_pages": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "object",
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "maxLength": 2000,
+                  "description": "A plan's own checkout page, on the checkout page's site.",
+                  "example": "https://acme.example/checkout?plan=annual"
+                },
+                "plan": {
+                  "type": "string",
+                  "maxLength": 200,
+                  "description": "The plan this page sells (its name as in your plans).",
+                  "example": "Pro annual"
+                }
+              },
+              "required": [
+                "url"
+              ]
+            },
+            "maxItems": 4,
+            "description": "More checkout pages, one per plan, when each plan has its own (e.g. /checkout?plan=annual next to checkout_url /checkout?plan=monthly). Every scan loads each one and judges it against the plan it sells. At most 4; replaces the stored list; null or [] clears it.",
+            "example": [
+              {
+                "url": "https://acme.example/checkout?plan=annual",
+                "plan": "Pro annual"
+              }
+            ]
+          },
           "purchase": {
             "$ref": "#/components/schemas/SitePurchase"
           },
@@ -6096,6 +6284,40 @@
               {
                 "action": "click",
                 "text": "Choose monthly"
+              }
+            ]
+          },
+          "checkout_pages": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "object",
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "maxLength": 2000,
+                  "description": "A plan's own checkout page, on the checkout page's site.",
+                  "example": "https://acme.example/checkout?plan=annual"
+                },
+                "plan": {
+                  "type": "string",
+                  "maxLength": 200,
+                  "description": "The plan this page sells (its name as in your plans).",
+                  "example": "Pro annual"
+                }
+              },
+              "required": [
+                "url"
+              ]
+            },
+            "maxItems": 4,
+            "description": "More checkout pages, one per plan, when each plan has its own (e.g. /checkout?plan=annual next to checkout_url /checkout?plan=monthly). Every scan loads each one and judges it against the plan it sells. At most 4; replaces the stored list; null or [] clears it.",
+            "example": [
+              {
+                "url": "https://acme.example/checkout?plan=annual",
+                "plan": "Pro annual"
               }
             ]
           },
@@ -7686,6 +7908,47 @@
           "compliance": {
             "$ref": "#/components/schemas/ComplianceInfo"
           },
+          "plan_task": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "Unique identifier of the task (task_…).",
+                "example": "task_3f9a1c2e7b4d4e0f9a8b7c6d5e4f3a2b"
+              },
+              "title": {
+                "type": "string",
+                "description": "The task title.",
+                "example": "Add the renewal line above your Subscribe button"
+              },
+              "status": {
+                "type": "string",
+                "description": "The task status in the compliance plan.",
+                "example": "open"
+              },
+              "label": {
+                "type": "string",
+                "description": "What the compliance plan says about it, in its own words (the to-do label, Done, Checks pass · live check pending, ...).",
+                "example": "Needs a fix"
+              }
+            },
+            "required": [
+              "id",
+              "title",
+              "status",
+              "label"
+            ],
+            "description": "The compliance plan task this check belongs to and what the plan says about it. The plan decides what is left to do: when compliance and plan_task.label differ (a check pending a live send, a decision you recorded), follow the plan. Null when no task covers the check.",
+            "example": {
+              "id": "task_3f9a1c2e7b4d4e0f9a8b7c6d5e4f3a2b",
+              "title": "Add the renewal line above your Subscribe button",
+              "status": "open",
+              "label": "Needs a fix"
+            }
+          },
           "scan": {
             "type": [
               "string",
@@ -7851,6 +8114,12 @@
                     "recommended": "Remove it: let subscribers cancel online any time.",
                     "why": "Commitments are legal in some states only when disclosed and agreed to."
                   }
+                },
+                "plan_task": {
+                  "id": "task_3f9a1c2e7b4d4e0f9a8b7c6d5e4f3a2b",
+                  "title": "Add the renewal line above your Subscribe button",
+                  "status": "open",
+                  "label": "Needs a fix"
                 },
                 "scan": "scan_3f9a1c2e7b4d4e0f9a8b7c6d5e4f3a2b",
                 "first_seen": 1793318400,
@@ -8654,9 +8923,10 @@
                 "enum": [
                   "pending",
                   "passed",
+                  "incomplete",
                   "failed"
                 ],
-                "description": "Result.",
+                "description": "Result. incomplete: every check observed passes, but something the task covers was not given to Checkbox yet (e.g. a plan's Checkout config is not registered); not done.",
                 "example": "failed"
               },
               "created": {
@@ -8742,6 +9012,30 @@
             "type": "integer",
             "description": "When the task first appeared. Unix timestamp in seconds.",
             "example": 1793318400
+          },
+          "found_after_first_plan": {
+            "type": "object",
+            "properties": {
+              "found": {
+                "type": "integer",
+                "description": "When it first appeared. Unix timestamp in seconds.",
+                "example": 1793318400
+              },
+              "found_by": {
+                "type": "string",
+                "description": "What found it, in plain words (the scan of your checkout page, the read of your Terms, the Stripe read, ...).",
+                "example": "the scan of your checkout page"
+              }
+            },
+            "required": [
+              "found",
+              "found_by"
+            ],
+            "description": "Present on an open task that was not in the site's first plan: a later check found it. Tell the human it is new, and what found it.",
+            "example": {
+              "found": 1793318400,
+              "found_by": "the scan of your checkout page"
+            }
           },
           "done_at": {
             "type": [
@@ -9049,6 +9343,10 @@
                 },
                 "verification_level": "template_checked",
                 "first_seen": 1793318400,
+                "found_after_first_plan": {
+                  "found": 1793318400,
+                  "found_by": "the scan of your checkout page"
+                },
                 "done_at": 1793318400
               }
             ]
@@ -9239,7 +9537,7 @@
                   "properties": {
                     "id": {
                       "type": "string",
-                      "description": "\"email_sender\" (who sends the required emails), \"notices_support_email\" / \"notices_cancel_timing\" (what Checkbox Notices needs before it sends), or the id of the task whose question it is.",
+                      "description": "\"email_sender\" (who sends the required emails), \"notices_support_email\" / \"notices_cancel_timing\" (what Checkbox Notices needs before it sends), \"stripe_terms_url\" (a step only the owner takes in the Stripe Dashboard: the Terms of Service URL Stripe needs before it collects consent, in test mode too), or the id of the task whose question it is.",
                       "example": "email_sender"
                     },
                     "text": {
@@ -9731,10 +10029,11 @@
               "not_checked",
               "pending_live_check",
               "needs_review",
+              "incomplete",
               "failed",
               "superseded"
             ],
-            "description": "pending (waiting for the confirming scan / re-evaluation), passed (Checkbox observed the expected result: every check passes or does not apply), passed_with_gaps (nothing observed fails, but some checks could not be observed: observed missing_data — not verified), passed_with_notes (nothing observed fails and the task counts as passing, but a check is still needs_review on a part that is not yours to change, such as Stripe's own page layout: see checks), not_checked (a task whose checks could only not be observed yet: nothing to change in the code; next_action says what evidence to provide), pending_live_check (an email whose content passes but that Checkbox has not seen sent for a real event yet: nothing to change; it completes on the first real send or a proof run), needs_review (nothing observed fails, but a check is still undecided, e.g. a cancellation not tried yet or a styling estimate: not done; next_action says what decides it), failed (a check was observed failing: see diff), superseded (this verification did not pass, but newer evidence, such as a test run or a later evaluation, settled the task since: see superseded and follow next_action; nothing to change for it).",
+            "description": "pending (waiting for the confirming scan / re-evaluation), passed (Checkbox observed the expected result: every check passes or does not apply), passed_with_gaps (nothing observed fails, but some checks could not be observed: observed missing_data — not verified), passed_with_notes (nothing observed fails and the task counts as passing, but a check is still needs_review on a part that is not yours to change, such as Stripe's own page layout: see checks), not_checked (a task whose checks could only not be observed yet: nothing to change in the code; next_action says what evidence to provide), pending_live_check (an email whose content passes but that Checkbox has not seen sent for a real event yet: nothing to change; it completes on the first real send or a proof run), needs_review (nothing observed fails, but a check is still undecided, e.g. a cancellation not tried yet or a styling estimate: not done; next_action says what decides it), incomplete (every check observed passes, but something the task covers was not given to Checkbox yet, e.g. one plan's Stripe Checkout config is not registered: not done; next_action says what to register), failed (a check was observed failing: see diff), superseded (this verification did not pass, but newer evidence, such as a test run or a later evaluation, settled the task since: see superseded and follow next_action; nothing to change for it).",
             "example": "pending"
           },
           "superseded": {
@@ -11431,6 +11730,14 @@
             ],
             "description": "Where subscribers cancel online (site domain, hosted cancellation page or billing portal).",
             "example": "https://acme.example/account/cancel"
+          },
+          "cancel_url_warning": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Round 35: set when every notice links to cancel_url while Checkbox has not seen a working online cancellation (cancel.online_available is not passing). Fix the cancel option there, or point cancel_url at one that works (e.g. the hosted cancellation page).",
+            "example": "Your notices link to https://acme.example/account, but Checkbox has not seen a working online cancellation yet (Needs a fix)."
           },
           "brand_color": {
             "type": [
@@ -13522,7 +13829,7 @@
           "short_disclosure_text": {
             "type": "string",
             "description": "The same terms as one short line, verified by the engine like disclosure_text (present only when it passes every targeted check); disclosure_text is then the fuller version.",
-            "example": "Renews automatically every month at $19.99 (plus applicable taxes) until you cancel. Cancel anytime online at https://acme.example/cancel."
+            "example": "Renews automatically every month at $19.99 (plus applicable taxes) until you cancel. Cancel anytime online at https://acme.example/cancel before your next billing date to avoid the next charge."
           },
           "consent_label": {
             "type": "string",
@@ -16532,7 +16839,7 @@
             "example": [
               {
                 "disclosure_text": "Your Acme subscription automatically renews every month at $19.99 …",
-                "short_disclosure_text": "Renews automatically every month at $19.99 (plus applicable taxes) until you cancel. Cancel anytime online at https://acme.example/cancel.",
+                "short_disclosure_text": "Renews automatically every month at $19.99 (plus applicable taxes) until you cancel. Cancel anytime online at https://acme.example/cancel before your next billing date to avoid the next charge.",
                 "consent_label": "I agree that my Acme subscription renews automatically …",
                 "button_text": "Subscribe — $19.99/month, renews automatically",
                 "html": "<div class=\"checkbox-renewal-terms\">…</div>",
@@ -18475,12 +18782,12 @@
           "version": {
             "type": "string",
             "description": "Semver of the bundle.",
-            "example": "1.5.7"
+            "example": "1.5.8"
           },
           "url": {
             "type": "string",
             "description": "Immutable URL of this version.",
-            "example": "https://app.checkbox.site/v1/elements/1.5.7/elements.js"
+            "example": "https://app.checkbox.site/v1/elements/1.5.8/elements.js"
           },
           "integrity": {
             "type": "string",
@@ -18522,8 +18829,8 @@
             "description": "Every released version, newest first.",
             "example": [
               {
-                "version": "1.5.7",
-                "url": "https://app.checkbox.site/v1/elements/1.5.7/elements.js",
+                "version": "1.5.8",
+                "url": "https://app.checkbox.site/v1/elements/1.5.8/elements.js",
                 "integrity": "sha384-…",
                 "size": 33000
               }
@@ -19013,7 +19320,7 @@
               "null"
             ],
             "description": "elements.js version.",
-            "example": "1.5.7"
+            "example": "1.5.8"
           },
           "client_timestamp": {
             "type": [
@@ -19530,7 +19837,7 @@
             "type": "string",
             "maxLength": 20,
             "description": "elements.js version that rendered the disclosure.",
-            "example": "1.5.7"
+            "example": "1.5.8"
           },
           "presentation": {
             "$ref": "#/components/schemas/ConsentPresentationInput"
@@ -19655,7 +19962,7 @@
                 "customer_reference": "cs_test_a1b2c3",
                 "client_reference": null,
                 "source": "elements",
-                "element_version": "1.5.7",
+                "element_version": "1.5.8",
                 "client_timestamp": null,
                 "presentation": {
                   "violations": [],
@@ -21762,7 +22069,7 @@
                 },
                 "status": {
                   "type": "string",
-                  "description": "pass, fail, needs_review or not_applicable, judged from this run's observations.",
+                  "description": "pass, fail, needs_review or not_applicable, judged from this run's observations; informational on a step that is informational only (a mirrored page that is not your checkout): listed, never a failure, nothing to fix.",
                   "example": "fail"
                 },
                 "message": {
@@ -30282,7 +30589,7 @@
             "schema": {
               "type": "string",
               "description": "Semver, e.g. 1.0.0.",
-              "example": "1.5.7"
+              "example": "1.5.8"
             },
             "required": true,
             "name": "version",
@@ -35356,6 +35663,7 @@
                                 "mobile"
                               ],
                               "checkout_steps": 0,
+                              "pages": [],
                               "completes_purchase": false,
                               "has_test_account": false,
                               "test_account": {
@@ -35694,6 +36002,12 @@
                                 "why": "Commitments are legal in some states only when disclosed and agreed to."
                               }
                             },
+                            "plan_task": {
+                              "id": "task_3f9a1c2e7b4d4e0f9a8b7c6d5e4f3a2b",
+                              "title": "Add the renewal line above your Subscribe button",
+                              "status": "open",
+                              "label": "Needs a fix"
+                            },
                             "scan": "scan_3f9a1c2e7b4d4e0f9a8b7c6d5e4f3a2b",
                             "first_seen": 1793318400,
                             "last_seen": 1793318400,
@@ -35852,6 +36166,12 @@
                                 "recommended": "Remove it: let subscribers cancel online any time.",
                                 "why": "Commitments are legal in some states only when disclosed and agreed to."
                               }
+                            },
+                            "plan_task": {
+                              "id": "task_3f9a1c2e7b4d4e0f9a8b7c6d5e4f3a2b",
+                              "title": "Add the renewal line above your Subscribe button",
+                              "status": "open",
+                              "label": "Needs a fix"
                             },
                             "scan": "scan_3f9a1c2e7b4d4e0f9a8b7c6d5e4f3a2b",
                             "first_seen": 1793318400,
@@ -36600,7 +36920,7 @@
                             "customer_reference": "cs_test_a1b2c3",
                             "client_reference": null,
                             "source": "elements",
-                            "element_version": "1.5.7",
+                            "element_version": "1.5.8",
                             "client_timestamp": null,
                             "presentation": {
                               "violations": [],
@@ -36731,6 +37051,7 @@
                                 "mobile"
                               ],
                               "checkout_steps": 0,
+                              "pages": [],
                               "completes_purchase": false,
                               "has_test_account": false,
                               "test_account": {
@@ -37018,6 +37339,7 @@
                                 "mobile"
                               ],
                               "checkout_steps": 0,
+                              "pages": [],
                               "completes_purchase": false,
                               "has_test_account": false,
                               "test_account": {

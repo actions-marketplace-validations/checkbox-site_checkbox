@@ -1,6 +1,6 @@
 # Checkbox: automatic-renewal law checks on every pull request (https://checkbox.site/docs/guides/ci).
-# Runs the checks listed in checkbox.json with the Checkbox rules engine, offline (no key, no network), annotates the
-# lines that need a fix and writes a summary with the corrected params / text to the job page.
+# Runs the checks listed in checkbox.json with the Checkbox rules engine, offline (no key, no network), annotates
+# the lines that need a fix and writes a summary with the corrected params / text to the job page.
 name: Checkbox
 
 on:
@@ -17,11 +17,15 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0       # the base branch too, so Checkbox can see what this change touches
       # Only needed when checkbox.json uses "module" entries that import your dependencies:
       # - run: npm ci
       - uses: checkbox-site/checkbox@v1
-        # with:
-        #   strict: true          # also fail when a check needs review
-        #   args: --online        # URL pages via the API; needs the env below
+        with:
+          # Offline (no key): a change to a trial, price or interval fails until Stripe is checked. To check it,
+          # use "args: --online" and the env below (repository secret CHECKBOX_SECRET_KEY); to only warn, remove this.
+          args: --require-stripe
+          # strict: true          # also fail when a check needs review
         # env:
         #   CHECKBOX_SECRET_KEY: ${{ secrets.CHECKBOX_SECRET_KEY }}

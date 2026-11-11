@@ -4,7 +4,11 @@
 # the corrected params / text. Offline by default: no API key, nothing leaves the runner.
 #
 #   - uses: actions/checkout@v4
+#     with:
+#       fetch-depth: 0        # the base branch too, so Checkbox can see what a pull request changes
 #   - uses: checkbox-site/checkbox@v1
+#
+# With a shallow checkout, the action fetches the pull request's base branch itself before the checks.
 #
 # Docs: https://checkbox.site/docs/guides/ci
 name: Checkbox compliance checks
@@ -68,6 +72,13 @@ runs:
         CHECKBOX_ARGS: ${{ inputs.args }}
         CHECKBOX_CLI_VERSION: ${{ inputs.version }}
       run: |
+        # A pull request is compared with its base branch (what it changed and removed, whether it touches a trial,
+        # price or interval). A shallow checkout has no origin/<base>: fetch its tip. If that fails, checkbox ci says so.
+        if [ -n "${GITHUB_BASE_REF:-}" ] && git rev-parse --is-inside-work-tree >/dev/null 2>&1 \
+          && ! git rev-parse --verify --quiet "refs/remotes/origin/${GITHUB_BASE_REF}^{commit}" >/dev/null; then
+          git fetch --no-tags --quiet --depth=1 origin "+refs/heads/${GITHUB_BASE_REF}:refs/remotes/origin/${GITHUB_BASE_REF}" \
+            || echo "::warning title=Checkbox::Could not fetch the base branch ${GITHUB_BASE_REF}; use actions/checkout with fetch-depth: 0."
+        fi
         args=(ci --config "$CHECKBOX_CONFIG_FILE")
         if [ "$CHECKBOX_STRICT" = "true" ]; then args+=(--strict); fi
         # shellcheck disable=SC2206 # word-splitting the extra arguments is intended

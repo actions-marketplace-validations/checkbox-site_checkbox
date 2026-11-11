@@ -1,6 +1,6 @@
 {
   "name": "@checkbox-site/mcp",
-  "version": "0.2.7",
+  "version": "0.2.8",
   "description": "Checkbox MCP server: auto-renewal law and subscription compliance checks for AI agents (FTC ROSCA, California ARL, New York and other states) on Stripe Checkout params, pricing pages, disclosures and emails. Remote at https://app.checkbox.site/mcp, or local stdio.",
   "keywords": [
     "checkbox",
@@ -77,7 +77,7 @@
     "prepack": "npm run build"
   },
   "dependencies": {
-    "@checkbox-site/node": "^0.2.7",
+    "@checkbox-site/node": "^0.2.8",
     "@modelcontextprotocol/sdk": "^1.32.2",
     "zod": "^4.6.7"
   }
