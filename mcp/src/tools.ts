@@ -593,9 +593,27 @@ async function setupOverOAuth(
     data: (() => {
       const doc = { ...session, ...(fresh ?? {}) } as Record<string, unknown> & { install?: { snippet_key?: unknown }; publishable_key?: unknown };
       const keys = labelledPublicKeys(doc.install?.snippet_key, doc.publishable_key);
-      return withoutLegacyScore({ ...doc, ...(keys.length ? { public_keys: keys } : {}), ...(firstCheck ? { first_check: firstCheck } : {}) });
+      return compactSetupDoc(withoutLegacyScore({ ...doc, ...(keys.length ? { public_keys: keys } : {}), ...(firstCheck ? { first_check: firstCheck } : {}) }));
     })(),
   };
+}
+
+/**
+ * Round 33 (pilot 32 item 22, new-app: setup_checkbox answered with about 30 KB on the first call): the first setup
+ * response leaves out what the agent does not need yet. The go-live steps become their one-line summary (get_compliance_plan
+ * and complete_setup carry them in full), and once the Stripe key is stored its permission checklist is dropped. Pure.
+ */
+export function compactSetupDoc<T>(doc: T): T {
+  if (!doc || typeof doc !== 'object') return doc;
+  const d = { ...(doc as Record<string, unknown>) };
+  const g = d.go_live as { summary?: unknown; steps?: unknown[] } | null | undefined;
+  if (g && typeof g === 'object' && Array.isArray(g.steps)) d.go_live = { summary: g.summary ?? null, steps: g.steps.length, full: 'get_compliance_plan (go_live) or complete_setup' };
+  const st = d.stripe as { test_credential_stored?: unknown; restricted_key?: { permissions?: unknown[] } & Record<string, unknown> } | undefined;
+  if (st && st.test_credential_stored === true && st.restricted_key && Array.isArray(st.restricted_key.permissions)) {
+    const { permissions: _p, ...rk } = st.restricted_key;
+    d.stripe = { ...st, restricted_key: rk };
+  }
+  return d as T;
 }
 
 /**
@@ -761,7 +779,7 @@ const setupCheckbox: ToolDef = {
         notes: [
           'Tell the human exactly one line, e.g. "Open <link> and click Approve to connect Checkbox (free, no card)." Do not ask them to copy keys.',
           // Round 32 (pilot 31 item 13): the Stripe key box and the restricted key in the same message (one approval).
-          `${args.billing_platform === 'stripe' ? 'In the same message' : 'If the site sells through Stripe, in the same message'}, ask them to tick “Let your agent store a Stripe test-mode key” on that page and, if the project has no rk_test_ key yet, to create a restricted key in Stripe Test mode (https://dashboard.stripe.com/test/apikeys → Create restricted key, with the permissions the approval page lists) and put it in the project's env file (never in the chat): one approval then covers the key and the test subscription.`,
+          `${args.billing_platform === 'stripe' ? 'In the same message' : 'If the site sells through Stripe, in the same message'}, ask them to tick the box “Let your agent store a Stripe test-mode restricted key for this project” on that page and, if the project has no rk_test_ key yet, to create a restricted key in Stripe Test mode (https://dashboard.stripe.com/test/apikeys → Create restricted key, with the permissions the approval page lists) and put it in the project's env file (never in the chat): one approval then covers the key and the test subscription.`,
           `Then call setup_checkbox again with device_code "${auth.device_code}" AND the same facts (site_url, checkout_url, merchant_name, plans, policy URLs): after the approval Checkbox applies them and runs the first checks in that call. Keep the device_code private; it is not shown to the human.`,
         ],
         next: { type: 'wait_for_approval', message: `Call setup_checkbox with device_code "${auth.device_code}" to wait for the approval.`, operation_id: 'createDeviceToken' },
@@ -782,7 +800,7 @@ const setupCheckbox: ToolDef = {
       notes,
       data: (() => {
         const keys = labelledPublicKeys((session as { install?: { snippet_key?: unknown } }).install?.snippet_key, (session as { publishable_key?: unknown }).publishable_key);
-        return keys.length ? { ...withoutLegacyScore(session), public_keys: keys } : withoutLegacyScore(session);
+        return compactSetupDoc(keys.length ? { ...withoutLegacyScore(session), public_keys: keys } : withoutLegacyScore(session));
       })(),
     };
   },
@@ -1092,6 +1110,27 @@ export function precheckLines(pre: PrecheckLite | null | undefined, max = 12): s
   return [`Pre-check (${pre?.verdict ?? 'n/a'}), per check:`, ...lines, ...(checks.length > max ? [`and ${checks.length - max} more (data.precheck.checks)`] : [])];
 }
 
+interface FinalCheckLite {
+  check_id: string;
+  observed: string;
+  detail?: string;
+}
+
+/**
+ * Round 33 (pilot 32 item 10, new-app: the PASSED_WITH_NOTES text listed the stale pre-check bullets (needs_review)
+ * while the final checks lived only in the JSON): a finished verification is summarized from its FINAL checks; the
+ * pre-check lines show only while it is pending or when it has no final checks. Pure, exported for tests.
+ */
+export function verificationLines(v: { status: string; precheck?: PrecheckLite | null; checks?: FinalCheckLite[] | null }, max = 12): string[] {
+  const checks = v.checks ?? [];
+  if (v.status === 'pending' || !checks.length) return precheckLines(v.precheck, max);
+  const order: Record<string, number> = { fail: 0, needs_review: 1, missing_data: 1, pass: 2, informational: 2, not_applicable: 3 };
+  const sorted = [...checks].sort((a, b) => (order[a.observed] ?? 1) - (order[b.observed] ?? 1));
+  const lines = sorted.slice(0, max).map((c) => `${c.check_id}: ${c.observed}${c.detail ? ` — ${untrusted(c.detail, 180)}` : ''}`);
+  const pre = v.precheck?.verdict && v.precheck.checks?.length ? [`(The pre-check's estimate, ${v.precheck.verdict}, is superseded by these final checks: data.precheck keeps it.)`] : [];
+  return ['Final checks:', ...lines, ...(checks.length > max ? [`and ${checks.length - max} more (data.checks)`] : []), ...pre];
+}
+
 const verifyTask: ToolDef = {
   name: 'verify_task',
   title: 'Verify a task after applying its change',
@@ -1101,7 +1140,7 @@ const verifyTask: ToolDef = {
     '- page tasks: html = the rendered page HTML (before or after deploy; ≤ ~900 KB). Without it Checkbox fetches the live page.',
     '- Stripe tasks: stripe_checkout_session = exactly the object your code now passes to stripe.checkout.sessions.create.',
     '- email tasks: email = { subject, text and/or html } of the new template.',
-    'Result: verification status passed / failed (with a diff of expected vs observed) / pending (waiting for the confirming scan). Waits up to `wait` seconds. Then follow next_action (usually get_compliance_plan). A verification with checks still needs_review is reported as failed with next_action type needs_review: it is not done. "informational" checks are notes on Stripe\'s own layout: nothing to change.',
+    'Result: verification status passed / needs_review / failed (with a diff of expected vs observed) / pending (waiting for the confirming scan). Waits up to `wait` seconds. Then follow next_action (usually get_compliance_plan). Status needs_review: nothing failed, but a check is still undecided; it is not done: follow next_action. "informational" checks are notes on Stripe\'s own layout: nothing to change.',
   ].join('\n'),
   input: {
     task: z.string().max(100).describe('Task id (task_…).'),
@@ -1127,7 +1166,7 @@ const verifyTask: ToolDef = {
   async run(args, { api }) {
     const body = pick(args, ['html', 'stripe_checkout_session', 'stripe_checkout_sessions', 'email', 'plan', 'price_id', 'recheck']);
     if (body.email && typeof body.email === 'object' && (body.email as { kind?: unknown }).kind) body.email = { ...(body.email as object), kind: checkKind((body.email as { kind?: unknown }).kind) };
-    const v = await api.request<{ id: string; site?: string; status: string; checked?: string; diff?: unknown[]; plan_status?: string | null; plan_status_label?: string | null; next_action?: NextAction | null; precheck?: PrecheckLite | null }>('POST', `/v1/tasks/${enc(String(args.task))}/verify`, {
+    const v = await api.request<{ id: string; site?: string; status: string; checked?: string; diff?: unknown[]; plan_status?: string | null; plan_status_label?: string | null; next_action?: NextAction | null; precheck?: PrecheckLite | null; checks?: FinalCheckLite[] | null }>('POST', `/v1/tasks/${enc(String(args.task))}/verify`, {
       query: { wait: (args.wait as number | undefined) ?? 25 },
       body,
     });
@@ -1135,7 +1174,7 @@ const verifyTask: ToolDef = {
     return {
       headline: `Verification ${v.id} of ${String(args.task)}: ${statusLine(v.status)}${v.plan_status ? `; plan is now ${planStatusWords(v.plan_status, v.plan_status_label)}` : ''}.${v.checked ? ` Checked: ${untrusted(v.checked, 300)}.` : ''}`,
       notes: [
-        ...precheckLines(v.precheck),
+        ...verificationLines(v),
         ...((v.status === 'failed' || v.status === 'not_checked') && v.next_action?.type === 'verify_domain'
           ? ['The domain is not verified yet. Waiting for the human to publish the DNS record / file / meta tag or install the snippet; don\'t retry until they say it\'s done. Nothing to change in the code.']
           : v.next_action?.type === 'retry_later'
@@ -1145,6 +1184,8 @@ const verifyTask: ToolDef = {
             [v.next_action.description ?? 'Checkbox Notices sends this email: nothing to add to your code. Continue with the next task.']
           : v.next_action?.type === 'bcc_then_continue'
           ? ['The copy is checked; the task closes when the first real email arrives with the BCC. Add the BCC to your sending code and continue with the next task (no need to poll).']
+          : v.status === 'needs_review'
+          ? ['Nothing failed, but a check is still undecided: it is not done. Follow Next (it says what decides it).']
           : v.status === 'failed'
           ? ['The change did not satisfy the check: read diff (expected vs observed), fix the code, and call verify_task again.']
           : v.status === 'not_checked'
@@ -1214,8 +1255,8 @@ const getVerification: ToolDef = {
   scopes: ['compliance_plans:read'],
   annotations: { ...ro, title: 'Verification' },
   async run(args, { api }) {
-    const v = await api.request<{ id: string; status: string; precheck?: PrecheckLite | null }>('GET', `/v1/verifications/${enc(String(args.verification))}`, { query: { wait: (args.wait as number | undefined) ?? 0 } });
-    const notes = precheckLines(v.precheck);
+    const v = await api.request<{ id: string; status: string; precheck?: PrecheckLite | null; checks?: FinalCheckLite[] | null }>('GET', `/v1/verifications/${enc(String(args.verification))}`, { query: { wait: (args.wait as number | undefined) ?? 0 } });
+    const notes = verificationLines(v);
     return { headline: `Verification ${v.id}: ${statusLine(v.status)}.`, ...(notes.length ? { notes } : {}), data: v };
   },
 };
@@ -1329,15 +1370,26 @@ const startTestRun: ToolDef = {
   },
 };
 
+const TEST_RUN_MAX_WAIT = 55;
+const TEST_RUN_DONE = new Set(['succeeded', 'incomplete', 'failed', 'canceled']);
+
 const getTestRun: ToolDef = {
   name: 'get_test_run',
   title: 'Get a test run (steps, observations, fixes)',
   description:
-    'A synthetic test subscription with every step (checkout, acknowledgment email, reminders at each legal window, cancellation, confirmation): what was observed, check results, evidence ids and fixes. While running, next_action.type is "wait" and waiting_for says what it waits for (pass wait: 30 to get the answer as soon as the run moves on). When finished, apply the fixes (usually via get_compliance_plan) and start another run to verify. Without test_run, returns the newest run of the site.',
+    'A synthetic test subscription with every step (checkout, acknowledgment email, reminders at each legal window, cancellation, confirmation): what was observed, check results, evidence ids and fixes. While running, next_action.type is "wait" and waiting_for says what it waits for: pass wait: 55 to get the answer as soon as the run finishes (one or two calls per run). When finished, apply the fixes (usually via get_compliance_plan) and start another run to verify. Without test_run, returns the newest run of the site.',
   input: {
     test_run: z.string().max(100).optional().describe('Test run id (run_…). Default: the newest run of the site.'),
     site: siteId.optional(),
-    wait: z.number().int().min(0).max(30).optional().describe('Long-poll: wait up to this many seconds for the run to move on before answering.'),
+    // Round 34 (pilot 33 item 22, core-codex: 25 polls with wait=30 for runs of 1-2 minutes, because each poll answered
+    // on every step): wait up to 55 s (under common 60 s client tool timeouts), answering when the run finishes.
+    wait: z
+      .number()
+      .int()
+      .min(0)
+      .transform((n) => Math.min(TEST_RUN_MAX_WAIT, n))
+      .optional()
+      .describe(`Seconds to wait for the run to finish before answering (0-${TEST_RUN_MAX_WAIT}; larger values wait ${TEST_RUN_MAX_WAIT}). Answers at once when it finishes.`),
   },
   scopes: ['test_runs:read'],
   annotations: { ...ro, title: 'Test run' },
@@ -1349,8 +1401,16 @@ const getTestRun: ToolDef = {
       if (!list.data.length) throw new ToolError(`Site ${site} has no test run yet.`, { type: 'start_test_run', message: 'Call start_test_run.', operation_id: 'createTestRun' });
       id = list.data[0]!.id;
     }
-    const wait = typeof args.wait === 'number' && args.wait > 0 ? Math.min(30, Math.floor(args.wait)) : undefined;
-    const run = await api.request<{ id: string; status: string; status_label?: string; phase?: string; waiting_for?: { what: string; until: number | null; step?: number | null; steps_total?: number | null; minutes_left?: number | null } | null; steps?: Array<{ key?: string; title?: string; status?: string; code?: string }> }>('GET', `/v1/test_runs/${enc(id)}`, wait ? { query: { wait } } : undefined);
+    type RunLite = { id: string; status: string; status_label?: string; phase?: string; next_action?: NextAction | null; waiting_for?: { what: string; until: number | null; step?: number | null; steps_total?: number | null; minutes_left?: number | null } | null; steps?: Array<{ key?: string; title?: string; status?: string; code?: string }> };
+    const wait = typeof args.wait === 'number' && args.wait > 0 ? Math.min(TEST_RUN_MAX_WAIT, Math.floor(args.wait)) : 0;
+    const deadline = Date.now() + wait * 1000;
+    // The API long-polls up to 30 s per call and answers on every step; keep asking until the run finishes or time is up.
+    let run = await api.request<RunLite>('GET', `/v1/test_runs/${enc(id)}`, wait ? { query: { wait: Math.min(30, wait) } } : undefined);
+    for (let left = Math.floor((deadline - Date.now()) / 1000); wait && !TEST_RUN_DONE.has(run.status) && left >= 1; left = Math.floor((deadline - Date.now()) / 1000)) {
+      run = await api.request<RunLite>('GET', `/v1/test_runs/${enc(id)}`, { query: { wait: Math.min(30, left) } });
+    }
+    const running = !TEST_RUN_DONE.has(run.status);
+    const next = running && run.next_action?.type === 'wait' ? { ...run.next_action, message: `${(run.next_action.message ?? '').replace(/\s*Call retrieveTestRun with \?wait=30[^.]*\.?/, '').trim()} Call get_test_run again with wait: ${TEST_RUN_MAX_WAIT}: it answers as soon as the run finishes.`.trim() } : undefined;
     const w = run.waiting_for;
     const progress = w ? [w.step && w.steps_total ? `step ${w.step} of ${w.steps_total}` : '', w.minutes_left ? `about ${w.minutes_left} min left` : ''].filter(Boolean).join(', ') : '';
     const waiting = w ? `Waiting for: ${w.what}${w.until ? ` (until ${new Date(w.until * 1000).toISOString().slice(0, 16).replace('T', ' ')} UTC at the latest)` : ''}${progress ? ` [${progress}]` : ''}` : null;
@@ -1358,6 +1418,7 @@ const getTestRun: ToolDef = {
       headline: `Test run ${run.id}: ${run.status_label ?? statusLine(run.status)}${run.phase && run.status !== 'succeeded' && run.status !== 'failed' ? ` (phase ${run.phase})` : ''}.`,
       notes: [...(waiting ? [waiting] : []), ...(run.steps ?? []).map((s) => `${s.status ?? '?'}: ${s.title ?? s.key}${s.code ? ` (${s.code})` : ''}`)].slice(0, 13),
       data: run,
+      ...(next ? { next } : {}),
     };
   },
 };
@@ -1371,8 +1432,8 @@ const checkDisclosure: ToolDef = {
   title: 'Check checkout disclosure text',
   description: [
     'Before shipping a checkout: checks the automatic-renewal disclosure shown next to the purchase button against every applicable law (ROSCA, CA, NY, …) and returns per-check verdicts with citations plus a REPLACEMENT verified by the rules engine (disclosure_text, consent_label, button_text, drop-in html and jsx).',
-    'Pass the text exactly as rendered plus the plan terms. Example: {"text":"Renews monthly at $19.99 until you cancel.","price":19.99,"interval":"month","trial_days":14,"cancel_url":"https://acme.example/account/cancel","merchant_name":"Acme","consent":{"checkbox":true,"prechecked":false}}.',
-    'If verdict is fail, put replacement.jsx (React) or .html above the button, then call again with the new text, consent and placement.bold: true (it is semibold). needs_review on styling means a rendered scan must confirm.',
+    'Pass the text exactly as rendered plus the plan terms. Example: {"text":"Renews monthly at $19.99 until you cancel.","price":19.99,"interval":"month","cancel_url":"https://acme.example/account/cancel","consent":{"checkbox":true,"prechecked":false}}.',
+    'If verdict is fail, put replacement.jsx (React) or .html above the button, then call again with the new text, consent and placement.bold: true. needs_review on styling means a rendered scan must confirm.',
   ].join('\n'),
   input: {
     text: z.string().min(1).max(5000).describe('The disclosure shown next to the purchase button, exactly as rendered.'),
@@ -1395,7 +1456,7 @@ const checkDisclosure: ToolDef = {
       'placement',
     )
       .optional()
-      .describe('Where and how the disclosure is shown (defaults: above the button, same page, 14px, high contrast).'),
+      .describe('Defaults: above the button, same page, 14px, high contrast.'),
     consent: strictObject(
       {
         checkbox: z.boolean(),
@@ -1406,7 +1467,8 @@ const checkDisclosure: ToolDef = {
       'consent',
     )
       .optional()
-      .describe('The consent checkbox, if the page has one. Omit when there is none.'),
+      .describe('The consent checkbox, if any.'),
+    checkout_type: z.enum(['own_page', 'stripe_checkout', 'payment_link']).optional().describe('Stripe-hosted: no box here'),
     jurisdictions: jurisdictions.optional(),
     as_of: asOf.optional(),
   },
@@ -1862,7 +1924,7 @@ const updateSite: ToolDef = {
       {
         login_url: z.string().max(2048),
         email: z.string().max(320),
-        password: z.string().max(200),
+        password: z.string().max(200).optional(),
         reactivate_url: z.string().max(2048).optional().describe('Test-only page that re-subscribes the test account.'),
       },
       'test_account',
@@ -2014,8 +2076,11 @@ const listFindings: ToolDef = {
         starting_after: args.starting_after as string | undefined,
       },
     });
+    // Round 34 (pilot 33 item 11, core-new-app: status=fail listed 0 while the plan said "2 fixes needed"): status is
+    // the engine's verdict; the fix count is the status label (a needs_review finding can need a fix).
+    const failNote = args.status === 'fail' && !list.data.length ? ' status=fail is the engine verdict only: a needs_review finding can still be counted as a fix (its label says "Needs a fix"). The fixes to make are the tasks of get_compliance_plan.' : '';
     return {
-      headline: `${list.data.length}${list.has_more ? '+' : ''} finding(s).`,
+      headline: `${list.data.length}${list.has_more ? '+' : ''} finding(s).${failNote}`,
       notes: list.data.map((f) => `${f.severity.toUpperCase()} ${f.id} [${f.compliance?.label ?? f.status}] ${f.check_id}: ${f.title}${f.requirements?.[0] ? ` [${f.requirements[0].citation}]` : ''}`),
       data: list,
     };

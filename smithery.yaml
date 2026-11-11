@@ -1,0 +1,21 @@
+# Smithery (https://smithery.ai) listing for the Checkbox MCP server.
+# The hosted server needs nothing from this file: list it on Smithery by URL (https://app.checkbox.site/mcp, MCP OAuth,
+# no key). This file lets Smithery run the published local server (@checkbox-site/mcp on npm) over stdio as well.
+# Mirrored to the root of github.com/checkbox-site/checkbox by scripts/public-repos/sync.ts.
+startCommand:
+  type: stdio
+  configSchema:
+    type: object
+    properties:
+      apiKey:
+        type: string
+        description: >-
+          Optional. A Checkbox API key (ck_test_... or ck_live_...). Without one, the setup_checkbox tool returns an
+          approval link for the human and then test-mode keys. Free, no credit card.
+  commandFunction: |-
+    (config) => ({
+      command: 'npx',
+      args: ['-y', '@checkbox-site/mcp'],
+      env: config.apiKey ? { CHECKBOX_API_KEY: config.apiKey } : {}
+    })
+  exampleConfig: {}

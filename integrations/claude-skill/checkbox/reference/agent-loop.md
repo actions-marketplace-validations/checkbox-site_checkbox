@@ -20,9 +20,10 @@ again. Meanwhile check pages by sending their HTML (`check_page_html`, or `verif
 
 MCP tool `get_compliance_plan` (REST: `GET /v1/sites/{site}/plan`); `get_task` returns one task in full:
 
-- `status`: `action_required` (apply open tasks), `verifying` (only confirmations pending), `blocked` (only human
-  answers remain, or a critical/high task was declined), `compliant` (every automated check passes; this is a status
-  name, not a legal conclusion: tell the user "Checkbox's checks pass", never "you are compliant").
+- `checks_status` (prefer it to the older `status`): `action_required` (apply open tasks), `verifying` (only
+  confirmations pending), `blocked` (only human answers remain, or a critical/high task was declined), `checks_pass`
+  (every automated check passes; not a legal conclusion: tell the user "Checkbox's checks pass", never "you are
+  compliant"). The older `status` says `compliant` for `checks_pass`. Show people `status_label`.
 - `tasks[]` in order. Each: `id` (stable `task_…`), `requirement { citation, plain_language }`, `why` (what was
   observed), `where { kind, file_hint, url, selector, stripe_object }`, `change { type: patch|copy|stripe_params|config|manual, content, edits[] }`,
   `verify { method, how, expected }`, `next_action`.
@@ -36,7 +37,7 @@ MCP tool `get_compliance_plan` (REST: `GET /v1/sites/{site}/plan`); `get_task` r
 3. Result: `passed`, `failed` (with what is still wrong), `not_checked` (evidence is missing, or the domain is not
    verified yet: nothing to change in the code) or `pending` (a scan, billing sync or real email confirms it; poll
    `get_verification` with the verification id, REST `GET /v1/verifications/{id}?wait=30`).
-4. Fetch the plan again. Repeat until no automated task is open (`status` `compliant` or `blocked`).
+4. Fetch the plan again. Repeat until no automated task is open (`checks_status` `checks_pass` or `blocked`).
 
 Email tasks ("Send the … email"): by default the merchant's code sends them. Write the email from `check_email`'s
 template, add BCC to the address the task names (`…+<kind>@in.checkbox.site`) where the code sends it, then
