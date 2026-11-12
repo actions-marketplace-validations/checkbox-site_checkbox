@@ -771,7 +771,7 @@
                 "maxLength": 40
               }
             ],
-            "description": "Alias of `amount` in MAJOR units (19 = $19.00); `amount` (minor units) is the canonical field.",
+            "description": "Alias of `amount` in MAJOR units (19 = $19.00), or as text (\"$19/month\", \"19 USD/mo\": its currency and interval fill those fields when absent); `amount` (minor units) is the canonical field.",
             "example": 19
           },
           "intro_price": {
@@ -1924,6 +1924,14 @@
                 "type": "integer",
                 "description": "When it started. Unix timestamp in seconds.",
                 "example": 1793318400
+              },
+              "finished_at": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "description": "Round 38: when it finished; null while it runs. Unix timestamp in seconds.",
+                "example": 1793318400
               }
             },
             "required": [
@@ -1936,7 +1944,8 @@
               "id": "run_3f9a1c2e7b4d4e0f9a8b7c6d5e4f3a2b",
               "status": "running",
               "status_label": "Running",
-              "created": 1793318400
+              "created": 1793318400,
+              "finished_at": 1793318400
             }
           },
           "owner_questions": {
@@ -2910,7 +2919,8 @@
                   "id": "run_3f9a1c2e7b4d4e0f9a8b7c6d5e4f3a2b",
                   "status": "running",
                   "status_label": "Running",
-                  "created": 1793318400
+                  "created": 1793318400,
+                  "finished_at": 1793318400
                 },
                 "owner_questions": {
                   "description": "Ask the human once, now, in one message, every question below (numbered)…",
@@ -10738,6 +10748,52 @@
             "description": "The plan status in words to show a person, from the same counts as the summary (\"1 fix needed · 2 to set up\", \"1 decision for you\"; else action_required \"Fixes needed\", blocked \"Your call\"), \"Checks still running (N)\" while checks are still running (verifying), compliant \"Checks pass\"; while an agent works the site and everything left waits for a deploy or the owner (next_action done_for_now): \"Waiting on deploy and you\" or \"Waiting on deploy\". Show this, never the machine value (`compliant` is a status name, not a legal conclusion).",
             "example": "1 fix needed · 2 to set up"
           },
+          "new_tasks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "description": "Task id.",
+                  "example": "task_8dc099db654b5463b1acf5c53c848623"
+                },
+                "key": {
+                  "type": "string",
+                  "description": "Task key.",
+                  "example": "signup_disclosure"
+                },
+                "title": {
+                  "type": "string",
+                  "description": "Task title.",
+                  "example": "Show the renewal terms above your purchase button"
+                },
+                "found_by": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "What found it (a scan of a page, the read of your Stripe settings, ...).",
+                  "example": "the scan of your checkout page"
+                }
+              },
+              "required": [
+                "id",
+                "key",
+                "title",
+                "found_by"
+              ]
+            },
+            "description": "Open plan tasks this re-check (or the checks it started) found, new since the plan was read before it: work them too. Omitted when there are none.",
+            "example": [
+              {
+                "id": "task_8dc099db654b5463b1acf5c53c848623",
+                "key": "signup_disclosure",
+                "title": "Show the renewal terms above your purchase button",
+                "found_by": "the scan of your checkout page"
+              }
+            ]
+          },
           "next_action": {
             "$ref": "#/components/schemas/PlanNextAction"
           },
@@ -10873,14 +10929,14 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 200,
-            "description": "email_copy tasks: check the email against this plan only (its name, e.g. \"Annual\").",
+            "description": "email_copy tasks: check the email against this plan only (its name, e.g. \"Annual\"). Stripe Checkout params tasks: judge (and wait for) only this plan's Checkout params.",
             "example": "Annual"
           },
           "price_id": {
             "type": "string",
             "minLength": 1,
             "maxLength": 200,
-            "description": "email_copy tasks: check the email against the plan with this Stripe Price id only.",
+            "description": "email_copy tasks: check the email against the plan with this Stripe Price id only. Stripe Checkout params tasks: judge only the params that sell this Price.",
             "example": "price_1Annual"
           },
           "recheck": {
@@ -10959,6 +11015,14 @@
                 ],
                 "plan_status": "action_required",
                 "plan_status_label": "1 fix needed · 2 to set up",
+                "new_tasks": [
+                  {
+                    "id": "task_8dc099db654b5463b1acf5c53c848623",
+                    "key": "signup_disclosure",
+                    "title": "Show the renewal terms above your purchase button",
+                    "found_by": "the scan of your checkout page"
+                  }
+                ],
                 "next_action": {
                   "type": "apply_task",
                   "description": "Apply task_… (add the renewal terms above the Subscribe button in app/checkout/page.tsx), then call verifyTask.",
@@ -22828,6 +22892,14 @@
             "description": "The same as finished (the name verifications use): when the run finished; null while it runs. Unix timestamp in seconds.",
             "example": 1793318400
           },
+          "finished_at": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Round 38: the same as finished (unix seconds): when the run finished; null while it runs. Unix timestamp in seconds.",
+            "example": 1793318400
+          },
           "duration_seconds": {
             "type": [
               "integer",
@@ -23608,6 +23680,7 @@
           "started",
           "finished",
           "completed",
+          "finished_at",
           "duration_seconds",
           "steps",
           "failure",
@@ -23661,6 +23734,7 @@
                 "started": 1793318400,
                 "finished": 1793318400,
                 "completed": 1793318400,
+                "finished_at": 1793318400,
                 "duration_seconds": 56,
                 "steps": [],
                 "failure": {
@@ -35508,6 +35582,14 @@
                             ],
                             "plan_status": "action_required",
                             "plan_status_label": "1 fix needed · 2 to set up",
+                            "new_tasks": [
+                              {
+                                "id": "task_8dc099db654b5463b1acf5c53c848623",
+                                "key": "signup_disclosure",
+                                "title": "Show the renewal terms above your purchase button",
+                                "found_by": "the scan of your checkout page"
+                              }
+                            ],
                             "next_action": {
                               "type": "apply_task",
                               "description": "Apply task_… (add the renewal terms above the Subscribe button in app/checkout/page.tsx), then call verifyTask.",
@@ -35916,6 +35998,7 @@
                             "started": 1793318400,
                             "finished": 1793318400,
                             "completed": 1793318400,
+                            "finished_at": 1793318400,
                             "duration_seconds": 56,
                             "steps": [],
                             "failure": {
@@ -36110,6 +36193,7 @@
                             "started": 1793318400,
                             "finished": 1793318400,
                             "completed": 1793318400,
+                            "finished_at": 1793318400,
                             "duration_seconds": 56,
                             "steps": [],
                             "failure": {

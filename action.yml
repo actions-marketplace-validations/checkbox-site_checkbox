@@ -56,6 +56,12 @@ outputs:
   result:
     description: The outcome in words, consistent with the exit code (e.g. "passed with items to review (they do not fail this run)").
     value: ${{ steps.checkbox.outputs.result }}
+  terms-checked:
+    description: true when a Terms of service page ("kind" "terms" in checkbox.json) was checked; false means "Terms NOT checked in CI".
+    value: ${{ steps.checkbox.outputs.terms_checked }}
+  owner-items:
+    description: What only the owner can do, as a Markdown checklist for the pull request description (empty when none).
+    value: ${{ steps.checkbox.outputs.owner_items }}
 
 runs:
   using: composite

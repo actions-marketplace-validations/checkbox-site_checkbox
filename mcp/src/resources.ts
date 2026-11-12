@@ -83,7 +83,7 @@ what to change. Free. Every feature. No credit card. Fair-use limits.
 5. Tasks with status **manual** hold a question for the HUMAN: ask them, then **answer_task**. Never answer for them.
 6. **start_test_run** — a synthetic subscription in Stripe test mode (card 4242, Checkbox inbox, test clock through
    trial end and renewal, online cancellation) observes every lifecycle check; **get_test_run** for results.
-7. Repeat 3-4 until the checks pass (plan status value \`compliant\`, label "Checks pass"), then **complete_setup** (emails the human a summary).
+7. Repeat 3-4 until the checks pass (plan status value \`compliant\`, label "Checks pass"), then Checkbox emails the human a summary by itself (**complete_setup** sends it earlier).
 8. A setup in Stripe test mode is not live yet: the plan and complete_setup carry **go_live** (the steps left before
    real customers, with who takes each: verify the domain, the live Stripe key — a person only —, the live checkout,
    promoting the site). Tell the human "set up in test mode; N steps before real customers", never just "done".

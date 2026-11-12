@@ -181,7 +181,8 @@ const setupFactsShape = {
           price_id: z.string().max(200).optional().describe('Stripe Price id.'),
           // Round 36 (pilot 35 item 21, codex / dev-approver: the first call sent plans[].price in dollars and was refused).
           // The API takes it as amount in MAJOR units and refuses a price that disagrees with amount.
-          price: z.number().positive().optional().describe('Or major units (19 = $19).'),
+          // Round 38 (pilot 37 item 29, codex: "$5/month" was refused by the schema): text is parsed by the API.
+          price: z.union([z.number(), z.string().max(40)]).optional().describe('Major units, or "$19/mo".'),
         },
         'plans[]',
         PLAN_FIELD_HINTS,
@@ -189,7 +190,7 @@ const setupFactsShape = {
     )
     .max(50)
     .optional()
-    .describe('Plans and prices found in the code, e.g. [{"name":"Pro","amount":1900,"currency":"usd","interval":"month","trial_days":14}]; a promo adds intro_percent_off and intro_periods. They decide which laws apply.'),
+    .describe('Plans and prices in the code, e.g. [{"name":"Pro","amount":1900,"interval":"month","trial_days":14}]; a promo adds intro_percent_off and intro_periods. They decide which laws apply.'),
   project: z
     .object({
       name: z.string().max(200).optional().describe('package.json name.'),
@@ -645,7 +646,14 @@ export function compactSetupResponse<T>(doc: T): T {
       return x && typeof x === 'object' && typeof x.status === 'string' && CLOSED_STEPS.has(x.status) ? { key: x.key, title: x.title, status: x.status } : st;
     });
   }
-  for (const k of ['setup_session', 'session']) if (d[k] && typeof d[k] === 'object') d[k] = compactSetupResponse(d[k]);
+  for (const k of ['setup_session', 'session']) {
+    if (!d[k] || typeof d[k] !== 'object') continue;
+    const inner = compactSetupResponse(d[k]) as Record<string, unknown>;
+    // Round 38 (pilot 37 item 25): what the response already carries at the top level is not repeated inside it.
+    const same = ['next_action', 'steps', 'compliance', 'owner_questions'].filter((f) => f in inner && f in d && JSON.stringify(inner[f]) === JSON.stringify(d[f]));
+    for (const f of same) delete inner[f];
+    d[k] = same.length ? { ...inner, same_as_top_level: same } : inner;
+  }
   return d as T;
 }
 
@@ -903,7 +911,7 @@ const getSetupStatus: ToolDef = {
   description: [
     'Returns the setup checklist of a setup session: snippet installed?, policies found and checked, Stripe test mode, latest verdict, and exactly one next_action.',
     'Pass verify=true after you changed something (installed the snippet, deployed, added a policy page): Checkbox re-loads the site, re-fetches the Terms and policies, re-evaluates and queues the first scan.',
-    'Loop: do next_action → get_setup_status(verify=true) → … until next_action.type is "done", then call complete_setup.',
+    'Loop: do next_action → get_setup_status(verify=true) → … until next_action.type is "done" (Checkbox then emails the summary).',
   ].join('\n'),
   input: {
     setup_session: z.string().max(100).optional().describe('Setup session id (setup_…). Default: the newest one.'),
@@ -1001,7 +1009,7 @@ const completeSetup: ToolDef = {
   name: 'complete_setup',
   title: 'Finish setup and email the human a summary',
   description:
-    'Call once the setup checklist next_action is "done" (or nothing else can be done without the human). Marks the setup finished and emails the person who approved it "<agent> set up Checkbox for <domain>" with what was created, what is still open, the go-live steps and a review link. Idempotent: the email is sent once. Monitoring keeps running. In test mode it returns go_live: tell the human go_live.summary ("set up in test mode; N steps before real customers"), never just "done".',
+    'Checkbox does this itself once the plan is done; call it if you stop earlier. Marks the setup finished and emails the person who approved it "<agent> set up Checkbox for <domain>" with what was created, what is still open, the go-live steps and a review link. Idempotent: the email is sent once. Monitoring keeps running. In test mode it returns go_live: tell the human go_live.summary ("set up in test mode; N steps before real customers"), never just "done".',
   input: { setup_session: z.string().max(100).optional().describe('Setup session id (setup_…). Default: the newest one.') },
   scopes: ['setup_sessions:write'],
   annotations: { ...write(true), title: 'Complete setup' },
@@ -1045,10 +1053,19 @@ interface PlanLite {
 }
 
 /** "Old task (covered by: Open task)": the open task sharing a check with a superseded one. Pure, exported for tests. */
-export function coveredLine(t: { key?: unknown; title: string; check_ids?: readonly string[] }, open: ReadonlyArray<{ key?: unknown; title: string; check_ids?: readonly string[] }>): string {
+export function coveredLine(
+  t: { key?: unknown; title: string; check_ids?: readonly string[] },
+  open: ReadonlyArray<{ key?: unknown; title: string; check_ids?: readonly string[] }>,
+  all: ReadonlyArray<{ key?: unknown; title: string; status?: string; check_ids?: readonly string[] }> = [],
+): string {
   const ids = t.check_ids ?? [];
-  const by = open.find((o) => o.key !== t.key && (o.check_ids ?? []).some((c) => ids.includes(c)));
-  return by ? `${t.title} (covered by: ${by.title})` : `${t.title} (covered by another open task)`;
+  const shares = (o: { key?: unknown; check_ids?: readonly string[] }) => o.key !== t.key && (o.check_ids ?? []).some((c) => ids.includes(c));
+  const by = open.find(shares);
+  if (by) return `${t.title} (covered by: ${by.title})`;
+  // Round 38 (pilot 37 item 32, dev-approver: "Merged into another task" named no task): the covering task by name,
+  // also when it is closed by now.
+  const closed = all.find((o) => shares(o) && o.status !== undefined);
+  return closed ? `${t.title} (covered by: ${closed.title}, ${closed.status === 'done' ? 'done' : closed.status})` : `${t.title} (covered by another task)`;
 }
 
 /** The plan with each task reduced to what an agent needs to choose the next one (the full task: get_task). */
@@ -1131,7 +1148,7 @@ const getCompliancePlan: ToolDef = {
           const na = closed.filter((t) => t.compliance_status === 'not_applicable' && t.closed_reason !== 'verified' && t.closed_reason !== 'superseded');
           return [
             ...(verified.length ? [`Done (verified): ${verified.map((t) => t.title).join('; ')}`] : []),
-            ...(covered.length ? [`Merged into another task: ${covered.map((t) => coveredLine(t, open)).join('; ')}`] : []),
+            ...(covered.length ? [`Merged into another task: ${covered.map((t) => coveredLine(t, open, closed.filter((x) => x.closed_reason !== 'superseded'))).join('; ')}`] : []),
             ...(na.length ? [`Not applicable (closed without a change, nothing observed passing): ${na.map((t) => t.title).join('; ')}`] : []),
           ];
         })(),
@@ -1179,7 +1196,11 @@ export function precheckLines(pre: PrecheckLite | null | undefined, max = 12): s
   if (!checks.length) return [];
   const order: Record<string, number> = { fail: 0, needs_review: 1, missing_data: 1, pass: 2, informational: 2, not_applicable: 3 };
   const sorted = [...checks].sort((a, b) => (order[a.status] ?? 1) - (order[b.status] ?? 1));
-  const lines = sorted.slice(0, max).map((c) => `${c.check_id}: ${c.status}${c.reason ? ` — ${untrusted(c.reason, 180)}` : ''}${c.fix ? ` Fix: ${untrusted(c.fix, 200)}` : ''}`);
+  // Round 38 (pilot 37 item 32, core-new-app: "Fix:" repeating the reason of a check that needs no change): a fix is
+  // printed only for a check that is not passing, when it says something the reason does not and asks for a change.
+  const showFix = (c: { status: string; reason?: string; fix?: string }) =>
+    !!c.fix && (c.status === 'fail' || c.status === 'needs_review' || c.status === 'missing_data') && c.fix.trim() !== (c.reason ?? '').trim() && !/^nothing to change|\bnothing to change\b|\bno change (is )?needed\b/i.test(c.fix);
+  const lines = sorted.slice(0, max).map((c) => `${c.check_id}: ${c.status}${c.reason ? ` — ${untrusted(c.reason, 180)}` : ''}${showFix(c) ? ` Fix: ${untrusted(c.fix!, 200)}` : ''}`);
   return [`Pre-check (${pre?.verdict ?? 'n/a'}), per check:`, ...lines, ...(checks.length > max ? [`and ${checks.length - max} more (data.precheck.checks)`] : [])];
 }
 
@@ -1187,19 +1208,28 @@ interface FinalCheckLite {
   check_id: string;
   observed: string;
   detail?: string;
+  source?: string;
 }
+
+const lineOf = (c: FinalCheckLite): string => `${c.check_id}: ${c.observed === 'open' && c.source === 'plan' ? 'open in the plan' : c.observed}${c.detail ? ` — ${untrusted(c.detail, 180)}` : ''}`;
 
 /**
  * Round 33 (pilot 32 item 10, new-app: the PASSED_WITH_NOTES text listed the stale pre-check bullets (needs_review)
  * while the final checks lived only in the JSON): a finished verification is summarized from its FINAL checks; the
  * pre-check lines show only while it is pending or when it has no final checks. Pure, exported for tests.
  */
-export function verificationLines(v: { status: string; precheck?: PrecheckLite | null; checks?: FinalCheckLite[] | null }, max = 12): string[] {
-  const checks = v.checks ?? [];
-  if (v.status === 'pending' || !checks.length) return precheckLines(v.precheck, max);
-  const order: Record<string, number> = { fail: 0, needs_review: 1, missing_data: 1, pass: 2, informational: 2, not_applicable: 3 };
-  const sorted = [...checks].sort((a, b) => (order[a.observed] ?? 1) - (order[b.observed] ?? 1));
-  const lines = sorted.slice(0, max).map((c) => `${c.check_id}: ${c.observed}${c.detail ? ` — ${untrusted(c.detail, 180)}` : ''}`);
+export function verificationLines(v: { status: string; precheck?: PrecheckLite | null; checks?: FinalCheckLite[] | null; diff?: FinalCheckLite[] | null }, max = 12): string[] {
+  // Round 38 (pilot 37 item 16, dev-approver: the failing check was hidden under "and 16 more" while passes from an
+  // older page view came first): what the plan keeps open (diff items from the plan) leads, then failing checks.
+  const planOpen = (v.diff ?? []).filter((d) => d && d.source === 'plan');
+  const checks = [...planOpen, ...(v.checks ?? [])];
+  if (v.status === 'pending' || !(v.checks ?? []).length) return precheckLines(v.precheck, max);
+  const order: Record<string, number> = { open: -1, fail: 0, needs_review: 1, missing_data: 1, pass: 2, informational: 2, not_applicable: 3 };
+  const failing = new Set(checks.filter((c) => c.observed === 'fail' || c.observed === 'open').map((c) => c.check_id));
+  // A pass of a check the plan or another observation reports failing sorts after that failure.
+  const rank = (c: FinalCheckLite) => (order[c.observed] ?? 1) + (c.observed === 'pass' && failing.has(c.check_id) ? 2 : 0);
+  const sorted = [...checks].sort((a, b) => rank(a) - rank(b));
+  const lines = sorted.slice(0, max).map(lineOf);
   const pre = v.precheck?.verdict && v.precheck.checks?.length ? [`(The pre-check's estimate, ${v.precheck.verdict}, is superseded by these final checks: data.precheck keeps it.)`] : [];
   return ['Final checks:', ...lines, ...(checks.length > max ? [`and ${checks.length - max} more (data.checks)`] : []), ...pre];
 }
@@ -1229,8 +1259,8 @@ const verifyTask: ToolDef = {
       })
       .optional()
       .describe('Email tasks: the new template (passes when it matches one plan fully).'),
-    plan: z.string().min(1).max(200).optional().describe('Email tasks: only this plan (name).'),
-    price_id: z.string().min(1).max(200).optional().describe('Email tasks: only this plan (Price id).'),
+    plan: z.string().min(1).max(200).optional().describe('Email/Stripe tasks: only this plan (name).'),
+    price_id: z.string().min(1).max(200).optional().describe('Email/Stripe tasks: only this plan (Price id).'),
     recheck: z.boolean().optional().describe('Not needed: a done task is always re-checked now; one closed with nothing observed passing is not_checked.'),
     wait,
   },
@@ -1239,7 +1269,7 @@ const verifyTask: ToolDef = {
   async run(args, { api }) {
     const body = pick(args, ['html', 'stripe_checkout_session', 'stripe_checkout_sessions', 'email', 'plan', 'price_id', 'recheck']);
     if (body.email && typeof body.email === 'object' && (body.email as { kind?: unknown }).kind) body.email = { ...(body.email as object), kind: checkKind((body.email as { kind?: unknown }).kind) };
-    const v = await api.request<{ id: string; site?: string; status: string; checked?: string; diff?: unknown[]; plan_status?: string | null; plan_status_label?: string | null; next_action?: NextAction | null; precheck?: PrecheckLite | null; checks?: FinalCheckLite[] | null }>('POST', `/v1/tasks/${enc(String(args.task))}/verify`, {
+    const v = await api.request<{ id: string; site?: string; status: string; checked?: string; diff?: FinalCheckLite[]; plan_status?: string | null; plan_status_label?: string | null; next_action?: NextAction | null; precheck?: PrecheckLite | null; checks?: FinalCheckLite[] | null }>('POST', `/v1/tasks/${enc(String(args.task))}/verify`, {
       query: { wait: (args.wait as number | undefined) ?? 25 },
       body,
     });
@@ -1309,7 +1339,7 @@ const verifySite: ToolDef = {
   annotations: { ...write(true, true), title: 'Verify site' },
   async run(args, { api }) {
     const site = await resolveSite(api, args.site);
-    const v = await api.request<{ id: string; status: string; plan_status?: string | null; diff?: unknown[]; next_action?: NextAction; precheck?: { note?: string } | null }>('POST', `/v1/sites/${enc(site)}/verify`, { query: { wait: (args.wait as number | undefined) ?? 25 }, body: {} });
+    const v = await api.request<{ id: string; status: string; plan_status?: string | null; plan_status_label?: string | null; diff?: FinalCheckLite[]; checks?: FinalCheckLite[] | null; next_action?: NextAction; precheck?: PrecheckLite & { note?: string } | null }>('POST', `/v1/sites/${enc(site)}/verify`, { query: { wait: (args.wait as number | undefined) ?? 25 }, body: {} });
     // Pilot 11: say what was re-read from the billing platform (the note's first sentence), so a stale answer is visible.
     const reread = /^(?:Re-read |Could not re-read |[A-Z][\w ]{0,40} was read ).*?(?:before judging\.|seconds\)\.|ago\.|earlier\.)/.exec(v.precheck?.note ?? '')?.[0];
     // A whole-site check that finds open checks produced the to-do list; it is not a failed change.
@@ -1317,10 +1347,12 @@ const verifySite: ToolDef = {
       v.next_action?.type === 'verify_domain'
         ? `Site check ${v.id}: nothing was fetched or scanned because the site's domain is not verified yet (Checkbox only visits websites their owners have verified). Follow Next to verify it.`
         : v.status === 'failed'
-        ? `${v.next_action?.type === 'first_check_complete' ? 'First check complete' : 'Site check complete'} (${v.id}): the open tasks of get_compliance_plan are the to-do list, not a failed change.${v.plan_status ? ` Plan: ${v.plan_status}.` : ''}`
-        : `Site check ${v.id}: ${statusLine(v.status)}${v.plan_status ? `; plan is ${v.plan_status}` : ''}.`;
+        ? // Round 38 (pilot 37 item 16): the plan's own words (status label, next step), never a count of its own.
+          `${v.next_action?.type === 'first_check_complete' ? 'First check complete' : 'Site check complete'} (${v.id}): ${v.plan_status === 'action_required' || !v.plan_status ? 'the open tasks of get_compliance_plan are the to-do list, not a failed change.' : 'not a failed change.'}${v.plan_status_label ?? v.plan_status ? ` Plan: ${v.plan_status_label ?? v.plan_status}.` : ''}`
+        : `Site check ${v.id}: ${statusLine(v.status)}${v.plan_status_label ?? v.plan_status ? `; plan: ${v.plan_status_label ?? v.plan_status}` : ''}.`;
     const headline = reread ? `${base} ${reread}` : base;
-    return { headline, data: v };
+    const notes = verificationLines(v);
+    return { headline, ...(notes.length ? { notes } : {}), data: v };
   },
 };
 

@@ -294,7 +294,7 @@ SetupPlan = TypedDict(
         "price_id": str,
         #: Alias of `name` (the name the checks also accept). (optional)
         "plan_name": str,
-        #: Alias of `amount` in MAJOR units (19 = $19.00); `amount` (minor units) is the canonical field. (optional)
+        #: Alias of `amount` in MAJOR units (19 = $19.00), or as text ("$19/month", "19 USD/mo": its currency and interval fill those fields when absent); `amount` (minor units) is the canonical field. (optional)
         "price": Union[float, str],
         #: Alias of `intro_amount` in MAJOR units (8 = $8.00). (optional)
         "intro_price": Union[float, str],
@@ -666,6 +666,8 @@ SetupSessionTestRun = TypedDict(
         "status_label": str,
         #: When it started. Unix timestamp in seconds.
         "created": int,
+        #: Round 38: when it finished; null while it runs. Unix timestamp in seconds. (optional)
+        "finished_at": Optional[int],
     },
     total=False,
 )
@@ -3552,6 +3554,22 @@ VerificationPrecheck = TypedDict(
 )
 
 
+VerificationNewTasksItem = TypedDict(
+    "VerificationNewTasksItem",
+    {
+        #: Task id.
+        "id": str,
+        #: Task key.
+        "key": str,
+        #: Task title.
+        "title": str,
+        #: What found it (a scan of a page, the read of your Stripe settings, ...).
+        "found_by": Optional[str],
+    },
+    total=False,
+)
+
+
 #: A re-check of one task (or the whole site) after the agent applied changes.
 Verification = TypedDict(
     "Verification",
@@ -3588,6 +3606,8 @@ Verification = TypedDict(
         "plan_status": Optional[Literal["action_required", "verifying", "compliant", "blocked"]],
         #: The plan status in words to show a person, from the same counts as the summary ("1 fix needed · 2 to set up", "1 decision for you"; else action_required "Fixes needed", blocked "Your call"), "Checks still running (N)" while checks are still running (verifying), compliant "Checks pass"; while an agent works the site and everything left waits for a deploy or the owner (next_action done_for_now): "Waiting on deploy and you" or "Waiting on deploy". Show this, never the machine value (`compliant` is a status name, not a legal conclusion). (optional)
         "plan_status_label": Optional[str],
+        #: Open plan tasks this re-check (or the checks it started) found, new since the plan was read before it: work them too. Omitted when there are none. (optional)
+        "new_tasks": List["VerificationNewTasksItem"],
         "next_action": "PlanNextAction",
         #: When it was requested. Unix timestamp in seconds.
         "created": int,
@@ -3628,9 +3648,9 @@ VerifyTaskParams = TypedDict(
         "stripe_checkout_sessions": List[Dict[str, Any]],
         #: email_copy tasks: the new email template (pre-check; the real email confirms). On a site with several plans it is checked against every plan and passes when it matches one plan fully (pass plan or price_id to check one plan). (optional)
         "email": "VerifyTaskParamsEmail",
-        #: email_copy tasks: check the email against this plan only (its name, e.g. "Annual"). (optional)
+        #: email_copy tasks: check the email against this plan only (its name, e.g. "Annual"). Stripe Checkout params tasks: judge (and wait for) only this plan's Checkout params. (optional)
         "plan": str,
-        #: email_copy tasks: check the email against the plan with this Stripe Price id only. (optional)
+        #: email_copy tasks: check the email against the plan with this Stripe Price id only. Stripe Checkout params tasks: judge only the params that sell this Price. (optional)
         "price_id": str,
         #: Kept for compatibility: a task that is already done (or declined) is always re-checked now (Stripe re-read, registered checkout configs judged again, a fresh evaluation or a confirming scan), never answered from its last result. A task closed without anything observed passing (superseded, no longer applicable, or a person's decision) answers not_checked: nothing to verify. (optional)
         "recheck": bool,
@@ -7666,6 +7686,8 @@ TestRun = TypedDict(
         "finished": Optional[int],
         #: The same as finished (the name verifications use): when the run finished; null while it runs. Unix timestamp in seconds.
         "completed": Optional[int],
+        #: Round 38: the same as finished (unix seconds): when the run finished; null while it runs. Unix timestamp in seconds.
+        "finished_at": Optional[int],
         #: How long the run took, from started (or created) to finished, in seconds; null while it runs.
         "duration_seconds": Optional[int],
         #: Lifecycle steps in order.
@@ -8252,9 +8274,9 @@ VerifyTaskRequestParams = TypedDict(
         "stripe_checkout_sessions": List[Dict[str, Any]],
         #: email_copy tasks: the new email template (pre-check; the real email confirms). On a site with several plans it is checked against every plan and passes when it matches one plan fully (pass plan or price_id to check one plan). (optional)
         "email": "VerifyTaskRequestParamsEmail",
-        #: email_copy tasks: check the email against this plan only (its name, e.g. "Annual"). (optional)
+        #: email_copy tasks: check the email against this plan only (its name, e.g. "Annual"). Stripe Checkout params tasks: judge (and wait for) only this plan's Checkout params. (optional)
         "plan": str,
-        #: email_copy tasks: check the email against the plan with this Stripe Price id only. (optional)
+        #: email_copy tasks: check the email against the plan with this Stripe Price id only. Stripe Checkout params tasks: judge only the params that sell this Price. (optional)
         "price_id": str,
         #: Kept for compatibility: a task that is already done (or declined) is always re-checked now (Stripe re-read, registered checkout configs judged again, a fresh evaluation or a confirming scan), never answered from its last result. A task closed without anything observed passing (superseded, no longer applicable, or a person's decision) answers not_checked: nothing to verify. (optional)
         "recheck": bool,

@@ -211,7 +211,7 @@ export interface SetupPlan {
   price_id?: string;
   /** Alias of `name` (the name the checks also accept). */
   plan_name?: string;
-  /** Alias of `amount` in MAJOR units (19 = $19.00); `amount` (minor units) is the canonical field. */
+  /** Alias of `amount` in MAJOR units (19 = $19.00), or as text ("$19/month", "19 USD/mo": its currency and interval fill those fields when absent); `amount` (minor units) is the canonical field. */
   price?: number | string;
   /** Alias of `intro_amount` in MAJOR units (8 = $8.00). */
   intro_price?: number | string;
@@ -479,6 +479,8 @@ export interface SetupSession {
     status_label?: string;
     /** When it started. Unix timestamp in seconds. */
     created: number;
+    /** Round 38: when it finished; null while it runs. Unix timestamp in seconds. */
+    finished_at?: number | null;
   } | null;
   /** Round 35: the plan's batched owner questions (the same as retrieveCompliancePlan owner_questions), so next_action's "as owner_questions says" can be followed from this response. Null when there is none. */
   owner_questions?: {
@@ -2277,6 +2279,17 @@ export interface Verification {
   plan_status: "action_required" | "verifying" | "compliant" | "blocked" | null;
   /** The plan status in words to show a person, from the same counts as the summary ("1 fix needed · 2 to set up", "1 decision for you"; else action_required "Fixes needed", blocked "Your call"), "Checks still running (N)" while checks are still running (verifying), compliant "Checks pass"; while an agent works the site and everything left waits for a deploy or the owner (next_action done_for_now): "Waiting on deploy and you" or "Waiting on deploy". Show this, never the machine value (`compliant` is a status name, not a legal conclusion). */
   plan_status_label?: string | null;
+  /** Open plan tasks this re-check (or the checks it started) found, new since the plan was read before it: work them too. Omitted when there are none. */
+  new_tasks?: Array<{
+    /** Task id. */
+    id: string;
+    /** Task key. */
+    key: string;
+    /** Task title. */
+    title: string;
+    /** What found it (a scan of a page, the read of your Stripe settings, ...). */
+    found_by: string | null;
+  }>;
   next_action: PlanNextAction;
   /** When it was requested. Unix timestamp in seconds. */
   created: number;
@@ -2304,9 +2317,9 @@ export interface VerifyTaskParams {
     /** HTML body. */
     html?: string;
   };
-  /** email_copy tasks: check the email against this plan only (its name, e.g. "Annual"). */
+  /** email_copy tasks: check the email against this plan only (its name, e.g. "Annual"). Stripe Checkout params tasks: judge (and wait for) only this plan's Checkout params. */
   plan?: string;
-  /** email_copy tasks: check the email against the plan with this Stripe Price id only. */
+  /** email_copy tasks: check the email against the plan with this Stripe Price id only. Stripe Checkout params tasks: judge only the params that sell this Price. */
   price_id?: string;
   /** Kept for compatibility: a task that is already done (or declined) is always re-checked now (Stripe re-read, registered checkout configs judged again, a fresh evaluation or a confirming scan), never answered from its last result. A task closed without anything observed passing (superseded, no longer applicable, or a person's decision) answers not_checked: nothing to verify. */
   recheck?: boolean;
@@ -4885,6 +4898,8 @@ export interface TestRun {
   finished: number | null;
   /** The same as finished (the name verifications use): when the run finished; null while it runs. Unix timestamp in seconds. */
   completed: number | null;
+  /** Round 38: the same as finished (unix seconds): when the run finished; null while it runs. Unix timestamp in seconds. */
+  finished_at: number | null;
   /** How long the run took, from started (or created) to finished, in seconds; null while it runs. */
   duration_seconds: number | null;
   /** Lifecycle steps in order. */
