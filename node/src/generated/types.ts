@@ -128,6 +128,10 @@ export interface DeviceAuthorizationParams {
   client?: SetupClient;
   /** Site URL detected in the project (shown on the approval screen; the test-mode site is created for it). */
   site_url?: string;
+  /** Page where customers subscribe (pricing page or checkout). Carried into the setup session and the test-mode site. */
+  checkout_url?: string;
+  /** Account page where subscribers manage or cancel. Carried into the setup session. */
+  account_url?: string;
   /** Project name. */
   project_name?: string;
   /** Detected framework. */
@@ -291,6 +295,13 @@ export type GoLive = {
   }>;
   /** What the agent tells the person instead of "done": set up in test mode, N steps left before real customers. */
   summary: string;
+  /** Steps Checkbox closed by inference from what the billing platform showed (the Stripe Terms of Service URL, which Stripe does not report directly), each with the reason. Tell the owner these too. Absent when none. */
+  closed?: Array<{
+    /** Stable step key. */
+    key: "verify_domain" | "stripe_terms_url" | "live_stripe_key" | "live_portal_cancel" | "live_checkout" | "deactivate_old_live_link" | "swap_test_urls" | "promote_site";
+    /** Why Checkbox closed the step, in plain words (what Stripe showed). */
+    text: string;
+  }>;
 } | null;
 
 /** One step of the setup checklist. */
@@ -377,6 +388,8 @@ export interface SetupSession {
   install: {
     /** The exact tag to put in <head> of the homepage, pricing, checkout / sign-up and account pages (not needed on every page). */
     script_tag: string | null;
+    /** The same tag pinned to the current snippet release with Subresource Integrity (integrity + crossorigin): the bytes never change until you update the tag (/s/latest.json names newer releases). Null when the deployment has no pinned release. */
+    pinned_script_tag: string | null;
     /** The site's public snippet key: the data-key of script_tag (and the local part of inbound_email). Use only this key in the snippet tag. */
     snippet_key: string | null;
     /** A different key: the account's test-mode publishable key (pk_test_…) for Checkbox Elements (<checkbox-disclosure>) and consent receipts (data-publishable-key). Not the snippet's data-key. */
@@ -1255,6 +1268,7 @@ export interface Site {
   latest_scan?: Scan;
   unverified_scan: UnverifiedScan;
   domain_verification?: DomainVerification;
+  next_action?: NextAction;
 }
 
 /** A page of sites, newest first. */
@@ -2526,6 +2540,17 @@ export interface NoticeSettings {
   real_sends: "test_mode" | "confirmed" | "needs_confirmation" | "off";
   /** Where subscribers cancel online (site domain, hosted cancellation page or billing portal). */
   cancel_url: string | null;
+  /** Round 36: on updateNoticeSettings, the plan's email tasks Checkbox Notices now covers (no longer on your to-do list). An empty list when none; absent on retrieve. */
+  closed_tasks?: Array<{
+    /** The plan task (task_…). */
+    id: string;
+    /** The task key. */
+    key: string;
+    /** The task title. */
+    title: string;
+    /** Its plan status now: pending_live_check (Checkbox Notices sends it; it completes on the first real send or a test run) or done. */
+    status: string;
+  }>;
   /** Round 35: set when every notice links to cancel_url while Checkbox has not seen a working online cancellation (cancel.online_available is not passing). Fix the cancel option there, or point cancel_url at one that works (e.g. the hosted cancellation page). */
   cancel_url_warning?: string | null;
   /** Hex brand colour. */
@@ -4731,7 +4756,7 @@ export interface TestRunStep {
   observations: Record<string, unknown>;
   /** Evidence records (screenshots, page captures, raw emails) behind the step. */
   evidence: Array<string>;
-  /** Warning or failure code of the step (stable): key_missing, key_not_test_mode, key_invalid, key_permission_missing, checkout_config_missing, price_not_in_test_mode, checkout_session_failed, checkout_page_unreadable, checkout_not_completed, subscription_create_failed, test_clock_failed, no_email_received_within, reminder_not_received, portal_not_configured, cancel_not_completed, cancellation_email_not_received, checkout_url_missing, real_checkout_not_completed, payment_link_not_found, webhook_not_delivered, reminder_outside_window, reminder_timing_not_observed, cancel_flow_not_configured, cancel_not_confirmed_in_stripe, acknowledgment_content_incomplete, required_notice_skipped, cancel_replaced_by_other_subscription, not_judged, scan_config_missing, domain_not_verified, scanner_failed, stripe_api_error, timeout, canceled, internal_error. */
+  /** Warning or failure code of the step (stable): key_missing, key_not_test_mode, key_invalid, key_permission_missing, checkout_config_missing, price_not_in_test_mode, checkout_session_failed, checkout_page_unreadable, checkout_not_completed, subscription_create_failed, test_clock_failed, no_email_received_within, reminder_not_received, portal_not_configured, cancel_not_completed, cancellation_email_not_received, checkout_url_missing, real_checkout_not_completed, payment_link_not_found, webhook_not_delivered, reminder_outside_window, reminder_timing_not_observed, cancel_flow_not_configured, cancel_not_confirmed_in_stripe, acknowledgment_content_incomplete, required_notice_skipped, cancel_replaced_by_other_subscription, cancel_own_control_failed, cancel_own_control_not_tested, not_judged, scan_config_missing, domain_not_verified, scanner_failed, stripe_api_error, timeout, canceled, internal_error. */
   code: string | null;
   fix: TestRunFix;
 }
@@ -4791,7 +4816,7 @@ export interface TestRun {
   steps: Array<TestRunStep>;
   /** Why the run stopped (failed / canceled runs). */
   failure: {
-    /** Stable failure code: key_missing, key_not_test_mode, key_invalid, key_permission_missing, checkout_config_missing, price_not_in_test_mode, checkout_session_failed, checkout_page_unreadable, checkout_not_completed, subscription_create_failed, test_clock_failed, no_email_received_within, reminder_not_received, portal_not_configured, cancel_not_completed, cancellation_email_not_received, checkout_url_missing, real_checkout_not_completed, payment_link_not_found, webhook_not_delivered, reminder_outside_window, reminder_timing_not_observed, cancel_flow_not_configured, cancel_not_confirmed_in_stripe, acknowledgment_content_incomplete, required_notice_skipped, cancel_replaced_by_other_subscription, not_judged, scan_config_missing, domain_not_verified, scanner_failed, stripe_api_error, timeout, canceled, internal_error. */
+    /** Stable failure code: key_missing, key_not_test_mode, key_invalid, key_permission_missing, checkout_config_missing, price_not_in_test_mode, checkout_session_failed, checkout_page_unreadable, checkout_not_completed, subscription_create_failed, test_clock_failed, no_email_received_within, reminder_not_received, portal_not_configured, cancel_not_completed, cancellation_email_not_received, checkout_url_missing, real_checkout_not_completed, payment_link_not_found, webhook_not_delivered, reminder_outside_window, reminder_timing_not_observed, cancel_flow_not_configured, cancel_not_confirmed_in_stripe, acknowledgment_content_incomplete, required_notice_skipped, cancel_replaced_by_other_subscription, cancel_own_control_failed, cancel_own_control_not_tested, not_judged, scan_config_missing, domain_not_verified, scanner_failed, stripe_api_error, timeout, canceled, internal_error. */
     code: string;
     /** What went wrong. */
     message: string;
@@ -4916,6 +4941,8 @@ export interface TestRun {
     } | null;
   } | null;
   next_action: NextAction;
+  /** Round 36: once the run finished, the site plan's status_label after it (the same words the plan, its verifications and the dashboard show, e.g. "Checks pass · 2 live checks pending"); null while the run is running or when the plan could not be read. A clean run is not the whole plan: owner steps and live checks pending stay on it. */
+  plan_status_label?: string | null;
 }
 
 /** A page of test runs, newest first. */
@@ -5542,7 +5569,7 @@ export interface CreateTestRunParams {
     cancel_url?: string;
     /** Clicks that cancel in your flow (after login / cancel_url), e.g. [{ "action": "click", "text": "Cancel subscription" }, { "action": "click", "text": "Confirm" }]. */
     cancel_steps?: Array<ScanStep>;
-    /** How your customers cancel. Default: your flow when test_account / cancel_url / cancel_steps describe it; else the Stripe portal, taken as declared when Stripe has portal cancellation on and your site links to the portal, or when the account or cancellation page you registered redirects or links to the portal; otherwise reported as a warning (cancel_flow_not_configured: the cancel worked, but how your customers cancel was not given). */
+    /** How your customers cancel. Default: your flow when test_account / cancel_url / cancel_steps describe it; else the Stripe portal, taken as declared when Stripe has portal cancellation on and your site links to the portal, or when the account or cancellation page you registered redirects or links to the portal; otherwise reported as a warning (cancel_flow_not_configured: the cancel worked, but how your customers cancel was not given). "merchant_flow" is never replaced by the portal: without test_account / cancel_url / cancel_steps, Checkbox presses the cancel option the last scan saw on your site, else the account or cancellation page you registered (a link there to the Stripe portal login link counts as your control); with none of these, the step says what to pass. */
     cancel_via?: "merchant_flow" | "stripe_portal";
     /** A test account the shopper logs into: to buy as a logged-in user (real_checkout) and to cancel through your in-app flow. Mail to its address counts when you BCC the site's Checkbox address. */
     test_account?: {

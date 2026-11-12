@@ -138,7 +138,6 @@ const startingAfter = z.string().max(100).optional().describe('Pagination cursor
 
 /** Plan fields agents reach for, mapped to the setup field (plans[] amounts are minor units). */
 const PLAN_FIELD_HINTS: Readonly<Record<string, string>> = Object.freeze({
-  price: 'amount (minor units: 800 = $8.00)',
   price_cents: 'amount (minor units: 800 = $8.00)',
   amount_cents: 'amount',
   unit_amount: 'amount',
@@ -151,15 +150,15 @@ const PLAN_FIELD_HINTS: Readonly<Record<string, string>> = Object.freeze({
 });
 
 const setupFactsShape = {
-  site_url: z.string().max(2048).optional().describe('Public URL of the site (production, or a preview deployment), e.g. "https://acme.example".'),
-  checkout_url: z.string().max(2048).optional().describe('Page where customers subscribe (pricing or checkout page).'),
+  site_url: z.string().max(2048).optional().describe('Public URL of the site (production or a preview), e.g. "https://acme.example".'),
+  checkout_url: z.string().max(2048).optional().describe('Pricing or checkout page.'),
   account_url: z.string().max(2048).nullable().optional().describe('Account page where subscribers manage / cancel (null clears a URL).'),
   terms_url: z.string().max(2048).nullable().optional().describe('Terms of service URL. Checkbox fetches and checks it.'),
   privacy_url: z.string().max(2048).nullable().optional().describe('Privacy policy URL.'),
   refund_url: z.string().max(2048).nullable().optional().describe('Refund policy URL.'),
   cancellation_url: z.string().max(2048).nullable().optional().describe('Cancellation policy URL, if separate from the Terms.'),
   support_email: z.string().max(320).optional().describe('Support address for subscribers.'),
-  merchant_name: z.string().max(100).optional().describe('The brand subscribers know (names the seller in generated disclosures), e.g. from the <title> or package.json (also accepted as "brand"). Default: the host name, which the plan then asks you to replace.'),
+  merchant_name: z.string().max(100).optional().describe('The brand subscribers know (names the seller in generated disclosures), e.g. from the <title> or package.json Default: the host name, which the plan asks you to replace.'),
   billing_platform: z
     .enum(['stripe', 'shopify', 'recharge', 'chargebee', 'recurly', 'paddle', 'lemon_squeezy', 'woocommerce', 'custom'])
     .optional()
@@ -180,6 +179,9 @@ const setupFactsShape = {
           intro_amount_off: z.number().int().positive().optional(),
           intro_periods: z.number().int().min(1).max(36).optional(),
           price_id: z.string().max(200).optional().describe('Stripe Price id.'),
+          // Round 36 (pilot 35 item 21, codex / dev-approver: the first call sent plans[].price in dollars and was refused).
+          // The API takes it as amount in MAJOR units and refuses a price that disagrees with amount.
+          price: z.number().positive().optional().describe('Or major units (19 = $19).'),
         },
         'plans[]',
         PLAN_FIELD_HINTS,
@@ -187,7 +189,7 @@ const setupFactsShape = {
     )
     .max(50)
     .optional()
-    .describe('Plans and prices found in the code, e.g. [{"name":"Pro","amount":1900,"currency":"usd","interval":"month","trial_days":14}]; a promo adds intro_percent_off and intro_periods. They decide which laws apply and what generated copy states.'),
+    .describe('Plans and prices found in the code, e.g. [{"name":"Pro","amount":1900,"currency":"usd","interval":"month","trial_days":14}]; a promo adds intro_percent_off and intro_periods. They decide which laws apply.'),
   project: z
     .object({
       name: z.string().max(200).optional().describe('package.json name.'),
@@ -556,6 +558,7 @@ async function setupOverOAuth(
   api: CheckboxApi,
   session: { id: string; status: string; review_url?: string; site?: string | null; business?: { site_url?: string | null } },
   ctx: ToolContext,
+  verbose = false,
 ): Promise<ToolOutput> {
   const notes = [
     `Connected to Checkbox through ${ctx.key.appName ?? ctx.clientName ?? 'this app'} with the human's approval (${ctx.key.mode} mode${ctx.key.kind === 'restricted' ? ', read-only' : ''}). No API key is needed: do not ask the human for one.`,
@@ -589,11 +592,13 @@ async function setupOverOAuth(
   return {
     headline: `Setup session ${session.id} started${session.business?.site_url ? ` for ${untrusted(session.business.site_url, 100)}` : ''}${session.site ? ` (test-mode site ${session.site})` : ''}.`,
     notes,
+    compactJson: !verbose,
     ...(next ? { next } : {}),
     data: (() => {
       const doc = { ...session, ...(fresh ?? {}) } as Record<string, unknown> & { install?: { snippet_key?: unknown }; publishable_key?: unknown };
       const keys = labelledPublicKeys(doc.install?.snippet_key, doc.publishable_key);
-      return compactSetupDoc(withoutLegacyScore({ ...doc, ...(keys.length ? { public_keys: keys } : {}), ...(firstCheck ? { first_check: firstCheck } : {}) }));
+      const out = withoutLegacyScore({ ...doc, ...(keys.length ? { public_keys: keys } : {}), ...(firstCheck ? { first_check: firstCheck } : {}) });
+      return verbose ? out : compactSetupResponse(out);
     })(),
   };
 }
@@ -607,13 +612,72 @@ export function compactSetupDoc<T>(doc: T): T {
   if (!doc || typeof doc !== 'object') return doc;
   const d = { ...(doc as Record<string, unknown>) };
   const g = d.go_live as { summary?: unknown; steps?: unknown[] } | null | undefined;
-  if (g && typeof g === 'object' && Array.isArray(g.steps)) d.go_live = { summary: g.summary ?? null, steps: g.steps.length, full: 'get_compliance_plan (go_live) or complete_setup' };
+  if (g && typeof g === 'object' && Array.isArray(g.steps)) d.go_live = { summary: g.summary ?? null, steps: g.steps.length, full: 'the go-live notes of get_compliance_plan, complete_setup, or verbose=true' };
   const st = d.stripe as { test_credential_stored?: unknown; restricted_key?: { permissions?: unknown[] } & Record<string, unknown> } | undefined;
   if (st && st.test_credential_stored === true && st.restricted_key && Array.isArray(st.restricted_key.permissions)) {
     const { permissions: _p, ...rk } = st.restricted_key;
     d.stripe = { ...st, restricted_key: rk };
   }
   return d as T;
+}
+
+/** `verbose` on the setup and plan tools (round 36, pilot 35 item 18). */
+const verboseArg = z.boolean().optional().describe('true: the full JSON object.');
+
+const CLOSED_STEPS = new Set(['done', 'skipped', 'not_applicable']);
+
+/**
+ * Round 36 (pilot 35 item 18, new-app / dev-approver: setup responses of 20-40 KB): the default setup response. On top of
+ * compactSetupDoc, the latest check's top findings become a count (get_compliance_plan and list_findings have them) and
+ * finished checklist steps keep only key, title and status. Every open step, id, status and next_action stays. Pure.
+ */
+export function compactSetupResponse<T>(doc: T): T {
+  if (!doc || typeof doc !== 'object') return doc;
+  const d = compactSetupDoc({ ...(doc as Record<string, unknown>) }) as Record<string, unknown>;
+  const c = d.compliance as Record<string, unknown> | null | undefined;
+  if (c && typeof c === 'object' && Array.isArray(c.top_findings)) {
+    const { top_findings: top, ...rest } = c;
+    d.compliance = { ...rest, top_findings_count: (top as unknown[]).length };
+  }
+  if (Array.isArray(d.steps)) {
+    d.steps = d.steps.map((st: unknown) => {
+      const x = st as { key?: unknown; title?: unknown; status?: unknown } | null;
+      return x && typeof x === 'object' && typeof x.status === 'string' && CLOSED_STEPS.has(x.status) ? { key: x.key, title: x.title, status: x.status } : st;
+    });
+  }
+  for (const k of ['setup_session', 'session']) if (d[k] && typeof d[k] === 'object') d[k] = compactSetupResponse(d[k]);
+  return d as T;
+}
+
+/** A task's next_action without what an MCP agent does not use: the CLI command, and the endpoint when a tool performs it. Pure. */
+export function slimNextAction(na: unknown, taskId?: string): unknown {
+  if (!na || typeof na !== 'object' || Array.isArray(na)) return na;
+  const { command: _command, ...rest } = na as Record<string, unknown>;
+  if (taskId && rest.task === taskId) delete rest.task;
+  if (typeof rest.mcp_tool === 'string' && rest.mcp_tool !== 'call_api') delete rest.endpoint;
+  return rest;
+}
+
+/**
+ * Round 36 (pilot 35 item 18: get_compliance_plan answered with 28-44 KB): the default plan. Open tasks as slimPlan,
+ * with `why` shortened and next_action without the CLI command; closed tasks as id, key, title, status, tier and why
+ * they closed; go_live as its summary (the notes list each step). verbose=true returns the API's full plan. Pure.
+ */
+export function compactPlan(plan: PlanLite): PlanLite {
+  const slim = slimPlan(plan);
+  const full = new Map((plan.tasks ?? []).map((t) => [t.id, t as Record<string, unknown>]));
+  const tasks = (slim.tasks ?? []).map((t) => {
+    const x = t as Record<string, unknown>;
+    if (t.status === 'done' || t.status === 'wont_fix') {
+      const f = full.get(t.id) ?? {};
+      return { id: t.id, key: x.key, title: t.title, status: t.status, tier: t.tier, compliance_status: x.compliance_status, closed_reason: f.closed_reason ?? null };
+    }
+    return { ...x, why: clipWords(x.why, 200), next_action: slimNextAction(x.next_action, t.id) };
+  });
+  const out = { ...slim, tasks } as PlanLite & Record<string, unknown>;
+  const g = out.go_live as { summary?: unknown; steps?: unknown[] } | null | undefined;
+  if (g && typeof g === 'object' && Array.isArray(g.steps)) out.go_live = { summary: g.summary ?? null, steps: g.steps.length, full: 'the notes above, or verbose=true' };
+  return out;
 }
 
 /**
@@ -671,6 +735,7 @@ const setupCheckbox: ToolDef = {
     device_code: z.string().max(200).optional().describe('From an earlier setup_checkbox call: poll that browser approval instead of starting a new one.'),
     live: z.boolean().optional().describe('Also request live-mode keys (live mode activates after domain verification). Default false: test mode only.'),
     agent: z.string().max(100).optional().describe('Which AI agent is doing this, shown to the human on the approval page, e.g. "Claude Code".'),
+    verbose: verboseArg,
   },
   scopes: ['setup_sessions:write'],
   public: true,
@@ -747,6 +812,7 @@ const setupCheckbox: ToolDef = {
       return {
         headline: `Approved. Checkbox account ready${site ? ` with test-mode site ${site}` : ''}; setup session ${res.setup_session ?? '(none)'}.`,
         notes,
+        compactJson: !args.verbose,
         ...(next ? { next } : {}),
         data: {
           ...(saved ? withoutSecrets(res) : res),
@@ -790,7 +856,7 @@ const setupCheckbox: ToolDef = {
     const body = pick(args, Object.keys(setupFactsShape));
     body.client = { name: 'checkbox-mcp', version: ctx.serverVersion, ...(args.agent || ctx.key.appName || ctx.clientName ? { agent: String(args.agent ?? ctx.key.appName ?? ctx.clientName).slice(0, 100) } : {}) };
     const session = await api.request<{ id: string; status: string; review_url?: string; site?: string | null; business?: { site_url?: string | null }; next_action?: NextAction }>('POST', '/v1/setup_sessions', { body });
-    if (ctx.key.auth === 'oauth') return setupOverOAuth(api, session, ctx);
+    if (ctx.key.auth === 'oauth') return setupOverOAuth(api, session, ctx, args.verbose === true);
     const notes = session.review_url ? [`Human review page: ${session.review_url}`] : [];
     if (session.next_action?.type === 'verify_domain') notes.push(firstCheckNote(session.next_action));
     const plansLine = sitePlansNote((session as { site_plans?: unknown }).site_plans);
@@ -798,9 +864,11 @@ const setupCheckbox: ToolDef = {
     return {
       headline: `Setup session ${session.id} started${session.business?.site_url ? ` for ${untrusted(session.business.site_url, 100)}` : ''}${session.site ? ` (test-mode site ${session.site})` : ''}.`,
       notes,
+      compactJson: !args.verbose,
       data: (() => {
         const keys = labelledPublicKeys((session as { install?: { snippet_key?: unknown } }).install?.snippet_key, (session as { publishable_key?: unknown }).publishable_key);
-        return compactSetupDoc(keys.length ? { ...withoutLegacyScore(session), public_keys: keys } : withoutLegacyScore(session));
+        const out = keys.length ? { ...withoutLegacyScore(session), public_keys: keys } : withoutLegacyScore(session);
+        return args.verbose ? out : compactSetupResponse(out);
       })(),
     };
   },
@@ -856,7 +924,7 @@ const getSetupStatus: ToolDef = {
       if (ro && !res.unverified_scan?.queued) notes.push(ro);
       const pl = sitePlansNote((res.setup_session as { site_plans?: unknown } | undefined)?.site_plans);
       if (pl) notes.push(pl);
-      return { headline: `Re-checked setup session ${id}.`, ...(notes.length ? { notes } : {}), data: withoutLegacyScore(res), next: nextActionOf(res) ?? nextActionOf(res.setup_session) ?? nextActionOf(res.session) };
+      return { headline: `Re-checked setup session ${id}.`, ...(notes.length ? { notes } : {}), compactJson: true, data: compactSetupResponse(withoutLegacyScore(res)), next: nextActionOf(res) ?? nextActionOf(res.setup_session) ?? nextActionOf(res.session) };
     }
     const session = await api.request<{ id: string; status: string; unverified_scan?: unknown; site_plans?: unknown; go_live?: GoLiveLite | null; next_action?: { type?: string }; steps?: Array<{ key?: string; status?: string; title?: string; summary?: string }> }>('GET', `/v1/setup_sessions/${enc(id)}`);
     const open = (session.steps ?? []).filter((s) => s.status && !['done', 'skipped', 'not_applicable'].includes(s.status));
@@ -866,7 +934,8 @@ const getSetupStatus: ToolDef = {
       headline: `Setup session ${session.id}: ${session.status}; ${open.length} checklist step(s) open.`,
       // The policies step says what an unverified preview read (or that the pages wait for domain verification).
       notes: [...open.slice(0, 8).map((s) => `${s.status}: ${s.title ?? s.key}${s.key === 'policies' && s.summary ? ` (${s.summary.slice(0, 240)})` : ''}`), ...(ro ? [ro] : []), ...(plansLine ? [plansLine] : []), ...(session.next_action?.type === 'done' ? goLiveNotes(session.go_live) : [])],
-      data: withoutLegacyScore(session),
+      compactJson: true,
+      data: compactSetupResponse(withoutLegacyScore(session)),
     };
   },
 };
@@ -904,7 +973,7 @@ const updateSetup: ToolDef = {
     const notes = Array.isArray(args.plans) && args.plans.length
       ? ['Plans saved: Checkbox re-evaluates the site with them now, so get_compliance_plan lists each plan\'s tasks (e.g. the trial reminder of a plan with a trial). If one seems missing, call verify_site to re-check at once.']
       : [];
-    return { headline: `Updated setup session ${session.id}.`, notes, data: withoutLegacyScore(session) };
+    return { headline: `Updated setup session ${session.id}.`, notes, compactJson: true, data: compactSetupResponse(withoutLegacyScore(session)) };
   },
 };
 
@@ -1025,12 +1094,12 @@ const getCompliancePlan: ToolDef = {
   title: 'Get the compliance plan (ordered tasks)',
   description: [
     'The main tool after setup. Returns the ordered tasks that make the site pass the automatic-renewal checks, recomputed from the latest observations.',
-    'Each task has: requirement + legal citation, why (what Checkbox observed), where (file / component / URL / CSS selector / Stripe object), change (exact unified-diff template, copy text or Stripe params), and verify (how to check).',
+    'Each task here is a summary (id, status, why, where, change type, next_action); get_task has the full change (diff, copy or Stripe params) and its legal citation.',
     'Plan status: action_required (apply open tasks), verifying (waiting for confirming observations), compliant (done: the checks pass — "pending_live_check" tasks count as passing: they complete on their own or with a proof run), blocked (only human questions — "Your call" — left).',
-    'Tasks are tagged tier required / recommended / extra. Only required tasks matter for compliance; recommended and extra tasks are optional suggestions (mention them once, do not push them).',
+    'Only tier "required" tasks count; "recommended" and "extra" tasks are optional suggestions (mention them once, do not push them).',
     'Loop: apply the first open required task in the code → verify_task → get_compliance_plan → … until the checks pass (status compliant). Tasks with status "manual" carry a question with a recommended answer: ask the HUMAN, then answer_task. Never invent answers.',
   ].join('\n'),
-  input: { site: siteId.optional() },
+  input: { site: siteId.optional(), verbose: verboseArg },
   scopes: ['compliance_plans:read'],
   annotations: { ...ro, title: 'Compliance plan' },
   async run(args, { api }) {
@@ -1071,8 +1140,10 @@ const getCompliancePlan: ToolDef = {
         ...(plan.status === 'compliant' ? await reviewHint(api, site, 'plan_compliant') : []),
       ],
       // Normal-round pilot (sveltekit): the full plan (53K characters) was cut mid-JSON by the client. The plan here is a
-      // compact summary of every task; get_task returns one task in full.
-      data: slimPlan(shown),
+      // compact summary of every task; get_task returns one task in full. Round 36 (pilot 35 item 18): compact JSON by
+      // default, the API's full plan with verbose=true.
+      compactJson: !args.verbose,
+      data: args.verbose ? shown : compactPlan(shown),
     };
   },
 };
@@ -1081,7 +1152,7 @@ const getTask: ToolDef = {
   name: 'get_task',
   title: 'Get one compliance task',
   description:
-    'One task of the compliance plan with the full change to apply (unified-diff template with machine-applicable edits, copy, or Stripe params), where to apply it, the legal requirement, its last verification and next_action. Use it when the plan JSON was truncated or before applying a task.',
+    'One plan task in full: the change to apply (unified-diff template with machine-applicable edits, copy or Stripe params), where, the legal requirement, its last verification and next_action. Call it before applying a task.',
   input: { task: z.string().max(100).describe('Task id (task_…) from get_compliance_plan.') },
   scopes: ['compliance_plans:read'],
   annotations: { ...ro, title: 'Task' },
@@ -1401,7 +1472,7 @@ const getTestRun: ToolDef = {
       if (!list.data.length) throw new ToolError(`Site ${site} has no test run yet.`, { type: 'start_test_run', message: 'Call start_test_run.', operation_id: 'createTestRun' });
       id = list.data[0]!.id;
     }
-    type RunLite = { id: string; status: string; status_label?: string; phase?: string; next_action?: NextAction | null; waiting_for?: { what: string; until: number | null; step?: number | null; steps_total?: number | null; minutes_left?: number | null } | null; steps?: Array<{ key?: string; title?: string; status?: string; code?: string }> };
+    type RunLite = { id: string; status: string; status_label?: string; plan_status_label?: string | null; phase?: string; next_action?: NextAction | null; waiting_for?: { what: string; until: number | null; step?: number | null; steps_total?: number | null; minutes_left?: number | null } | null; steps?: Array<{ key?: string; title?: string; status?: string; code?: string }> };
     const wait = typeof args.wait === 'number' && args.wait > 0 ? Math.min(TEST_RUN_MAX_WAIT, Math.floor(args.wait)) : 0;
     const deadline = Date.now() + wait * 1000;
     // The API long-polls up to 30 s per call and answers on every step; keep asking until the run finishes or time is up.
@@ -1415,7 +1486,7 @@ const getTestRun: ToolDef = {
     const progress = w ? [w.step && w.steps_total ? `step ${w.step} of ${w.steps_total}` : '', w.minutes_left ? `about ${w.minutes_left} min left` : ''].filter(Boolean).join(', ') : '';
     const waiting = w ? `Waiting for: ${w.what}${w.until ? ` (until ${new Date(w.until * 1000).toISOString().slice(0, 16).replace('T', ' ')} UTC at the latest)` : ''}${progress ? ` [${progress}]` : ''}` : null;
     return {
-      headline: `Test run ${run.id}: ${run.status_label ?? statusLine(run.status)}${run.phase && run.status !== 'succeeded' && run.status !== 'failed' ? ` (phase ${run.phase})` : ''}.`,
+      headline: `Test run ${run.id}: ${run.status_label ?? statusLine(run.status)}${run.phase && run.status !== 'succeeded' && run.status !== 'failed' ? ` (phase ${run.phase})` : ''}.${run.plan_status_label ? ` Plan after this run: ${run.plan_status_label}.` : ''}`,
       notes: [...(waiting ? [waiting] : []), ...(run.steps ?? []).map((s) => `${s.status ?? '?'}: ${s.title ?? s.key}${s.code ? ` (${s.code})` : ''}`)].slice(0, 13),
       data: run,
       ...(next ? { next } : {}),
@@ -1561,12 +1632,12 @@ const checkPageHtml: ToolDef = {
   title: 'Check a checkout / pricing page (HTML or URL)',
   description: [
     'Checks a whole checkout or pricing page: finds the purchase button, the renewal disclosure, consent checkboxes and terms/cancel links, and evaluates them. Send html = the RENDERED page (after JavaScript; for React/Next pages, render it or paste the server output) — this is how to check a page before deploying.',
-    'Or send url to fetch a live public page (live mode on an activated account only; test keys must send html).',
+    'Or send url to fetch a public page (live keys; test keys: your registered site\'s origin).',
     'Static HTML cannot measure styling, so placement/styling passes come back as needs_review until a scan confirms; failures are real. When it fails, replacement holds verified drop-in markup.',
   ].join('\n'),
   input: {
     html: z.string().max(1_000_000).optional().describe('Rendered checkout page HTML. Give html or url.'),
-    url: z.string().max(2048).optional().describe('Live public page URL to fetch instead (live, activated accounts).'),
+    url: z.string().max(2048).optional().describe('Public page URL to fetch instead.'),
     page_kind: z.enum(['checkout', 'pricing']).optional().describe('Default checkout.'),
     terms: planTerms.optional().describe('The plan sold on the page. merchant_name / cancel_url alone are fine (no price compared).'),
     plans: z.array(strictObject(planTermsShape, 'plans[]')).max(20).optional().describe('Multi-plan pricing page: EVERY plan it sells (price, interval, trial_days each). Each plan card is judged against its own plan; plan_replacements gives each plan its own markup for its own button.'),

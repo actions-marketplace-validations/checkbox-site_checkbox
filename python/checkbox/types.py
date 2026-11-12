@@ -185,6 +185,10 @@ DeviceAuthorizationParams = TypedDict(
         "client": "SetupClient",
         #: Site URL detected in the project (shown on the approval screen; the test-mode site is created for it). (optional)
         "site_url": str,
+        #: Page where customers subscribe (pricing page or checkout). Carried into the setup session and the test-mode site. (optional)
+        "checkout_url": str,
+        #: Account page where subscribers manage or cancel. Carried into the setup session. (optional)
+        "account_url": str,
         #: Project name. (optional)
         "project_name": str,
         #: Detected framework. (optional)
@@ -403,6 +407,18 @@ GoLiveValueStepsItem = TypedDict(
 )
 
 
+GoLiveValueClosedItem = TypedDict(
+    "GoLiveValueClosedItem",
+    {
+        #: Stable step key.
+        "key": Literal["verify_domain", "stripe_terms_url", "live_stripe_key", "live_portal_cancel", "live_checkout", "deactivate_old_live_link", "swap_test_urls", "promote_site"],
+        #: Why Checkbox closed the step, in plain words (what Stripe showed).
+        "text": str,
+    },
+    total=False,
+)
+
+
 #: Test mode only: the steps left before real customers are covered, with who takes each (the compliance plan's go_live). When next_action is done, report "set up in test mode; N steps before real customers" (go_live.summary), never a plain done. Null in live mode or before the first checks.
 GoLiveValue = TypedDict(
     "GoLiveValue",
@@ -417,6 +433,8 @@ GoLiveValue = TypedDict(
         "steps": List["GoLiveValueStepsItem"],
         #: What the agent tells the person instead of "done": set up in test mode, N steps left before real customers.
         "summary": str,
+        #: Steps Checkbox closed by inference from what the billing platform showed (the Stripe Terms of Service URL, which Stripe does not report directly), each with the reason. Tell the owner these too. Absent when none. (optional)
+        "closed": List["GoLiveValueClosedItem"],
     },
     total=False,
 )
@@ -510,6 +528,8 @@ SetupSessionInstall = TypedDict(
     {
         #: The exact tag to put in <head> of the homepage, pricing, checkout / sign-up and account pages (not needed on every page).
         "script_tag": Optional[str],
+        #: The same tag pinned to the current snippet release with Subresource Integrity (integrity + crossorigin): the bytes never change until you update the tag (/s/latest.json names newer releases). Null when the deployment has no pinned release.
+        "pinned_script_tag": Optional[str],
         #: The site's public snippet key: the data-key of script_tag (and the local part of inbound_email). Use only this key in the snippet tag.
         "snippet_key": Optional[str],
         #: A different key: the account's test-mode publishable key (pk_test_…) for Checkbox Elements (<checkbox-disclosure>) and consent receipts (data-publishable-key). Not the snippet's data-key.
@@ -1849,6 +1869,8 @@ Site = TypedDict(
         "unverified_scan": "UnverifiedScan",
         #: (optional)
         "domain_verification": "DomainVerification",
+        #: (optional)
+        "next_action": "NextAction",
     },
     total=False,
 )
@@ -3862,6 +3884,22 @@ NoticeSendList = TypedDict(
 )
 
 
+NoticeSettingsClosedTasksItem = TypedDict(
+    "NoticeSettingsClosedTasksItem",
+    {
+        #: The plan task (task_…).
+        "id": str,
+        #: The task key.
+        "key": str,
+        #: The task title.
+        "title": str,
+        #: Its plan status now: pending_live_check (Checkbox Notices sends it; it completes on the first real send or a test run) or done.
+        "status": str,
+    },
+    total=False,
+)
+
+
 #: Who Checkbox can send notices to (null when unknown).
 NoticeSettingsSubscribers = TypedDict(
     "NoticeSettingsSubscribers",
@@ -3964,6 +4002,8 @@ NoticeSettings = TypedDict(
         "real_sends": Literal["test_mode", "confirmed", "needs_confirmation", "off"],
         #: Where subscribers cancel online (site domain, hosted cancellation page or billing portal).
         "cancel_url": Optional[str],
+        #: Round 36: on updateNoticeSettings, the plan's email tasks Checkbox Notices now covers (no longer on your to-do list). An empty list when none; absent on retrieve. (optional)
+        "closed_tasks": List["NoticeSettingsClosedTasksItem"],
         #: Round 35: set when every notice links to cancel_url while Checkbox has not seen a working online cancellation (cancel.online_available is not passing). Fix the cancel option there, or point cancel_url at one that works (e.g. the hosted cancellation page). (optional)
         "cancel_url_warning": Optional[str],
         #: Hex brand colour.
@@ -7217,7 +7257,7 @@ TestRunStep = TypedDict(
         "observations": Dict[str, Any],
         #: Evidence records (screenshots, page captures, raw emails) behind the step.
         "evidence": List[str],
-        #: Warning or failure code of the step (stable): key_missing, key_not_test_mode, key_invalid, key_permission_missing, checkout_config_missing, price_not_in_test_mode, checkout_session_failed, checkout_page_unreadable, checkout_not_completed, subscription_create_failed, test_clock_failed, no_email_received_within, reminder_not_received, portal_not_configured, cancel_not_completed, cancellation_email_not_received, checkout_url_missing, real_checkout_not_completed, payment_link_not_found, webhook_not_delivered, reminder_outside_window, reminder_timing_not_observed, cancel_flow_not_configured, cancel_not_confirmed_in_stripe, acknowledgment_content_incomplete, required_notice_skipped, cancel_replaced_by_other_subscription, not_judged, scan_config_missing, domain_not_verified, scanner_failed, stripe_api_error, timeout, canceled, internal_error.
+        #: Warning or failure code of the step (stable): key_missing, key_not_test_mode, key_invalid, key_permission_missing, checkout_config_missing, price_not_in_test_mode, checkout_session_failed, checkout_page_unreadable, checkout_not_completed, subscription_create_failed, test_clock_failed, no_email_received_within, reminder_not_received, portal_not_configured, cancel_not_completed, cancellation_email_not_received, checkout_url_missing, real_checkout_not_completed, payment_link_not_found, webhook_not_delivered, reminder_outside_window, reminder_timing_not_observed, cancel_flow_not_configured, cancel_not_confirmed_in_stripe, acknowledgment_content_incomplete, required_notice_skipped, cancel_replaced_by_other_subscription, cancel_own_control_failed, cancel_own_control_not_tested, not_judged, scan_config_missing, domain_not_verified, scanner_failed, stripe_api_error, timeout, canceled, internal_error.
         "code": Optional[str],
         "fix": "TestRunFix",
     },
@@ -7252,7 +7292,7 @@ TestRunWaitingFor = TypedDict(
 TestRunFailure = TypedDict(
     "TestRunFailure",
     {
-        #: Stable failure code: key_missing, key_not_test_mode, key_invalid, key_permission_missing, checkout_config_missing, price_not_in_test_mode, checkout_session_failed, checkout_page_unreadable, checkout_not_completed, subscription_create_failed, test_clock_failed, no_email_received_within, reminder_not_received, portal_not_configured, cancel_not_completed, cancellation_email_not_received, checkout_url_missing, real_checkout_not_completed, payment_link_not_found, webhook_not_delivered, reminder_outside_window, reminder_timing_not_observed, cancel_flow_not_configured, cancel_not_confirmed_in_stripe, acknowledgment_content_incomplete, required_notice_skipped, cancel_replaced_by_other_subscription, not_judged, scan_config_missing, domain_not_verified, scanner_failed, stripe_api_error, timeout, canceled, internal_error.
+        #: Stable failure code: key_missing, key_not_test_mode, key_invalid, key_permission_missing, checkout_config_missing, price_not_in_test_mode, checkout_session_failed, checkout_page_unreadable, checkout_not_completed, subscription_create_failed, test_clock_failed, no_email_received_within, reminder_not_received, portal_not_configured, cancel_not_completed, cancellation_email_not_received, checkout_url_missing, real_checkout_not_completed, payment_link_not_found, webhook_not_delivered, reminder_outside_window, reminder_timing_not_observed, cancel_flow_not_configured, cancel_not_confirmed_in_stripe, acknowledgment_content_incomplete, required_notice_skipped, cancel_replaced_by_other_subscription, cancel_own_control_failed, cancel_own_control_not_tested, not_judged, scan_config_missing, domain_not_verified, scanner_failed, stripe_api_error, timeout, canceled, internal_error.
         "code": str,
         #: What went wrong.
         "message": str,
@@ -7499,6 +7539,8 @@ TestRun = TypedDict(
         #: What the run proves and the evidence beyond the steps (Stripe runs).
         "proof": Optional["TestRunProof"],
         "next_action": "NextAction",
+        #: Round 36: once the run finished, the site plan's status_label after it (the same words the plan, its verifications and the dashboard show, e.g. "Checks pass · 2 live checks pending"); null while the run is running or when the plan could not be read. A clean run is not the whole plan: owner steps and live checks pending stay on it. (optional)
+        "plan_status_label": Optional[str],
     },
     total=False,
 )
@@ -8422,7 +8464,7 @@ CreateTestRunParamsStripe = TypedDict(
         "cancel_url": str,
         #: Clicks that cancel in your flow (after login / cancel_url), e.g. [{ "action": "click", "text": "Cancel subscription" }, { "action": "click", "text": "Confirm" }]. (optional)
         "cancel_steps": List["ScanStep"],
-        #: How your customers cancel. Default: your flow when test_account / cancel_url / cancel_steps describe it; else the Stripe portal, taken as declared when Stripe has portal cancellation on and your site links to the portal, or when the account or cancellation page you registered redirects or links to the portal; otherwise reported as a warning (cancel_flow_not_configured: the cancel worked, but how your customers cancel was not given). (optional)
+        #: How your customers cancel. Default: your flow when test_account / cancel_url / cancel_steps describe it; else the Stripe portal, taken as declared when Stripe has portal cancellation on and your site links to the portal, or when the account or cancellation page you registered redirects or links to the portal; otherwise reported as a warning (cancel_flow_not_configured: the cancel worked, but how your customers cancel was not given). "merchant_flow" is never replaced by the portal: without test_account / cancel_url / cancel_steps, Checkbox presses the cancel option the last scan saw on your site, else the account or cancellation page you registered (a link there to the Stripe portal login link counts as your control); with none of these, the step says what to pass. (optional)
         "cancel_via": Literal["merchant_flow", "stripe_portal"],
         #: A test account the shopper logs into: to buy as a logged-in user (real_checkout) and to cancel through your in-app flow. Mail to its address counts when you BCC the site's Checkbox address. (optional)
         "test_account": "CreateTestRunParamsStripeTestAccount",
