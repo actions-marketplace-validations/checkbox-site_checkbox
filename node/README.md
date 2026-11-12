@@ -1,7 +1,8 @@
 # Checkbox Node.js SDK
 
 Automatic-renewal-law compliance (ROSCA, California Bus. & Prof. Code § 17600, New York GBL § 527-a and ~26 other state
-laws) for subscription businesses, as an API. Zero runtime dependencies (global `fetch`; Node 20+, Bun, Deno, edge).
+laws) for subscription businesses, as an API: auto-renewal law checks for Stripe Checkout, click-to-cancel
+cancellation and renewal reminder emails. Zero runtime dependencies (global `fetch`; Node 20+, Bun, Deno, edge).
 Free to use.
 
 > **Install.** `npm install @checkbox-site/node` (Node 20+). Never install the unscoped npm package `checkbox`: it is an

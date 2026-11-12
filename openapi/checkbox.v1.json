@@ -56,7 +56,7 @@
     },
     {
       "name": "Certificates",
-      "description": "Signed monitoring certificates with a public verification page and badge. A certificate means the site passed the checks Checkbox ran, not that it is legally compliant. Not legal advice."
+      "description": "Signed check records (API name: certificates) with a public verification page and badge. A check record means the site passed the checks Checkbox ran, not that it is legally compliant. Not legal advice."
     },
     {
       "name": "Notices",
@@ -1365,7 +1365,7 @@
                   "string",
                   "null"
                 ],
-                "description": "Account page.",
+                "description": "Account page where subscribers manage and cancel.",
                 "example": null
               },
               "terms_url": {
@@ -1373,7 +1373,7 @@
                   "string",
                   "null"
                 ],
-                "description": "Terms of service.",
+                "description": "Terms of service page (fetched and checked).",
                 "example": "https://acme.com/terms"
               },
               "privacy_url": {
@@ -1381,7 +1381,7 @@
                   "string",
                   "null"
                 ],
-                "description": "Privacy policy.",
+                "description": "Privacy policy page.",
                 "example": "https://acme.com/privacy"
               },
               "refund_url": {
@@ -1389,7 +1389,7 @@
                   "string",
                   "null"
                 ],
-                "description": "Refund policy.",
+                "description": "Refund policy page.",
                 "example": null
               },
               "cancellation_url": {
@@ -1397,7 +1397,7 @@
                   "string",
                   "null"
                 ],
-                "description": "Cancellation policy.",
+                "description": "Separate cancellation policy page (checked like the Terms), not the page where subscribers cancel (account_url).",
                 "example": null
               },
               "support_email": {
@@ -1405,7 +1405,7 @@
                   "string",
                   "null"
                 ],
-                "description": "Support email.",
+                "description": "Support address subscribers can write to.",
                 "example": "support@acme.com"
               },
               "merchant_name": {
@@ -1421,7 +1421,7 @@
                   "string",
                   "null"
                 ],
-                "description": "Billing platform.",
+                "description": "Billing platform (stripe, shopify, recharge, …).",
                 "example": "stripe"
               },
               "plans": {
@@ -1429,7 +1429,7 @@
                 "items": {
                   "$ref": "#/components/schemas/SetupPlan"
                 },
-                "description": "Plans.",
+                "description": "Plans and prices as registered (the free-trial and term facts the law depends on).",
                 "example": []
               }
             },
@@ -1832,13 +1832,24 @@
                         "why": "Test runs fast-forward through trial end and renewal."
                       }
                     ]
+                  },
+                  "steps": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "The same key as plain numbered steps for the owner (the permissions grouped: Write, then Read). Send them as they are.",
+                    "example": [
+                      "Open https://dashboard.stripe.com/test/apikeys (Stripe in Test mode) and click “Create restricted key”."
+                    ]
                   }
                 },
                 "required": [
                   "recommended",
                   "reason",
                   "create_url",
-                  "permissions"
+                  "permissions",
+                  "steps"
                 ],
                 "description": "Restricted-key recommendation.",
                 "example": {
@@ -1851,6 +1862,9 @@
                       "access": "write",
                       "why": "Test runs fast-forward through trial end and renewal."
                     }
+                  ],
+                  "steps": [
+                    "Open https://dashboard.stripe.com/test/apikeys (Stripe in Test mode) and click “Create restricted key”."
                   ]
                 }
               }
@@ -1878,6 +1892,9 @@
                     "access": "write",
                     "why": "Test runs fast-forward through trial end and renewal."
                   }
+                ],
+                "steps": [
+                  "Open https://dashboard.stripe.com/test/apikeys (Stripe in Test mode) and click “Create restricted key”."
                 ]
               }
             }
@@ -1940,8 +1957,18 @@
                   "properties": {
                     "id": {
                       "type": "string",
-                      "description": "\"email_sender\" (who sends the required emails), \"notices_support_email\" / \"notices_cancel_timing\" (what Checkbox Notices needs before it sends), \"stripe_terms_url\" (a step only the owner takes in the Stripe Dashboard: the Terms of Service URL Stripe needs before it collects consent, in test mode too), or the id of the task whose question it is.",
+                      "description": "The id answerTask takes: the id of the task whose question it is (task_…), or the question's name for those that are not one task's: \"email_sender\", \"notices_support_email\", \"notices_cancel_timing\", \"stripe_terms_url\", \"stripe_portal_login\", \"replace_payment_link\" (send site with the answer when the account has several sites). Every listed question is answered with answerTask and this id.",
                       "example": "email_sender"
+                    },
+                    "key": {
+                      "type": "string",
+                      "description": "What the question is: \"email_sender\" (who sends the required emails), \"notices_support_email\" / \"notices_cancel_timing\" (what Checkbox Notices needs before it sends), \"stripe_terms_url\" (the Terms of Service URL Stripe needs before it collects consent, in test mode too), \"stripe_portal_login\" / \"replace_payment_link\" (Stripe Dashboard steps of a Payment Link site), or the key of the task whose question it is.",
+                      "example": "email_sender"
+                    },
+                    "added_later": {
+                      "type": "boolean",
+                      "description": "true when the question was not in the first batch the owner was asked: if they already answered the others, ask only these. Absent otherwise.",
+                      "example": true
                     },
                     "text": {
                       "type": "string",
@@ -1982,16 +2009,19 @@
                   },
                   "required": [
                     "id",
+                    "key",
                     "text",
                     "options",
                     "tasks",
                     "on_answer"
                   ]
                 },
-                "description": "Every choice only the owner makes, together.",
+                "description": "Every choice only the owner makes, together. Empty when nothing is left to ask and only closed questions are reported.",
                 "example": [
                   {
                     "id": "email_sender",
+                    "key": "email_sender",
+                    "added_later": true,
                     "text": "Who sends the required emails (renewal reminder, charge notice): you (your code), or Checkbox Notices?",
                     "options": [
                       "me",
@@ -2001,6 +2031,56 @@
                     "on_answer": {
                       "checkbox": "One call: updateNoticeSettings { mode: \"checkbox\", add_kinds: [\"renewal_reminder\"] }."
                     }
+                  }
+                ]
+              },
+              "closed": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "description": "The question's id as it was listed.",
+                      "example": "stripe_terms_url"
+                    },
+                    "key": {
+                      "type": "string",
+                      "description": "What the question was (see questions[].key).",
+                      "example": "stripe_terms_url"
+                    },
+                    "text": {
+                      "type": "string",
+                      "description": "The question as it was listed.",
+                      "example": "In the Stripe Dashboard, Settings → Public details, set your Terms of Service URL."
+                    },
+                    "reason": {
+                      "type": "string",
+                      "description": "Why it closed without an answer, in plain words. Tell the owner they need not answer it.",
+                      "example": "Closed: the Terms of Service URL in the Stripe Dashboard (Settings > Public details) is set."
+                    },
+                    "closed": {
+                      "type": "integer",
+                      "description": "When Checkbox saw it closed. Unix timestamp in seconds.",
+                      "example": 1793318400
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "key",
+                    "text",
+                    "reason",
+                    "closed"
+                  ]
+                },
+                "description": "Questions listed earlier that closed by themselves (reported for a day), each with the reason. Absent when none.",
+                "example": [
+                  {
+                    "id": "stripe_terms_url",
+                    "key": "stripe_terms_url",
+                    "text": "In the Stripe Dashboard, Settings → Public details, set your Terms of Service URL.",
+                    "reason": "Closed: the Terms of Service URL in the Stripe Dashboard (Settings > Public details) is set.",
+                    "closed": 1793318400
                   }
                 ]
               }
@@ -2015,6 +2095,8 @@
               "questions": [
                 {
                   "id": "email_sender",
+                  "key": "email_sender",
+                  "added_later": true,
                   "text": "Who sends the required emails (renewal reminder, charge notice): you (your code), or Checkbox Notices?",
                   "options": [
                     "me",
@@ -2024,6 +2106,15 @@
                   "on_answer": {
                     "checkbox": "One call: updateNoticeSettings { mode: \"checkbox\", add_kinds: [\"renewal_reminder\"] }."
                   }
+                }
+              ],
+              "closed": [
+                {
+                  "id": "stripe_terms_url",
+                  "key": "stripe_terms_url",
+                  "text": "In the Stripe Dashboard, Settings → Public details, set your Terms of Service URL.",
+                  "reason": "Closed: the Terms of Service URL in the Stripe Dashboard (Settings > Public details) is set.",
+                  "closed": 1793318400
                 }
               ]
             }
@@ -2116,7 +2207,7 @@
                     "sold",
                     "stripe"
                   ],
-                  "description": "declared in setup, chosen in site facts, sold by the pay buttons, or read from the connected Stripe account.",
+                  "description": "Where the terms come from: declared in setup (no connected Stripe Price confirms them), chosen in site facts, sold by the pay buttons, or stripe: read from a Price in the connected Stripe account (also a declared plan once Stripe's Price replaced its terms).",
                   "example": "declared"
                 }
               },
@@ -2482,7 +2573,7 @@
             ],
             "maxLength": 2000,
             "format": "uri",
-            "description": "Account page where subscribers manage / cancel. null clears it.",
+            "description": "Account page where subscribers manage and cancel their subscription (where they cancel; not a policy page). Checkbox never treats it as the cancellation policy page. null clears it.",
             "example": "https://acme.com/account"
           },
           "terms_url": {
@@ -2492,7 +2583,7 @@
             ],
             "maxLength": 2000,
             "format": "uri",
-            "description": "Terms of service page. Checkbox fetches and checks it. null clears it.",
+            "description": "Terms of service page. Checkbox fetches it, keeps a copy as evidence and checks its automatic-renewal and cancellation terms. null clears it.",
             "example": "https://acme.com/terms"
           },
           "privacy_url": {
@@ -2502,7 +2593,7 @@
             ],
             "maxLength": 2000,
             "format": "uri",
-            "description": "Privacy policy page. null clears it.",
+            "description": "Privacy policy page. Checkbox fetches it and keeps a copy with the other policy pages. null clears it.",
             "example": "https://acme.com/privacy"
           },
           "refund_url": {
@@ -2512,7 +2603,7 @@
             ],
             "maxLength": 2000,
             "format": "uri",
-            "description": "Refund policy page. null clears it.",
+            "description": "Refund policy page, if separate from the Terms. Checkbox fetches it and keeps a copy as evidence. null clears it.",
             "example": "https://acme.com/refunds"
           },
           "cancellation_url": {
@@ -2522,7 +2613,7 @@
             ],
             "maxLength": 2000,
             "format": "uri",
-            "description": "Cancellation policy page (if separate from the Terms). null clears it.",
+            "description": "A separate page that states your cancellation policy (how and when subscribers can cancel), only if it is not in your Terms. Checkbox fetches it, keeps a copy as evidence and checks it, like the Terms, for the cancellation terms the laws require. It is not the page where subscribers cancel: send that as account_url. A Stripe customer portal link sent here is used only as the cancel link (emails, test runs), never read as a policy. null clears it.",
             "example": "https://acme.com/cancellation-policy"
           },
           "support_email": {
@@ -2809,6 +2900,9 @@
                         "access": "write",
                         "why": "Test runs fast-forward through trial end and renewal."
                       }
+                    ],
+                    "steps": [
+                      "Open https://dashboard.stripe.com/test/apikeys (Stripe in Test mode) and click “Create restricted key”."
                     ]
                   }
                 },
@@ -2823,6 +2917,8 @@
                   "questions": [
                     {
                       "id": "email_sender",
+                      "key": "email_sender",
+                      "added_later": true,
                       "text": "Who sends the required emails (renewal reminder, charge notice): you (your code), or Checkbox Notices?",
                       "options": [
                         "me",
@@ -2832,6 +2928,15 @@
                       "on_answer": {
                         "checkbox": "One call: updateNoticeSettings { mode: \"checkbox\", add_kinds: [\"renewal_reminder\"] }."
                       }
+                    }
+                  ],
+                  "closed": [
+                    {
+                      "id": "stripe_terms_url",
+                      "key": "stripe_terms_url",
+                      "text": "In the Stripe Dashboard, Settings → Public details, set your Terms of Service URL.",
+                      "reason": "Closed: the Terms of Service URL in the Stripe Dashboard (Settings > Public details) is set.",
+                      "closed": 1793318400
                     }
                   ]
                 },
@@ -8419,6 +8524,57 @@
         ],
         "description": "What the caller (usually an AI coding agent) should do next."
       },
+      "UnfamiliarNote": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "enum": [
+              "more_checkouts_than_plans",
+              "unclassified_email",
+              "unmodelled_stripe_object",
+              "cancel_flow_unexpected",
+              "low_confidence_wording"
+            ],
+            "description": "Why it was flagged.",
+            "example": "unmodelled_stripe_object"
+          },
+          "headline": {
+            "type": "string",
+            "description": "What to tell the human.",
+            "example": "We haven't seen this exact setup before. We've logged it for review."
+          },
+          "line": {
+            "type": "string",
+            "description": "What was unusual, in plain words.",
+            "example": "An active Stripe Payment Link (plink_123) still sells $12.00 every month, which no plan Checkbox judged has. Checkbox does not check that link."
+          },
+          "status_text": {
+            "type": "string",
+            "enum": [
+              "Logged for review"
+            ],
+            "description": "The status shown next to the line.",
+            "example": "Logged for review"
+          },
+          "task": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The task it sits next to (null: the site as a whole).",
+            "example": null
+          }
+        },
+        "required": [
+          "code",
+          "headline",
+          "line",
+          "status_text",
+          "task"
+        ],
+        "description": "A setup Checkbox has not seen before, logged for review. Informational: it never changes a status, a task or a verdict, and nothing needs to be done about it."
+      },
       "Task": {
         "type": "object",
         "properties": {
@@ -8827,7 +8983,7 @@
               "string",
               "null"
             ],
-            "description": "What Checkbox needs before it can give the exact change or verify it (observation: it has not seen the page / email yet; facts: plan, price, cancel URL or merchant name; verify_domain: the site's domain is not verified yet, so Checkbox cannot visit it to verify this task: do the verify_domain task first). The title stays the same either way.",
+            "description": "What Checkbox needs before it can give the exact change or verify it (observation: it has not seen the page / email yet; facts: plan, price, cancel URL or merchant name; verify_domain: the site's domain is not verified yet, so Checkbox cannot visit it to verify this task: do the verify_domain task first; online_cancellation: the change names where subscribers cancel, so it waits on that task, listed in blocked_by). The title stays the same either way.",
             "example": null
           },
           "closed_reason": {
@@ -9140,6 +9296,22 @@
             ],
             "description": "When it was done. Unix timestamp in seconds.",
             "example": 1793318400
+          },
+          "unfamiliar": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UnfamiliarNote"
+            },
+            "description": "Setups next to this task Checkbox has not seen before, logged for review (informational; never changes the task). Absent unless the deployment shows them.",
+            "example": [
+              {
+                "code": "unmodelled_stripe_object",
+                "headline": "We haven't seen this exact setup before. We've logged it for review.",
+                "line": "An active Stripe Payment Link (plink_123) still sells $12.00 every month, which no plan Checkbox judged has. Checkbox does not check that link.",
+                "status_text": "Logged for review",
+                "task": null
+              }
+            ]
           }
         },
         "required": [
@@ -9443,7 +9615,16 @@
                   "found": 1793318400,
                   "found_by": "the scan of your checkout page"
                 },
-                "done_at": 1793318400
+                "done_at": 1793318400,
+                "unfamiliar": [
+                  {
+                    "code": "unmodelled_stripe_object",
+                    "headline": "We haven't seen this exact setup before. We've logged it for review.",
+                    "line": "An active Stripe Payment Link (plink_123) still sells $12.00 every month, which no plan Checkbox judged has. Checkbox does not check that link.",
+                    "status_text": "Logged for review",
+                    "task": null
+                  }
+                ]
               }
             ]
           },
@@ -9633,8 +9814,18 @@
                   "properties": {
                     "id": {
                       "type": "string",
-                      "description": "\"email_sender\" (who sends the required emails), \"notices_support_email\" / \"notices_cancel_timing\" (what Checkbox Notices needs before it sends), \"stripe_terms_url\" (a step only the owner takes in the Stripe Dashboard: the Terms of Service URL Stripe needs before it collects consent, in test mode too), or the id of the task whose question it is.",
+                      "description": "The id answerTask takes: the id of the task whose question it is (task_…), or the question's name for those that are not one task's: \"email_sender\", \"notices_support_email\", \"notices_cancel_timing\", \"stripe_terms_url\", \"stripe_portal_login\", \"replace_payment_link\" (send site with the answer when the account has several sites). Every listed question is answered with answerTask and this id.",
                       "example": "email_sender"
+                    },
+                    "key": {
+                      "type": "string",
+                      "description": "What the question is: \"email_sender\" (who sends the required emails), \"notices_support_email\" / \"notices_cancel_timing\" (what Checkbox Notices needs before it sends), \"stripe_terms_url\" (the Terms of Service URL Stripe needs before it collects consent, in test mode too), \"stripe_portal_login\" / \"replace_payment_link\" (Stripe Dashboard steps of a Payment Link site), or the key of the task whose question it is.",
+                      "example": "email_sender"
+                    },
+                    "added_later": {
+                      "type": "boolean",
+                      "description": "true when the question was not in the first batch the owner was asked: if they already answered the others, ask only these. Absent otherwise.",
+                      "example": true
                     },
                     "text": {
                       "type": "string",
@@ -9675,16 +9866,19 @@
                   },
                   "required": [
                     "id",
+                    "key",
                     "text",
                     "options",
                     "tasks",
                     "on_answer"
                   ]
                 },
-                "description": "Every choice only the owner makes, together.",
+                "description": "Every choice only the owner makes, together. Empty when nothing is left to ask and only closed questions are reported.",
                 "example": [
                   {
                     "id": "email_sender",
+                    "key": "email_sender",
+                    "added_later": true,
                     "text": "Who sends the required emails (renewal reminder, charge notice): you (your code), or Checkbox Notices?",
                     "options": [
                       "me",
@@ -9694,6 +9888,56 @@
                     "on_answer": {
                       "checkbox": "One call: updateNoticeSettings { mode: \"checkbox\", add_kinds: [\"renewal_reminder\"] }."
                     }
+                  }
+                ]
+              },
+              "closed": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "description": "The question's id as it was listed.",
+                      "example": "stripe_terms_url"
+                    },
+                    "key": {
+                      "type": "string",
+                      "description": "What the question was (see questions[].key).",
+                      "example": "stripe_terms_url"
+                    },
+                    "text": {
+                      "type": "string",
+                      "description": "The question as it was listed.",
+                      "example": "In the Stripe Dashboard, Settings → Public details, set your Terms of Service URL."
+                    },
+                    "reason": {
+                      "type": "string",
+                      "description": "Why it closed without an answer, in plain words. Tell the owner they need not answer it.",
+                      "example": "Closed: the Terms of Service URL in the Stripe Dashboard (Settings > Public details) is set."
+                    },
+                    "closed": {
+                      "type": "integer",
+                      "description": "When Checkbox saw it closed. Unix timestamp in seconds.",
+                      "example": 1793318400
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "key",
+                    "text",
+                    "reason",
+                    "closed"
+                  ]
+                },
+                "description": "Questions listed earlier that closed by themselves (reported for a day), each with the reason. Absent when none.",
+                "example": [
+                  {
+                    "id": "stripe_terms_url",
+                    "key": "stripe_terms_url",
+                    "text": "In the Stripe Dashboard, Settings → Public details, set your Terms of Service URL.",
+                    "reason": "Closed: the Terms of Service URL in the Stripe Dashboard (Settings > Public details) is set.",
+                    "closed": 1793318400
                   }
                 ]
               }
@@ -9708,6 +9952,8 @@
               "questions": [
                 {
                   "id": "email_sender",
+                  "key": "email_sender",
+                  "added_later": true,
                   "text": "Who sends the required emails (renewal reminder, charge notice): you (your code), or Checkbox Notices?",
                   "options": [
                     "me",
@@ -9717,6 +9963,15 @@
                   "on_answer": {
                     "checkbox": "One call: updateNoticeSettings { mode: \"checkbox\", add_kinds: [\"renewal_reminder\"] }."
                   }
+                }
+              ],
+              "closed": [
+                {
+                  "id": "stripe_terms_url",
+                  "key": "stripe_terms_url",
+                  "text": "In the Stripe Dashboard, Settings → Public details, set your Terms of Service URL.",
+                  "reason": "Closed: the Terms of Service URL in the Stripe Dashboard (Settings > Public details) is set.",
+                  "closed": 1793318400
                 }
               ]
             }
@@ -9817,6 +10072,22 @@
                 "reason": "Received, but not linked to a subscriber yet: run a test subscription, or BCC real sends so Checkbox can match them.",
                 "email": null,
                 "basis": null
+              }
+            ]
+          },
+          "unfamiliar": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UnfamiliarNote"
+            },
+            "description": "Setups on this site Checkbox has not seen before, logged for review (informational; never changes the status). Tell the human the headline and the line; do not promise a reply. Absent unless the deployment shows them.",
+            "example": [
+              {
+                "code": "unmodelled_stripe_object",
+                "headline": "We haven't seen this exact setup before. We've logged it for review.",
+                "line": "An active Stripe Payment Link (plink_123) still sells $12.00 every month, which no plan Checkbox judged has. Checkbox does not check that link.",
+                "status_text": "Logged for review",
+                "task": null
               }
             ]
           },
@@ -10010,6 +10281,14 @@
                 ],
                 "description": "When the answer waits for the human: the link they open (signed in to Checkbox) to confirm it. Same as answer.pending_confirmation_url; null when nothing waits for confirmation.",
                 "example": "https://app.checkbox.site/confirm-answer?task=task_…&token=…"
+              },
+              "recorded": {
+                "type": "boolean",
+                "enum": [
+                  false
+                ],
+                "description": "false when nothing was recorded because the task no longer asks a question (it changed since the plan was read); next_action says why and what to do. Absent when the answer was handled.",
+                "example": false
               }
             },
             "required": [
@@ -10019,14 +10298,68 @@
         ],
         "description": "The task after answerTask, with the confirmation link at the top level when the human must confirm."
       },
+      "AnsweredOwnerQuestion": {
+        "type": "object",
+        "properties": {
+          "object": {
+            "type": "string",
+            "enum": [
+              "owner_question_answer"
+            ],
+            "description": "String representing the object's type.",
+            "example": "owner_question_answer"
+          },
+          "id": {
+            "type": "string",
+            "description": "The question's id, as owner_questions lists it (its name).",
+            "example": "email_sender"
+          },
+          "key": {
+            "type": "string",
+            "description": "What the question is (owner_questions[].key).",
+            "example": "email_sender"
+          },
+          "answer": {
+            "type": "string",
+            "description": "The answer as understood (one of the question's options).",
+            "example": "checkbox"
+          },
+          "recorded": {
+            "type": "boolean",
+            "enum": [
+              false
+            ],
+            "description": "Always false: these questions are settled by a setting (updateNoticeSettings) or by what Stripe shows, never by a stored answer.",
+            "example": false
+          },
+          "open": {
+            "type": "boolean",
+            "description": "Whether the plan still asks this question.",
+            "example": true
+          },
+          "next_action": {
+            "$ref": "#/components/schemas/PlanNextAction"
+          }
+        },
+        "required": [
+          "object",
+          "id",
+          "key",
+          "answer",
+          "recorded",
+          "open",
+          "next_action"
+        ],
+        "description": "What to do with the owner's answer to a question that is not one task's own: the exact call (next_action)."
+      },
       "AnswerTaskParams": {
         "type": "object",
         "properties": {
           "answer": {
             "type": "string",
             "minLength": 2,
-            "maxLength": 20,
-            "description": "One of the task's question.options (yes / no, or confirmed / needs_change).",
+            "maxLength": 254,
+            "description": "One of the question's options (yes / no, or confirmed / needs_change). For the owner question notices_support_email, the support email address itself.",
             "example": "yes"
           },
           "note": {
@@ -10034,6 +10367,12 @@
             "maxLength": 1000,
             "description": "Context from the human (stored with the attestation).",
             "example": "Subscribers pick email or SMS at sign-up; all current subscribers chose email."
+          },
+          "site": {
+            "type": "string",
+            "maxLength": 100,
+            "description": "Only for an owner question named like email_sender: the site it belongs to (needed when the account has several sites).",
+            "example": "site_3ce96a872b444dbb8c30bc247624d3ea"
           }
         },
         "required": [
@@ -22274,7 +22613,7 @@
               "string",
               "null"
             ],
-            "description": "Warning or failure code of the step (stable): key_missing, key_not_test_mode, key_invalid, key_permission_missing, checkout_config_missing, price_not_in_test_mode, checkout_session_failed, checkout_page_unreadable, checkout_not_completed, subscription_create_failed, test_clock_failed, no_email_received_within, reminder_not_received, portal_not_configured, cancel_not_completed, cancellation_email_not_received, checkout_url_missing, real_checkout_not_completed, payment_link_not_found, webhook_not_delivered, reminder_outside_window, reminder_timing_not_observed, cancel_flow_not_configured, cancel_not_confirmed_in_stripe, acknowledgment_content_incomplete, required_notice_skipped, cancel_replaced_by_other_subscription, cancel_own_control_failed, cancel_own_control_not_tested, not_judged, scan_config_missing, domain_not_verified, scanner_failed, stripe_api_error, timeout, canceled, internal_error.",
+            "description": "Warning or failure code of the step (stable): key_missing, key_not_test_mode, key_invalid, key_permission_missing, checkout_config_missing, price_not_in_test_mode, checkout_session_failed, checkout_page_unreadable, checkout_not_completed, subscription_create_failed, test_clock_failed, no_email_received_within, reminder_not_received, portal_not_configured, cancel_not_completed, cancellation_email_not_received, checkout_url_missing, real_checkout_not_completed, pre_checkout_steps_needed, check_failed, payment_link_not_found, webhook_not_delivered, reminder_outside_window, reminder_timing_not_observed, cancel_flow_not_configured, cancel_not_confirmed_in_stripe, acknowledgment_content_incomplete, required_notice_skipped, cancel_replaced_by_other_subscription, cancel_own_control_failed, cancel_own_control_not_tested, not_judged, scan_config_missing, domain_not_verified, scanner_failed, stripe_api_error, timeout, canceled, internal_error.",
             "example": "no_email_received_within"
           },
           "fix": {
@@ -22513,7 +22852,7 @@
             "properties": {
               "code": {
                 "type": "string",
-                "description": "Stable failure code: key_missing, key_not_test_mode, key_invalid, key_permission_missing, checkout_config_missing, price_not_in_test_mode, checkout_session_failed, checkout_page_unreadable, checkout_not_completed, subscription_create_failed, test_clock_failed, no_email_received_within, reminder_not_received, portal_not_configured, cancel_not_completed, cancellation_email_not_received, checkout_url_missing, real_checkout_not_completed, payment_link_not_found, webhook_not_delivered, reminder_outside_window, reminder_timing_not_observed, cancel_flow_not_configured, cancel_not_confirmed_in_stripe, acknowledgment_content_incomplete, required_notice_skipped, cancel_replaced_by_other_subscription, cancel_own_control_failed, cancel_own_control_not_tested, not_judged, scan_config_missing, domain_not_verified, scanner_failed, stripe_api_error, timeout, canceled, internal_error.",
+                "description": "Stable failure code: key_missing, key_not_test_mode, key_invalid, key_permission_missing, checkout_config_missing, price_not_in_test_mode, checkout_session_failed, checkout_page_unreadable, checkout_not_completed, subscription_create_failed, test_clock_failed, no_email_received_within, reminder_not_received, portal_not_configured, cancel_not_completed, cancellation_email_not_received, checkout_url_missing, real_checkout_not_completed, pre_checkout_steps_needed, check_failed, payment_link_not_found, webhook_not_delivered, reminder_outside_window, reminder_timing_not_observed, cancel_flow_not_configured, cancel_not_confirmed_in_stripe, acknowledgment_content_incomplete, required_notice_skipped, cancel_replaced_by_other_subscription, cancel_own_control_failed, cancel_own_control_not_tested, not_judged, scan_config_missing, domain_not_verified, scanner_failed, stripe_api_error, timeout, canceled, internal_error.",
                 "example": "price_not_in_test_mode"
               },
               "message": {
@@ -23121,6 +23460,125 @@
               }
             }
           },
+          "plan_tested": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "name": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The plan's name: the registered checkout config the run used (plan), else the Stripe price's nickname.",
+                "example": "Yearly"
+              },
+              "price": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The Stripe price (test mode) of the run's subscription.",
+                "example": "price_1Q…"
+              },
+              "amount": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "description": "Recurring amount in the smallest currency unit.",
+                "example": 7200
+              },
+              "currency": {
+                "type": "string",
+                "description": "ISO currency, lowercase.",
+                "example": "usd"
+              },
+              "interval": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Billing interval.",
+                "example": "year"
+              },
+              "interval_count": {
+                "type": "integer",
+                "description": "Intervals per billing period.",
+                "example": 1
+              },
+              "trial_days": {
+                "type": "integer",
+                "description": "Free-trial days of the run's subscription (0: none).",
+                "example": 14
+              },
+              "summary": {
+                "type": "string",
+                "description": "The plan in words.",
+                "example": "“Yearly” ($72.00 every year, 14-day trial)"
+              }
+            },
+            "required": [
+              "name",
+              "price",
+              "amount",
+              "currency",
+              "interval",
+              "interval_count",
+              "trial_days",
+              "summary"
+            ],
+            "description": "Round 37: the one plan this run tested (its subscription's Stripe price); null before the run found a subscription. A run covers one plan: plans_not_run lists the others.",
+            "example": {
+              "name": "Yearly",
+              "price": "price_1Q…",
+              "amount": 7200,
+              "currency": "usd",
+              "interval": "year",
+              "interval_count": 1,
+              "trial_days": 14,
+              "summary": "“Yearly” ($72.00 every year, 14-day trial)"
+            }
+          },
+          "plans_not_run": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "config": {
+                  "type": "string",
+                  "description": "Registered checkout config id (stripe.checkout_config takes it; plan takes its name).",
+                  "example": "scc_3f9a…"
+                },
+                "name": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "The config's name: pass it as plan to createTestRun.",
+                  "example": "Monthly"
+                },
+                "prices": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "Stripe prices its line_items sell.",
+                  "example": [
+                    "price_1Q…"
+                  ]
+                }
+              },
+              "required": [
+                "config",
+                "name",
+                "prices"
+              ]
+            },
+            "description": "Round 37: registered plans (checkout configs) no test run of the site had observed when this run finished. Run each with createTestRun { plan: name }.",
+            "example": []
+          },
           "next_action": {
             "$ref": "#/components/schemas/NextAction"
           },
@@ -23289,6 +23747,17 @@
                     "note": null
                   }
                 },
+                "plan_tested": {
+                  "name": "Yearly",
+                  "price": "price_1Q…",
+                  "amount": 7200,
+                  "currency": "usd",
+                  "interval": "year",
+                  "interval_count": 1,
+                  "trial_days": 14,
+                  "summary": "“Yearly” ($72.00 every year, 14-day trial)"
+                },
+                "plans_not_run": [],
                 "next_action": {
                   "type": "verify_domain",
                   "message": "Verify your site domain to turn on live mode.",
@@ -23520,7 +23989,7 @@
           },
           "type": {
             "type": "string",
-            "description": "Event type: site.compliance_changed, finding.created, finding.resolved, scan.completed, scan.failed, law.changed, certificate.issued, certificate.lapsed, certificate.revoked, notice.sent, notice.due, notice.overdue, consent.created, receipt.created, test_run.completed, test_run.failed, plan.updated, site.checks_passed, site.compliant (deprecated), task.verified.",
+            "description": "Event type: site.compliance_changed, finding.created, finding.resolved, scan.completed, scan.failed, law.changed, check_record.issued, certificate.issued (deprecated), certificate.lapsed, certificate.revoked, notice.sent, notice.due, notice.overdue, consent.created, receipt.created, test_run.completed, test_run.failed, plan.updated, site.checks_passed, site.compliant (deprecated), task.verified.",
             "example": "finding.created"
           },
           "api_version": {
@@ -23544,7 +24013,7 @@
               "object": {
                 "type": "object",
                 "additionalProperties": {},
-                "description": "The object the event is about (a site, finding, scan, certificate, law_update or notice), as the API returns it.",
+                "description": "The object the event is about (a site, finding, scan, certificate (a check record), law_update or notice), as the API returns it.",
                 "example": {
                   "id": "fnd_3f9a1c2e7b4d4e0f9a8b7c6d5e4f3a2b",
                   "object": "finding"
@@ -27408,7 +27877,7 @@
       "post": {
         "operationId": "answerTask",
         "summary": "Record the human answer to a manual task",
-        "description": "For tasks with status manual: record the human's answer to task.question (ask them; never answer on their behalf). Answers that assert a legal fact (yes, confirmed) are stored as a proposal and return next_action.type \"ask_human_to_confirm\" with a link the human opens while signed in to Checkbox; only their confirmation writes the attestation, sets the site fact and re-evaluates. no / needs_change turn the task into a change for the agent; done (after a dashboard-only step) re-checks at once. Every answer is stored in the evidence vault.",
+        "description": "For tasks with status manual, and for every question the plan's owner_questions lists (by its id): record the human's answer (ask them; never answer on their behalf). An owner question that is not one task's own (owner_questions[].key email_sender, stripe_terms_url, …) returns an AnsweredOwnerQuestion: nothing is stored, next_action is the exact call that applies the answer. An answer to a task whose question closed since the plan was read records nothing (recorded: false) and says why. Answers that assert a legal fact (yes, confirmed) are stored as a proposal and return next_action.type \"ask_human_to_confirm\" with a link the human opens while signed in to Checkbox; only their confirmation writes the attestation, sets the site fact and re-evaluates. no / needs_change turn the task into a change for the agent; done (after a dashboard-only step) re-checks at once. Every answer is stored in the evidence vault.",
         "tags": [
           "Compliance plans"
         ],
@@ -27427,7 +27896,9 @@
           {
             "schema": {
               "type": "string",
-              "description": "Unique identifier of the task (task_…).",
+              "minLength": 2,
+              "maxLength": 100,
+              "description": "The task id (task_…), or an owner_questions id that is not a task's (email_sender, notices_support_email, notices_cancel_timing, stripe_portal_login, replace_payment_link, stripe_terms_url).",
               "example": "task_3f9a1c2e7b4d4e0f9a8b7c6d5e4f3a2b"
             },
             "required": true,
@@ -27472,7 +27943,14 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AnsweredTask"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/AnsweredTask"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AnsweredOwnerQuestion"
+                    }
+                  ]
                 }
               }
             }
@@ -33172,7 +33650,7 @@
                       "checkout_config": {
                         "type": "string",
                         "maxLength": 100,
-                        "description": "Registered checkout config (scc_…) to mirror; default: the newest one, else your latest live Checkout Session. \"none\" skips the registered configs (mirror your live checkout, stripe.price or stripe.payment_link instead).",
+                        "description": "Registered checkout config id (scc_…) to mirror; to pick one by name or Price id, use the top-level plan field. Default: the newest one, else your latest live Checkout Session. \"none\" skips the registered configs (mirror your live checkout, stripe.price or stripe.payment_link instead).",
                         "example": "scc_3f9a1c2e7b4d4e0f9a8b7c6d5e4f3a2b"
                       },
                       "price": {
@@ -33898,7 +34376,7 @@
                     },
                     "minItems": 1,
                     "maxItems": 50,
-                    "description": "Event types to send, or [\"*\"] for all: site.compliance_changed, finding.created, finding.resolved, scan.completed, scan.failed, law.changed, certificate.issued, certificate.lapsed, certificate.revoked, notice.sent, notice.due, notice.overdue, consent.created, receipt.created, test_run.completed, test_run.failed, plan.updated, site.checks_passed, site.compliant (deprecated), task.verified.",
+                    "description": "Event types to send, or [\"*\"] for all: site.compliance_changed, finding.created, finding.resolved, scan.completed, scan.failed, law.changed, check_record.issued, certificate.issued (deprecated), certificate.lapsed, certificate.revoked, notice.sent, notice.due, notice.overdue, consent.created, receipt.created, test_run.completed, test_run.failed, plan.updated, site.checks_passed, site.compliant (deprecated), task.verified.",
                     "example": [
                       "finding.created",
                       "site.compliance_changed"
@@ -34202,7 +34680,7 @@
                     },
                     "minItems": 1,
                     "maxItems": 50,
-                    "description": "Event types to send, or [\"*\"] for all: site.compliance_changed, finding.created, finding.resolved, scan.completed, scan.failed, law.changed, certificate.issued, certificate.lapsed, certificate.revoked, notice.sent, notice.due, notice.overdue, consent.created, receipt.created, test_run.completed, test_run.failed, plan.updated, site.checks_passed, site.compliant (deprecated), task.verified.",
+                    "description": "Event types to send, or [\"*\"] for all: site.compliance_changed, finding.created, finding.resolved, scan.completed, scan.failed, law.changed, check_record.issued, certificate.issued (deprecated), certificate.lapsed, certificate.revoked, notice.sent, notice.due, notice.overdue, consent.created, receipt.created, test_run.completed, test_run.failed, plan.updated, site.checks_passed, site.compliant (deprecated), task.verified.",
                     "example": [
                       "finding.created",
                       "site.compliance_changed"
@@ -35524,6 +36002,17 @@
                                 "note": null
                               }
                             },
+                            "plan_tested": {
+                              "name": "Yearly",
+                              "price": "price_1Q…",
+                              "amount": 7200,
+                              "currency": "usd",
+                              "interval": "year",
+                              "interval_count": 1,
+                              "trial_days": 14,
+                              "summary": "“Yearly” ($72.00 every year, 14-day trial)"
+                            },
+                            "plans_not_run": [],
                             "next_action": {
                               "type": "verify_domain",
                               "message": "Verify your site domain to turn on live mode.",
@@ -35707,6 +36196,17 @@
                                 "note": null
                               }
                             },
+                            "plan_tested": {
+                              "name": "Yearly",
+                              "price": "price_1Q…",
+                              "amount": 7200,
+                              "currency": "usd",
+                              "interval": "year",
+                              "interval_count": 1,
+                              "trial_days": 14,
+                              "summary": "“Yearly” ($72.00 every year, 14-day trial)"
+                            },
+                            "plans_not_run": [],
                             "next_action": {
                               "type": "verify_domain",
                               "message": "Verify your site domain to turn on live mode.",
@@ -36689,14 +37189,96 @@
         }
       }
     },
+    "check_record.issued": {
+      "post": {
+        "operationId": "webhook_check_record_issued",
+        "summary": "check_record.issued",
+        "description": "A check record was issued: a signed record of which checks the site passed and when (API object: certificate). It is not a certification of legal compliance.",
+        "tags": [
+          "Webhooks"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Event"
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "enum": [
+                          "check_record.issued"
+                        ],
+                        "description": "Event type.",
+                        "example": "check_record.issued"
+                      },
+                      "data": {
+                        "type": "object",
+                        "properties": {
+                          "object": {
+                            "$ref": "#/components/schemas/Certificate"
+                          },
+                          "previous_attributes": {
+                            "type": "object",
+                            "additionalProperties": {},
+                            "description": "Previous values of changed fields.",
+                            "example": {}
+                          }
+                        },
+                        "required": [
+                          "object"
+                        ],
+                        "example": {
+                          "object": {
+                            "id": "cert_3f9a1c2e7b4d4e0f9a8b7c6d5e4f3a2b",
+                            "object": "certificate",
+                            "livemode": false,
+                            "site": "site_3f9a1c2e7b4d4e0f9a8b7c6d5e4f3a2b",
+                            "status": "active",
+                            "domain": "acme.example",
+                            "issued": 1793318400,
+                            "valid_until": 1793318400,
+                            "renewed": 1793318400,
+                            "ended": 1793318400,
+                            "public_reason": null,
+                            "verify_url": "https://app.checkbox.site/verify/SC-7Q2K-9M4X",
+                            "badge": {
+                              "svg_url": "https://app.checkbox.site/badge/SC-7Q2K-9M4X.svg",
+                              "script_url": "https://app.checkbox.site/badge/SC-7Q2K-9M4X.js",
+                              "embed_html": "<a href=\"…\"><img src=\"…\" alt=\"…\"></a>"
+                            }
+                          },
+                          "previous_attributes": {}
+                        }
+                      }
+                    }
+                  }
+                ],
+                "description": "Something that happened in the account. Delivered to webhook endpoints and listed by listEvents (kept 30 days)."
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Return any 2xx status to acknowledge the event."
+          }
+        }
+      }
+    },
     "certificate.issued": {
       "post": {
         "operationId": "webhook_certificate_issued",
         "summary": "certificate.issued",
-        "description": "A monitoring certificate was issued.",
+        "description": "Deprecated alias of check_record.issued, kept so existing endpoints keep working: sent at the same moment with the same data.object. Subscribe to check_record.issued instead (an endpoint on \"*\" receives both).",
         "tags": [
           "Webhooks"
         ],
+        "deprecated": true,
         "requestBody": {
           "content": {
             "application/json": {
@@ -36774,7 +37356,7 @@
       "post": {
         "operationId": "webhook_certificate_lapsed",
         "summary": "certificate.lapsed",
-        "description": "A certificate lapsed (the site stopped meeting the requirements).",
+        "description": "A check record lapsed (the site stopped passing the checks it records).",
         "tags": [
           "Webhooks"
         ],
@@ -36855,7 +37437,7 @@
       "post": {
         "operationId": "webhook_certificate_revoked",
         "summary": "certificate.revoked",
-        "description": "A certificate was revoked.",
+        "description": "A check record was revoked.",
         "tags": [
           "Webhooks"
         ],

@@ -156,7 +156,7 @@ const setupFactsShape = {
   terms_url: z.string().max(2048).nullable().optional().describe('Terms of service URL. Checkbox fetches and checks it.'),
   privacy_url: z.string().max(2048).nullable().optional().describe('Privacy policy URL.'),
   refund_url: z.string().max(2048).nullable().optional().describe('Refund policy URL.'),
-  cancellation_url: z.string().max(2048).nullable().optional().describe('Cancellation policy URL, if separate from the Terms.'),
+  cancellation_url: z.string().max(2048).nullable().optional().describe('Separate cancellation policy page, if not in the Terms. Not where people cancel (account_url).'),
   support_email: z.string().max(320).optional().describe('Support address for subscribers.'),
   merchant_name: z.string().max(100).optional().describe('The brand subscribers know (names the seller in generated disclosures), e.g. from the <title> or package.json Default: the host name, which the plan asks you to replace.'),
   billing_platform: z
@@ -1033,6 +1033,8 @@ export function planStatusWords(status: string, label?: string | null): string {
 
 interface PlanLite {
   status: string;
+  /** Round 37: setups Checkbox has not seen before, logged for review (only when the deployment shows them). */
+  unfamiliar?: Array<{ headline: string; line: string; status_text: string; task: string | null }>;
   status_label?: string;
   summary?: string;
   counts?: Record<string, number>;
@@ -1277,16 +1279,20 @@ const answerTask: ToolDef = {
   name: 'answer_task',
   title: 'Record the human\'s answer to a manual task',
   description:
-    'For tasks with status "manual": record the HUMAN\'s answer to task.question. Ask the human first and pass their words; never answer on their behalf (answers are legal attestations stored in the evidence vault). answer is one of task.question.options; yes / no also work (= confirmed / needs_change). "no" turns the task into a change you can apply.',
+    'Manual tasks and every owner_questions id: record the HUMAN\'s answer. Ask them first, pass their words; never answer for them (answers are legal attestations). answer: one of the options; yes / no = confirmed / needs_change. "no" turns the task into a change.',
   input: {
-    task: z.string().max(100).describe('Task id (task_…) with status manual.'),
-    answer: z.string().max(40).describe('One of the task.question.options, as the human chose.'),
+    task: z.string().max(100).describe('Task id (task_…) or owner_questions id.'),
+    answer: z.string().max(254).describe('One of the options, as the human chose.'),
     note: z.string().max(2000).optional().describe('Context from the human, stored with the answer.'),
+    site: z.string().max(100).optional().describe('site_… for a named owner question.'),
   },
   scopes: ['compliance_plans:write'],
   annotations: { ...write(false), title: 'Answer task' },
   async run(args, { api }) {
-    const task = await api.request<{ id: string; status: string; title: string; next_action?: NextAction | null }>('POST', `/v1/tasks/${enc(String(args.task))}/answer`, { body: pick(args, ['answer', 'note']) });
+    const task = await api.request<{ id: string; object?: string; status?: string; title?: string; recorded?: boolean; next_action?: NextAction | null }>('POST', `/v1/tasks/${enc(String(args.task))}/answer`, { body: pick(args, ['answer', 'note', 'site']) });
+    // Round 37 (pilot 36 item 8): an owner question that is not one task's own, and a task whose question closed.
+    if (task.object === 'owner_question_answer') return { headline: `Answer accepted for ${task.id}; nothing stored: ${task.next_action?.description ?? 'see next_action.'}`, data: task };
+    if (task.recorded === false) return { headline: `Nothing recorded on ${task.id}: ${task.next_action?.description ?? 'it no longer asks a question.'}`, data: task };
     // Round 21 (pilot 20 item 16): "done" on a task Checkbox already closed succeeds without recording anything.
     if (task.status === 'done' && task.next_action?.type === 'retrieve_plan') return { headline: `${task.id} was already done (Checkbox closed it itself): nothing to answer, nothing recorded.`, data: task };
     return { headline: `Recorded the answer on ${task.id}; task is now ${task.status}.`, data: task };
@@ -1384,8 +1390,8 @@ const startTestRun: ToolDef = {
   description: [
     'Observes the WHOLE subscription lifecycle in the billing platform\'s TEST mode: subscribes a test customer (card 4242…) with a Checkbox inbox email, waits for the acknowledgment, fast-forwards a Stripe test clock through each notice window before trial end and renewal (collecting reminders), then cancels online and waits for the confirmation. Nothing is charged.',
     'Needs a Stripe TEST-mode restricted key (rk_test_…) stored for the site: store it yourself with store_stripe_test_key (one key for checks, fixes and test runs; live keys stay with the human in the dashboard). Never ask the human to paste a key into the chat. If missing, the error\'s next_action says so. For non-Stripe sites use type "generic".',
-    'Usually 1-2 minutes (real_checkout: a few): poll get_test_run (its next_action says when, and minutes_left estimates the rest). Each step reports observations, check results and agent-readable fixes; apply them and run again.',
-    'mode "real_checkout" is the PROOF run: the shopper buys through the merchant\'s own checkout on its test deployment (stripe.checkout_url or stripe.payment_link), so the merchant\'s webhook handlers and email code fire; give stripe.test_account + stripe.cancel_url when customers cancel in the app. A step is "passed" only with evidence; "warning" means needs review.',
+    'Usually 1-2 minutes (real_checkout: a few): poll get_test_run (next_action says when). Each step reports observations, check results and fixes; apply them and run again.',
+    'mode "real_checkout" is the PROOF run: the shopper buys through the merchant\'s own checkout on its test deployment (stripe.checkout_url or stripe.payment_link), so the merchant\'s webhook handlers and email code fire; give stripe.test_account + stripe.cancel_url when customers cancel in the app. Several plan buttons: pass plan, or stripe.pre_checkout_steps [{action:"click",text:"<button>"}]. A step is "passed" only with evidence; "warning" means needs review.',
     'Cancel: stripe.cancel_via "stripe_portal" (default) or "merchant_flow" (cancel_url + cancel_steps; behind a login, test_account { login_url, email, password }).',
   ].join('\n'),
   input: {
@@ -1472,7 +1478,7 @@ const getTestRun: ToolDef = {
       if (!list.data.length) throw new ToolError(`Site ${site} has no test run yet.`, { type: 'start_test_run', message: 'Call start_test_run.', operation_id: 'createTestRun' });
       id = list.data[0]!.id;
     }
-    type RunLite = { id: string; status: string; status_label?: string; plan_status_label?: string | null; phase?: string; next_action?: NextAction | null; waiting_for?: { what: string; until: number | null; step?: number | null; steps_total?: number | null; minutes_left?: number | null } | null; steps?: Array<{ key?: string; title?: string; status?: string; code?: string }> };
+    type RunLite = { id: string; status: string; status_label?: string; plan_status_label?: string | null; plan_tested?: { summary?: string } | null; phase?: string; next_action?: NextAction | null; waiting_for?: { what: string; until: number | null; step?: number | null; steps_total?: number | null; minutes_left?: number | null } | null; steps?: Array<{ key?: string; title?: string; status?: string; code?: string }> };
     const wait = typeof args.wait === 'number' && args.wait > 0 ? Math.min(TEST_RUN_MAX_WAIT, Math.floor(args.wait)) : 0;
     const deadline = Date.now() + wait * 1000;
     // The API long-polls up to 30 s per call and answers on every step; keep asking until the run finishes or time is up.
@@ -1486,7 +1492,7 @@ const getTestRun: ToolDef = {
     const progress = w ? [w.step && w.steps_total ? `step ${w.step} of ${w.steps_total}` : '', w.minutes_left ? `about ${w.minutes_left} min left` : ''].filter(Boolean).join(', ') : '';
     const waiting = w ? `Waiting for: ${w.what}${w.until ? ` (until ${new Date(w.until * 1000).toISOString().slice(0, 16).replace('T', ' ')} UTC at the latest)` : ''}${progress ? ` [${progress}]` : ''}` : null;
     return {
-      headline: `Test run ${run.id}: ${run.status_label ?? statusLine(run.status)}${run.phase && run.status !== 'succeeded' && run.status !== 'failed' ? ` (phase ${run.phase})` : ''}.${run.plan_status_label ? ` Plan after this run: ${run.plan_status_label}.` : ''}`,
+      headline: `Test run ${run.id}: ${run.status_label ?? statusLine(run.status)}${run.phase && run.status !== 'succeeded' && run.status !== 'failed' ? ` (phase ${run.phase})` : ''}.${run.plan_tested?.summary ? ` Plan tested: ${run.plan_tested.summary}.` : ''}${run.plan_status_label ? ` Plan after this run: ${run.plan_status_label}.` : ''}`,
       notes: [...(waiting ? [waiting] : []), ...(run.steps ?? []).map((s) => `${s.status ?? '?'}: ${s.title ?? s.key}${s.code ? ` (${s.code})` : ''}`)].slice(0, 13),
       data: run,
       ...(next ? { next } : {}),
@@ -2078,6 +2084,7 @@ const getSiteStatus: ToolDef = {
       ...(evaluated && label ? pendingLive.map((p) => `LIVE CHECK PENDING ${p.check_id}: ${p.what} — ${p.completes}`) : []),
       ...(ro ? [ro] : []),
       ...shopifyLines((site as { shopify?: SiteShopifyLite | null }).shopify, site.id),
+      ...unfamiliarLines('tasks' in plan ? plan.unfamiliar : undefined, 'tasks' in plan && Array.isArray(plan.tasks) ? (plan.tasks as Array<{ id?: string; title?: string }>) : []),
     ];
     const { open_findings: _open, needs_review: _nr, ...complianceLite } = (site.compliance ?? {}) as Record<string, unknown>;
     return {
@@ -2123,6 +2130,16 @@ const getSiteStatus: ToolDef = {
     };
   },
 };
+
+/**
+ * Round 37: the plan's unfamiliar-setup notes as status lines ("Logged for review: …"), headline once. Informational:
+ * they never change the next step. Exported for tests.
+ */
+export function unfamiliarLines(notes: PlanLite['unfamiliar'], tasks: ReadonlyArray<{ id?: string; title?: string }> = []): string[] {
+  if (!notes?.length) return [];
+  const title = (id: string | null) => (id ? tasks.find((t) => t.id === id)?.title : undefined);
+  return [notes[0]!.headline, ...notes.map((n) => `${n.status_text}${title(n.task) ? ` (${title(n.task)})` : ''}: ${n.line}`)];
+}
 
 const listFindings: ToolDef = {
   name: 'list_findings',
@@ -2383,6 +2400,36 @@ interface DisclosureLite {
   verification?: { passes?: boolean } | null;
 }
 
+/**
+ * Round 37 (pilot 36 item 12): { plan: { name, price, amount, currency, interval, interval_count, trial_days },
+ * merchant: { name, brand_name, cancel_url, cancel_timing } } flattened onto the top-level terms (top-level wins). Pure,
+ * exported for tests.
+ */
+const NESTED_KEYS = { plan: ['name', 'price', 'amount', 'currency', 'interval', 'interval_count', 'trial_days', 'intro_price', 'intro_percent_off', 'intro_periods'], merchant: ['name', 'brand_name', 'cancel_url', 'cancel_timing'] } as const;
+
+/** The nested keys get_compliant_disclosure does not know (plan.price_cents …). Pure, exported for tests. */
+export function nestedUnknownKeys(args: Record<string, unknown>): string[] {
+  const out: string[] = [];
+  for (const where of ['plan', 'merchant'] as const) {
+    const v = args[where];
+    if (v && typeof v === 'object') for (const k of Object.keys(v)) if (!(NESTED_KEYS[where] as readonly string[]).includes(k)) out.push(`${where}.${k}`);
+  }
+  return out;
+}
+
+export function flattenDisclosureArgs(args: Record<string, unknown>): Record<string, unknown> {
+  const { plan, merchant, ...rest } = args as { plan?: Record<string, unknown>; merchant?: Record<string, unknown> } & Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  if (plan && typeof plan === 'object') {
+    for (const [k, v] of Object.entries(plan)) if (v !== undefined) out[k === 'name' ? 'plan_name' : k] = v;
+  }
+  if (merchant && typeof merchant === 'object') {
+    for (const [k, v] of Object.entries(merchant)) if (v !== undefined) out[k === 'name' ? 'merchant_name' : k] = v;
+  }
+  for (const [k, v] of Object.entries(rest)) if (v !== undefined) out[k] = v;
+  return out;
+}
+
 function toDisclosureTerms(t: Record<string, unknown>): Record<string, unknown> {
   const out = pick(t, ['merchant_name', 'amount', 'currency', 'interval', 'interval_count', 'trial_days', 'intro_percent_off', 'intro_periods', 'cancel_url', 'cancel_timing']);
   if (out.merchant_name === undefined && typeof t.brand_name === 'string') out.merchant_name = t.brand_name;
@@ -2432,15 +2479,21 @@ const getCompliantDisclosure: ToolDef = {
   name: 'get_compliant_disclosure',
   title: 'Generate a disclosure that passes the checks for given terms',
   description: [
-    'Generates the locked, engine-verified automatic-renewal disclosure for a plan: disclosure_text, consent_label (for an unchecked, required checkbox), button_text and drop-in html. The same wording Checkbox Elements and Fixes use.',
-    'Give the terms: price (major units) or amount (minor), interval, trial_days, cancel_url, merchant_name, promo (intro_price or intro_percent_off, intro_periods). Example: {"merchant_name":"Acme","price":19.99,"interval":"month","trial_days":14,"cancel_url":"https://acme.example/account/cancel"}.',
-    'With site (and a key allowed to create disclosures), it also returns the Checkbox Elements snippet (script tag + <checkbox-disclosure> element + React usage) that records each consent as evidence.',
+    'Generates the locked, engine-verified automatic-renewal disclosure for a plan: disclosure_text, consent_label (for an unchecked, required checkbox), button_text and drop-in html (the wording Elements and Fixes use).',
+    'Terms: price or amount, interval, trial_days, cancel_url, merchant_name, promo (intro_price or intro_percent_off, intro_periods). Example: {"merchant_name":"Acme","price":19.99,"interval":"month","trial_days":14,"cancel_url":"https://acme.example/cancel"}.',
+    'With site (and a key that may create disclosures), it also returns the Elements snippet (script tag, <checkbox-disclosure>, React usage) that records each consent.',
   ].join('\n'),
   // Round 15 (P4): a promo (intro price) is stated with how long it lasts.
-  input: { ...elementsTermsShape, brand_name: planTermsShape.brand_name, intro_price: planTermsShape.intro_price, intro_percent_off: planTermsShape.intro_percent_off, intro_periods: planTermsShape.intro_periods, interval: z.enum(['day', 'week', 'month', 'year']).describe('Billing interval.'), site: z.string().max(100).optional().describe('Site id (site_…) to also get the Elements snippet for.'), jurisdictions: jurisdictions.optional() },
+  // Round 37 (pilot 36 item 12, core-codex): the terms may also come nested, { plan: {...}, merchant: {...} }, the shape
+  // other tools use; they are flattened before anything is checked.
+  input: { ...elementsTermsShape, brand_name: planTermsShape.brand_name, intro_price: planTermsShape.intro_price, intro_percent_off: planTermsShape.intro_percent_off, intro_periods: planTermsShape.intro_periods, interval: z.enum(['day', 'week', 'month', 'year']).optional().describe('Billing interval.'), plan: z.record(z.unknown()).optional(), merchant: z.record(z.unknown()).optional(), site: z.string().max(100).optional().describe('Site id (site_…) to also get the Elements snippet for.'), jurisdictions: jurisdictions.optional() },
   scopes: ['checks:read'],
   annotations: { ...ro, readOnlyHint: false, title: 'Disclosure that passes the checks' },
-  async run(args, { api, key }) {
+  async run(rawArgs, { api, key }) {
+    const odd = nestedUnknownKeys(rawArgs);
+    if (odd.length) throw new ToolError(`unknown nested argument ${odd.map((k) => `\`${k}\``).join(', ')}. plan takes ${NESTED_KEYS.plan.join(', ')}; merchant takes ${NESTED_KEYS.merchant.join(', ')}. Nothing was generated.`);
+    const args = flattenDisclosureArgs(rawArgs);
+    if (!args.interval) throw new ToolError('interval is required: pass interval ("month", "year", …) at the top level or in plan.interval. Nothing was generated.');
     if (typeof args.site === 'string' && args.site && keyAllows(key, 'consents:write')) {
       const d = await api.request<DisclosureLite>('POST', '/v1/disclosures', { body: { site: args.site, terms: toDisclosureTerms(args) } });
       return {

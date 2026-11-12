@@ -1,7 +1,8 @@
 # Checkbox Python SDK
 
 Automatic-renewal-law compliance (ROSCA, California Bus. & Prof. Code § 17600, New York GBL § 527-a and ~26 other state
-laws) for subscription businesses, as an API. Standard library only (`urllib`), Python 3.9+. Free to use.
+laws) for subscription businesses, as an API: auto-renewal law checks for Stripe Checkout, click-to-cancel
+cancellation and renewal reminder emails. Standard library only (`urllib`), Python 3.9+. Free to use.
 
 > **Package name.** `pip install checkbox-site` (the name in `pyproject.toml`; never install the unrelated `checkbox` or
 > `checkbox-sdk` packages). The import name is `checkbox`.

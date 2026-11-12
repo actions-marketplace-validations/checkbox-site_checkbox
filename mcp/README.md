@@ -2,7 +2,7 @@
 
 <!-- mcp-name: site.checkbox/checkbox -->
 
-Subscription-law compliance for AI coding agents. Connect Claude, Cursor, VS Code or any MCP client to Checkbox and
+Auto-renewal law checks (ROSCA, click-to-cancel, automatic renewal laws) for Stripe Checkout, cancellation flows and renewal reminder emails, for AI coding agents. Connect Claude, Cursor, VS Code or any MCP client to Checkbox and
 your agent can set up a project with one human click, check checkout code before it ships, work the compliance plan to
 done and run synthetic test subscriptions — against ROSCA, California's Automatic Renewal Law, New York GBL § 527-a
 and the other state automatic-renewal laws.

@@ -485,23 +485,23 @@ SetupSessionBusiness = TypedDict(
         "site_url": Optional[str],
         #: Checkout / pricing page.
         "checkout_url": Optional[str],
-        #: Account page.
+        #: Account page where subscribers manage and cancel.
         "account_url": Optional[str],
-        #: Terms of service.
+        #: Terms of service page (fetched and checked).
         "terms_url": Optional[str],
-        #: Privacy policy.
+        #: Privacy policy page.
         "privacy_url": Optional[str],
-        #: Refund policy.
+        #: Refund policy page.
         "refund_url": Optional[str],
-        #: Cancellation policy.
+        #: Separate cancellation policy page (checked like the Terms), not the page where subscribers cancel (account_url).
         "cancellation_url": Optional[str],
-        #: Support email.
+        #: Support address subscribers can write to.
         "support_email": Optional[str],
         #: Merchant (brand) name used in generated legal copy (the site name).
         "merchant_name": Optional[str],
-        #: Billing platform.
+        #: Billing platform (stripe, shopify, recharge, …).
         "billing_platform": Optional[str],
-        #: Plans.
+        #: Plans and prices as registered (the free-trial and term facts the law depends on).
         "plans": List["SetupPlan"],
     },
     total=False,
@@ -628,6 +628,8 @@ SetupSessionStripeRestrictedKey = TypedDict(
         "create_url": str,
         #: The one key checklist: every permission Checkbox uses (checks, fixes after the human approves, test runs).
         "permissions": List["SetupSessionStripeRestrictedKeyPermissionsItem"],
+        #: The same key as plain numbered steps for the owner (the permissions grouped: Write, then Read). Send them as they are.
+        "steps": List[str],
     },
     total=False,
 )
@@ -672,8 +674,12 @@ SetupSessionTestRun = TypedDict(
 SetupSessionOwnerQuestionsQuestionsItem = TypedDict(
     "SetupSessionOwnerQuestionsQuestionsItem",
     {
-        #: "email_sender" (who sends the required emails), "notices_support_email" / "notices_cancel_timing" (what Checkbox Notices needs before it sends), "stripe_terms_url" (a step only the owner takes in the Stripe Dashboard: the Terms of Service URL Stripe needs before it collects consent, in test mode too), or the id of the task whose question it is.
+        #: The id answerTask takes: the id of the task whose question it is (task_…), or the question's name for those that are not one task's: "email_sender", "notices_support_email", "notices_cancel_timing", "stripe_terms_url", "stripe_portal_login", "replace_payment_link" (send site with the answer when the account has several sites). Every listed question is answered with answerTask and this id.
         "id": str,
+        #: What the question is: "email_sender" (who sends the required emails), "notices_support_email" / "notices_cancel_timing" (what Checkbox Notices needs before it sends), "stripe_terms_url" (the Terms of Service URL Stripe needs before it collects consent, in test mode too), "stripe_portal_login" / "replace_payment_link" (Stripe Dashboard steps of a Payment Link site), or the key of the task whose question it is.
+        "key": str,
+        #: true when the question was not in the first batch the owner was asked: if they already answered the others, ask only these. Absent otherwise. (optional)
+        "added_later": bool,
         #: The question, in plain words for the owner.
         "text": str,
         #: The answers.
@@ -687,14 +693,34 @@ SetupSessionOwnerQuestionsQuestionsItem = TypedDict(
 )
 
 
+SetupSessionOwnerQuestionsClosedItem = TypedDict(
+    "SetupSessionOwnerQuestionsClosedItem",
+    {
+        #: The question's id as it was listed.
+        "id": str,
+        #: What the question was (see questions[].key).
+        "key": str,
+        #: The question as it was listed.
+        "text": str,
+        #: Why it closed without an answer, in plain words. Tell the owner they need not answer it.
+        "reason": str,
+        #: When Checkbox saw it closed. Unix timestamp in seconds.
+        "closed": int,
+    },
+    total=False,
+)
+
+
 #: Round 35: the plan's batched owner questions (the same as retrieveCompliancePlan owner_questions), so next_action's "as owner_questions says" can be followed from this response. Null when there is none.
 SetupSessionOwnerQuestions = TypedDict(
     "SetupSessionOwnerQuestions",
     {
         #: How to ask them: once, in one message, while the fixes go on.
         "description": str,
-        #: Every choice only the owner makes, together.
+        #: Every choice only the owner makes, together. Empty when nothing is left to ask and only closed questions are reported.
         "questions": List["SetupSessionOwnerQuestionsQuestionsItem"],
+        #: Questions listed earlier that closed by themselves (reported for a day), each with the reason. Absent when none. (optional)
+        "closed": List["SetupSessionOwnerQuestionsClosedItem"],
     },
     total=False,
 )
@@ -734,7 +760,7 @@ SetupSessionSitePlansItem = TypedDict(
         "intro_price": Optional["SetupSessionSitePlansItemIntroPrice"],
         #: Every Stripe Price id that names this plan.
         "stripe_price_ids": List[str],
-        #: declared in setup, chosen in site facts, sold by the pay buttons, or read from the connected Stripe account.
+        #: Where the terms come from: declared in setup (no connected Stripe Price confirms them), chosen in site facts, sold by the pay buttons, or stripe: read from a Price in the connected Stripe account (also a declared plan once Stripe's Price replaced its terms).
         "source": Literal["declared", "chosen", "sold", "stripe"],
     },
     total=False,
@@ -935,15 +961,15 @@ SetupSessionUpdate = TypedDict(
         "site_url": str,
         #: Page where customers subscribe (pricing page or checkout). (optional)
         "checkout_url": str,
-        #: Account page where subscribers manage / cancel. null clears it. (optional)
+        #: Account page where subscribers manage and cancel their subscription (where they cancel; not a policy page). Checkbox never treats it as the cancellation policy page. null clears it. (optional)
         "account_url": Optional[str],
-        #: Terms of service page. Checkbox fetches and checks it. null clears it. (optional)
+        #: Terms of service page. Checkbox fetches it, keeps a copy as evidence and checks its automatic-renewal and cancellation terms. null clears it. (optional)
         "terms_url": Optional[str],
-        #: Privacy policy page. null clears it. (optional)
+        #: Privacy policy page. Checkbox fetches it and keeps a copy with the other policy pages. null clears it. (optional)
         "privacy_url": Optional[str],
-        #: Refund policy page. null clears it. (optional)
+        #: Refund policy page, if separate from the Terms. Checkbox fetches it and keeps a copy as evidence. null clears it. (optional)
         "refund_url": Optional[str],
-        #: Cancellation policy page (if separate from the Terms). null clears it. (optional)
+        #: A separate page that states your cancellation policy (how and when subscribers can cancel), only if it is not in your Terms. Checkbox fetches it, keeps a copy as evidence and checks it, like the Terms, for the cancellation terms the laws require. It is not the page where subscribers cancel: send that as account_url. A Stripe customer portal link sent here is used only as the cancel link (emails, test runs), never read as a policy. null clears it. (optional)
         "cancellation_url": Optional[str],
         #: Support address subscribers can write to. (optional)
         "support_email": str,
@@ -2661,6 +2687,25 @@ PlanNextAction = TypedDict(
 )
 
 
+#: A setup Checkbox has not seen before, logged for review. Informational: it never changes a status, a task or a verdict, and nothing needs to be done about it.
+UnfamiliarNote = TypedDict(
+    "UnfamiliarNote",
+    {
+        #: Why it was flagged.
+        "code": Literal["more_checkouts_than_plans", "unclassified_email", "unmodelled_stripe_object", "cancel_flow_unexpected", "low_confidence_wording"],
+        #: What to tell the human.
+        "headline": str,
+        #: What was unusual, in plain words.
+        "line": str,
+        #: The status shown next to the line.
+        "status_text": Literal["Logged for review"],
+        #: The task it sits next to (null: the site as a whole).
+        "task": Optional[str],
+    },
+    total=False,
+)
+
+
 #: The legal requirement.
 TaskRequirement = TypedDict(
     "TaskRequirement",
@@ -2870,7 +2915,7 @@ Task = TypedDict(
         "change": "TaskChange",
         #: How to verify the task.
         "verify": "TaskVerify",
-        #: What Checkbox needs before it can give the exact change or verify it (observation: it has not seen the page / email yet; facts: plan, price, cancel URL or merchant name; verify_domain: the site's domain is not verified yet, so Checkbox cannot visit it to verify this task: do the verify_domain task first). The title stays the same either way.
+        #: What Checkbox needs before it can give the exact change or verify it (observation: it has not seen the page / email yet; facts: plan, price, cancel URL or merchant name; verify_domain: the site's domain is not verified yet, so Checkbox cannot visit it to verify this task: do the verify_domain task first; online_cancellation: the change names where subscribers cancel, so it waits on that task, listed in blocked_by). The title stays the same either way.
         "blocked_on": Optional[str],
         #: Done / declined tasks: verified (its checks pass), no_longer_applicable (its checks no longer apply, e.g. the data source changed), superseded, declined, decided (the owner confirmed a decision, e.g. New York notices by email only: closed, but its checks are not verified).
         "closed_reason": Optional[Literal["verified", "no_longer_applicable", "superseded", "declined", "decided"]],
@@ -2897,6 +2942,8 @@ Task = TypedDict(
         "found_after_first_plan": "TaskFoundAfterFirstPlan",
         #: When it was done. Unix timestamp in seconds.
         "done_at": Optional[int],
+        #: Setups next to this task Checkbox has not seen before, logged for review (informational; never changes the task). Absent unless the deployment shows them. (optional)
+        "unfamiliar": List["UnfamiliarNote"],
     },
     total=False,
 )
@@ -2960,8 +3007,12 @@ CompliancePlanCoverage = TypedDict(
 CompliancePlanOwnerQuestionsQuestionsItem = TypedDict(
     "CompliancePlanOwnerQuestionsQuestionsItem",
     {
-        #: "email_sender" (who sends the required emails), "notices_support_email" / "notices_cancel_timing" (what Checkbox Notices needs before it sends), "stripe_terms_url" (a step only the owner takes in the Stripe Dashboard: the Terms of Service URL Stripe needs before it collects consent, in test mode too), or the id of the task whose question it is.
+        #: The id answerTask takes: the id of the task whose question it is (task_…), or the question's name for those that are not one task's: "email_sender", "notices_support_email", "notices_cancel_timing", "stripe_terms_url", "stripe_portal_login", "replace_payment_link" (send site with the answer when the account has several sites). Every listed question is answered with answerTask and this id.
         "id": str,
+        #: What the question is: "email_sender" (who sends the required emails), "notices_support_email" / "notices_cancel_timing" (what Checkbox Notices needs before it sends), "stripe_terms_url" (the Terms of Service URL Stripe needs before it collects consent, in test mode too), "stripe_portal_login" / "replace_payment_link" (Stripe Dashboard steps of a Payment Link site), or the key of the task whose question it is.
+        "key": str,
+        #: true when the question was not in the first batch the owner was asked: if they already answered the others, ask only these. Absent otherwise. (optional)
+        "added_later": bool,
         #: The question, in plain words for the owner.
         "text": str,
         #: The answers.
@@ -2975,14 +3026,34 @@ CompliancePlanOwnerQuestionsQuestionsItem = TypedDict(
 )
 
 
+CompliancePlanOwnerQuestionsClosedItem = TypedDict(
+    "CompliancePlanOwnerQuestionsClosedItem",
+    {
+        #: The question's id as it was listed.
+        "id": str,
+        #: What the question was (see questions[].key).
+        "key": str,
+        #: The question as it was listed.
+        "text": str,
+        #: Why it closed without an answer, in plain words. Tell the owner they need not answer it.
+        "reason": str,
+        #: When Checkbox saw it closed. Unix timestamp in seconds.
+        "closed": int,
+    },
+    total=False,
+)
+
+
 #: Every open owner choice as ONE batched question (who sends the required emails, plus each question task such as the New York notice channel). Ask it once, early, in one message; the plan's next_action says the same. Absent when there is none.
 CompliancePlanOwnerQuestions = TypedDict(
     "CompliancePlanOwnerQuestions",
     {
         #: How to ask them: once, in one message, while the fixes go on.
         "description": str,
-        #: Every choice only the owner makes, together.
+        #: Every choice only the owner makes, together. Empty when nothing is left to ask and only closed questions are reported.
         "questions": List["CompliancePlanOwnerQuestionsQuestionsItem"],
+        #: Questions listed earlier that closed by themselves (reported for a day), each with the reason. Absent when none. (optional)
+        "closed": List["CompliancePlanOwnerQuestionsClosedItem"],
     },
     total=False,
 )
@@ -3082,6 +3153,8 @@ CompliancePlan = TypedDict(
         "go_live": "GoLive",
         #: Evidence level per required email kind. A plan never reaches status compliant on template_checked emails.
         "email_verification": List["CompliancePlanEmailVerificationItem"],
+        #: Setups on this site Checkbox has not seen before, logged for review (informational; never changes the status). Tell the human the headline and the line; do not promise a reply. Absent unless the deployment shows them. (optional)
+        "unfamiliar": List["UnfamiliarNote"],
         #: Rules / catalog version of the evaluation.
         "rules_version": Optional[str],
         #: Automated assessment; not legal advice.
@@ -3318,7 +3391,7 @@ AnsweredTask = TypedDict(
         "change": "AnsweredTaskChange",
         #: How to verify the task.
         "verify": "AnsweredTaskVerify",
-        #: What Checkbox needs before it can give the exact change or verify it (observation: it has not seen the page / email yet; facts: plan, price, cancel URL or merchant name; verify_domain: the site's domain is not verified yet, so Checkbox cannot visit it to verify this task: do the verify_domain task first). The title stays the same either way.
+        #: What Checkbox needs before it can give the exact change or verify it (observation: it has not seen the page / email yet; facts: plan, price, cancel URL or merchant name; verify_domain: the site's domain is not verified yet, so Checkbox cannot visit it to verify this task: do the verify_domain task first; online_cancellation: the change names where subscribers cancel, so it waits on that task, listed in blocked_by). The title stays the same either way.
         "blocked_on": Optional[str],
         #: Done / declined tasks: verified (its checks pass), no_longer_applicable (its checks no longer apply, e.g. the data source changed), superseded, declined, decided (the owner confirmed a decision, e.g. New York notices by email only: closed, but its checks are not verified).
         "closed_reason": Optional[Literal["verified", "no_longer_applicable", "superseded", "declined", "decided"]],
@@ -3345,8 +3418,34 @@ AnsweredTask = TypedDict(
         "found_after_first_plan": "AnsweredTaskFoundAfterFirstPlan",
         #: When it was done. Unix timestamp in seconds.
         "done_at": Optional[int],
+        #: Setups next to this task Checkbox has not seen before, logged for review (informational; never changes the task). Absent unless the deployment shows them. (optional)
+        "unfamiliar": List["UnfamiliarNote"],
         #: When the answer waits for the human: the link they open (signed in to Checkbox) to confirm it. Same as answer.pending_confirmation_url; null when nothing waits for confirmation.
         "confirmation_url": Optional[str],
+        #: false when nothing was recorded because the task no longer asks a question (it changed since the plan was read); next_action says why and what to do. Absent when the answer was handled. (optional)
+        "recorded": Literal[False],
+    },
+    total=False,
+)
+
+
+#: What to do with the owner's answer to a question that is not one task's own: the exact call (next_action).
+AnsweredOwnerQuestion = TypedDict(
+    "AnsweredOwnerQuestion",
+    {
+        #: String representing the object's type.
+        "object": Literal["owner_question_answer"],
+        #: The question's id, as owner_questions lists it (its name).
+        "id": str,
+        #: What the question is (owner_questions[].key).
+        "key": str,
+        #: The answer as understood (one of the question's options).
+        "answer": str,
+        #: Always false: these questions are settled by a setting (updateNoticeSettings) or by what Stripe shows, never by a stored answer.
+        "recorded": Literal[False],
+        #: Whether the plan still asks this question.
+        "open": bool,
+        "next_action": "PlanNextAction",
     },
     total=False,
 )
@@ -3355,10 +3454,12 @@ AnsweredTask = TypedDict(
 AnswerTaskParams = TypedDict(
     "AnswerTaskParams",
     {
-        #: One of the task's question.options (yes / no, or confirmed / needs_change).
+        #: One of the question's options (yes / no, or confirmed / needs_change). For the owner question notices_support_email, the support email address itself.
         "answer": str,
         #: Context from the human (stored with the attestation). (optional)
         "note": str,
+        #: Only for an owner question named like email_sender: the site it belongs to (needed when the account has several sites). (optional)
+        "site": str,
     },
     total=False,
 )
@@ -7257,7 +7358,7 @@ TestRunStep = TypedDict(
         "observations": Dict[str, Any],
         #: Evidence records (screenshots, page captures, raw emails) behind the step.
         "evidence": List[str],
-        #: Warning or failure code of the step (stable): key_missing, key_not_test_mode, key_invalid, key_permission_missing, checkout_config_missing, price_not_in_test_mode, checkout_session_failed, checkout_page_unreadable, checkout_not_completed, subscription_create_failed, test_clock_failed, no_email_received_within, reminder_not_received, portal_not_configured, cancel_not_completed, cancellation_email_not_received, checkout_url_missing, real_checkout_not_completed, payment_link_not_found, webhook_not_delivered, reminder_outside_window, reminder_timing_not_observed, cancel_flow_not_configured, cancel_not_confirmed_in_stripe, acknowledgment_content_incomplete, required_notice_skipped, cancel_replaced_by_other_subscription, cancel_own_control_failed, cancel_own_control_not_tested, not_judged, scan_config_missing, domain_not_verified, scanner_failed, stripe_api_error, timeout, canceled, internal_error.
+        #: Warning or failure code of the step (stable): key_missing, key_not_test_mode, key_invalid, key_permission_missing, checkout_config_missing, price_not_in_test_mode, checkout_session_failed, checkout_page_unreadable, checkout_not_completed, subscription_create_failed, test_clock_failed, no_email_received_within, reminder_not_received, portal_not_configured, cancel_not_completed, cancellation_email_not_received, checkout_url_missing, real_checkout_not_completed, pre_checkout_steps_needed, check_failed, payment_link_not_found, webhook_not_delivered, reminder_outside_window, reminder_timing_not_observed, cancel_flow_not_configured, cancel_not_confirmed_in_stripe, acknowledgment_content_incomplete, required_notice_skipped, cancel_replaced_by_other_subscription, cancel_own_control_failed, cancel_own_control_not_tested, not_judged, scan_config_missing, domain_not_verified, scanner_failed, stripe_api_error, timeout, canceled, internal_error.
         "code": Optional[str],
         "fix": "TestRunFix",
     },
@@ -7292,7 +7393,7 @@ TestRunWaitingFor = TypedDict(
 TestRunFailure = TypedDict(
     "TestRunFailure",
     {
-        #: Stable failure code: key_missing, key_not_test_mode, key_invalid, key_permission_missing, checkout_config_missing, price_not_in_test_mode, checkout_session_failed, checkout_page_unreadable, checkout_not_completed, subscription_create_failed, test_clock_failed, no_email_received_within, reminder_not_received, portal_not_configured, cancel_not_completed, cancellation_email_not_received, checkout_url_missing, real_checkout_not_completed, payment_link_not_found, webhook_not_delivered, reminder_outside_window, reminder_timing_not_observed, cancel_flow_not_configured, cancel_not_confirmed_in_stripe, acknowledgment_content_incomplete, required_notice_skipped, cancel_replaced_by_other_subscription, cancel_own_control_failed, cancel_own_control_not_tested, not_judged, scan_config_missing, domain_not_verified, scanner_failed, stripe_api_error, timeout, canceled, internal_error.
+        #: Stable failure code: key_missing, key_not_test_mode, key_invalid, key_permission_missing, checkout_config_missing, price_not_in_test_mode, checkout_session_failed, checkout_page_unreadable, checkout_not_completed, subscription_create_failed, test_clock_failed, no_email_received_within, reminder_not_received, portal_not_configured, cancel_not_completed, cancellation_email_not_received, checkout_url_missing, real_checkout_not_completed, pre_checkout_steps_needed, check_failed, payment_link_not_found, webhook_not_delivered, reminder_outside_window, reminder_timing_not_observed, cancel_flow_not_configured, cancel_not_confirmed_in_stripe, acknowledgment_content_incomplete, required_notice_skipped, cancel_replaced_by_other_subscription, cancel_own_control_failed, cancel_own_control_not_tested, not_judged, scan_config_missing, domain_not_verified, scanner_failed, stripe_api_error, timeout, canceled, internal_error.
         "code": str,
         #: What went wrong.
         "message": str,
@@ -7490,6 +7591,45 @@ TestRunProof = TypedDict(
 )
 
 
+#: Round 37: the one plan this run tested (its subscription's Stripe price); null before the run found a subscription. A run covers one plan: plans_not_run lists the others.
+TestRunPlanTested = TypedDict(
+    "TestRunPlanTested",
+    {
+        #: The plan's name: the registered checkout config the run used (plan), else the Stripe price's nickname.
+        "name": Optional[str],
+        #: The Stripe price (test mode) of the run's subscription.
+        "price": Optional[str],
+        #: Recurring amount in the smallest currency unit.
+        "amount": Optional[int],
+        #: ISO currency, lowercase.
+        "currency": str,
+        #: Billing interval.
+        "interval": Optional[str],
+        #: Intervals per billing period.
+        "interval_count": int,
+        #: Free-trial days of the run's subscription (0: none).
+        "trial_days": int,
+        #: The plan in words.
+        "summary": str,
+    },
+    total=False,
+)
+
+
+TestRunPlansNotRunItem = TypedDict(
+    "TestRunPlansNotRunItem",
+    {
+        #: Registered checkout config id (stripe.checkout_config takes it; plan takes its name).
+        "config": str,
+        #: The config's name: pass it as plan to createTestRun.
+        "name": Optional[str],
+        #: Stripe prices its line_items sell.
+        "prices": List[str],
+    },
+    total=False,
+)
+
+
 #: A synthetic test subscription that observes the whole subscription lifecycle in test mode and reports each step with evidence, check results and fixes.
 TestRun = TypedDict(
     "TestRun",
@@ -7538,6 +7678,10 @@ TestRun = TypedDict(
         "stripe": Optional["TestRunStripe"],
         #: What the run proves and the evidence beyond the steps (Stripe runs).
         "proof": Optional["TestRunProof"],
+        #: Round 37: the one plan this run tested (its subscription's Stripe price); null before the run found a subscription. A run covers one plan: plans_not_run lists the others. (optional)
+        "plan_tested": Optional["TestRunPlanTested"],
+        #: Round 37: registered plans (checkout configs) no test run of the site had observed when this run finished. Run each with createTestRun { plan: name }. (optional)
+        "plans_not_run": List["TestRunPlansNotRunItem"],
         "next_action": "NextAction",
         #: Round 36: once the run finished, the site plan's status_label after it (the same words the plan, its verifications and the dashboard show, e.g. "Checks pass · 2 live checks pending"); null while the run is running or when the plan could not be read. A clean run is not the whole plan: owner steps and live checks pending stay on it. (optional)
         "plan_status_label": Optional[str],
@@ -7630,7 +7774,7 @@ DeletedWebhookEndpoint = TypedDict(
 EventData = TypedDict(
     "EventData",
     {
-        #: The object the event is about (a site, finding, scan, certificate, law_update or notice), as the API returns it.
+        #: The object the event is about (a site, finding, scan, certificate (a check record), law_update or notice), as the API returns it.
         "object": Dict[str, Any],
         #: For *_changed events: the previous values of the changed fields. (optional)
         "previous_attributes": Dict[str, Any],
@@ -7660,7 +7804,7 @@ Event = TypedDict(
         "id": str,
         #: String representing the object's type. Always "event".
         "object": Literal["event"],
-        #: Event type: site.compliance_changed, finding.created, finding.resolved, scan.completed, scan.failed, law.changed, certificate.issued, certificate.lapsed, certificate.revoked, notice.sent, notice.due, notice.overdue, consent.created, receipt.created, test_run.completed, test_run.failed, plan.updated, site.checks_passed, site.compliant (deprecated), task.verified.
+        #: Event type: site.compliance_changed, finding.created, finding.resolved, scan.completed, scan.failed, law.changed, check_record.issued, certificate.issued (deprecated), certificate.lapsed, certificate.revoked, notice.sent, notice.due, notice.overdue, consent.created, receipt.created, test_run.completed, test_run.failed, plan.updated, site.checks_passed, site.compliant (deprecated), task.verified.
         "type": str,
         #: API version used to render data.object.
         "api_version": str,
@@ -8446,7 +8590,7 @@ CreateTestRunParamsStripeTestAccount = TypedDict(
 CreateTestRunParamsStripe = TypedDict(
     "CreateTestRunParamsStripe",
     {
-        #: Registered checkout config (scc_…) to mirror; default: the newest one, else your latest live Checkout Session. "none" skips the registered configs (mirror your live checkout, stripe.price or stripe.payment_link instead). (optional)
+        #: Registered checkout config id (scc_…) to mirror; to pick one by name or Price id, use the top-level plan field. Default: the newest one, else your latest live Checkout Session. "none" skips the registered configs (mirror your live checkout, stripe.price or stripe.payment_link instead). (optional)
         "checkout_config": str,
         #: A test-mode price to subscribe to when nothing is registered. (optional)
         "price": str,
@@ -8591,7 +8735,7 @@ CreateWebhookEndpointParams = TypedDict(
     {
         #: HTTPS URL.
         "url": str,
-        #: Event types to send, or ["*"] for all: site.compliance_changed, finding.created, finding.resolved, scan.completed, scan.failed, law.changed, certificate.issued, certificate.lapsed, certificate.revoked, notice.sent, notice.due, notice.overdue, consent.created, receipt.created, test_run.completed, test_run.failed, plan.updated, site.checks_passed, site.compliant (deprecated), task.verified.
+        #: Event types to send, or ["*"] for all: site.compliance_changed, finding.created, finding.resolved, scan.completed, scan.failed, law.changed, check_record.issued, certificate.issued (deprecated), certificate.lapsed, certificate.revoked, notice.sent, notice.due, notice.overdue, consent.created, receipt.created, test_run.completed, test_run.failed, plan.updated, site.checks_passed, site.compliant (deprecated), task.verified.
         "enabled_events": List[str],
         #: Description. (optional)
         "description": str,
@@ -8623,7 +8767,7 @@ UpdateWebhookEndpointParams = TypedDict(
     {
         #: HTTPS URL. (optional)
         "url": str,
-        #: Event types to send, or ["*"] for all: site.compliance_changed, finding.created, finding.resolved, scan.completed, scan.failed, law.changed, certificate.issued, certificate.lapsed, certificate.revoked, notice.sent, notice.due, notice.overdue, consent.created, receipt.created, test_run.completed, test_run.failed, plan.updated, site.checks_passed, site.compliant (deprecated), task.verified. (optional)
+        #: Event types to send, or ["*"] for all: site.compliance_changed, finding.created, finding.resolved, scan.completed, scan.failed, law.changed, check_record.issued, certificate.issued (deprecated), certificate.lapsed, certificate.revoked, notice.sent, notice.due, notice.overdue, consent.created, receipt.created, test_run.completed, test_run.failed, plan.updated, site.checks_passed, site.compliant (deprecated), task.verified. (optional)
         "enabled_events": List[str],
         #: Description (null clears it). (optional)
         "description": Optional[str],
@@ -9028,6 +9172,9 @@ RetrieveScanResponse = TypedDict(
     },
     total=False,
 )
+
+
+AnswerTaskResponse = Union["AnsweredTask", "AnsweredOwnerQuestion"]
 
 
 PlanUpdatedEventData = TypedDict(
@@ -9680,6 +9827,56 @@ LawChangedEvent = TypedDict(
 )
 
 
+CheckRecordIssuedEventData = TypedDict(
+    "CheckRecordIssuedEventData",
+    {
+        "object": "Certificate",
+        #: Previous values of changed fields. (optional)
+        "previous_attributes": Dict[str, Any],
+    },
+    total=False,
+)
+
+
+#: What caused the event.
+CheckRecordIssuedEventRequest = TypedDict(
+    "CheckRecordIssuedEventRequest",
+    {
+        #: API request that caused the event (null for automatic changes).
+        "id": Optional[str],
+        #: Idempotency-Key of that request.
+        "idempotency_key": Optional[str],
+    },
+    total=False,
+)
+
+
+#: check_record.issued: A check record was issued: a signed record of which checks the site passed and when (API object: certificate). It is not a certification of legal compliance.
+CheckRecordIssuedEvent = TypedDict(
+    "CheckRecordIssuedEvent",
+    {
+        #: Unique identifier of the event (evt_…).
+        "id": str,
+        #: String representing the object's type. Always "event".
+        "object": Literal["event"],
+        #: Event type.
+        "type": Literal["check_record.issued"],
+        #: API version used to render data.object.
+        "api_version": str,
+        #: When the event happened. Unix timestamp in seconds.
+        "created": int,
+        #: true for live-mode objects, false for test mode (ck_test_ keys act on an isolated sandbox).
+        "livemode": bool,
+        "data": "CheckRecordIssuedEventData",
+        #: Webhook deliveries not yet acknowledged.
+        "pending_webhooks": int,
+        #: What caused the event.
+        "request": "CheckRecordIssuedEventRequest",
+    },
+    total=False,
+)
+
+
 CertificateIssuedEventData = TypedDict(
     "CertificateIssuedEventData",
     {
@@ -9704,7 +9901,7 @@ CertificateIssuedEventRequest = TypedDict(
 )
 
 
-#: certificate.issued: A monitoring certificate was issued.
+#: certificate.issued: Deprecated alias of check_record.issued, kept so existing endpoints keep working: sent at the same moment with the same data.object. Subscribe to check_record.issued instead (an endpoint on "*" receives both).
 CertificateIssuedEvent = TypedDict(
     "CertificateIssuedEvent",
     {
@@ -9754,7 +9951,7 @@ CertificateLapsedEventRequest = TypedDict(
 )
 
 
-#: certificate.lapsed: A certificate lapsed (the site stopped meeting the requirements).
+#: certificate.lapsed: A check record lapsed (the site stopped passing the checks it records).
 CertificateLapsedEvent = TypedDict(
     "CertificateLapsedEvent",
     {
@@ -9804,7 +10001,7 @@ CertificateRevokedEventRequest = TypedDict(
 )
 
 
-#: certificate.revoked: A certificate was revoked.
+#: certificate.revoked: A check record was revoked.
 CertificateRevokedEvent = TypedDict(
     "CertificateRevokedEvent",
     {
@@ -10031,7 +10228,7 @@ SiteCompliantEvent = TypedDict(
 
 
 #: Every event Checkbox delivers to webhook endpoints, discriminated by ``type``.
-WebhookEvent = Union["PlanUpdatedEvent", "TaskVerifiedEvent", "NoticeDueEvent", "NoticeOverdueEvent", "ReceiptCreatedEvent", "TestRunCompletedEvent", "TestRunFailedEvent", "SiteComplianceChangedEvent", "FindingCreatedEvent", "FindingResolvedEvent", "ScanCompletedEvent", "ScanFailedEvent", "LawChangedEvent", "CertificateIssuedEvent", "CertificateLapsedEvent", "CertificateRevokedEvent", "NoticeSentEvent", "ConsentCreatedEvent", "SiteChecksPassedEvent", "SiteCompliantEvent"]
+WebhookEvent = Union["PlanUpdatedEvent", "TaskVerifiedEvent", "NoticeDueEvent", "NoticeOverdueEvent", "ReceiptCreatedEvent", "TestRunCompletedEvent", "TestRunFailedEvent", "SiteComplianceChangedEvent", "FindingCreatedEvent", "FindingResolvedEvent", "ScanCompletedEvent", "ScanFailedEvent", "LawChangedEvent", "CheckRecordIssuedEvent", "CertificateIssuedEvent", "CertificateLapsedEvent", "CertificateRevokedEvent", "NoticeSentEvent", "ConsentCreatedEvent", "SiteChecksPassedEvent", "SiteCompliantEvent"]
 
 WEBHOOK_EVENT_TYPES = (
     "plan.updated",
@@ -10047,6 +10244,7 @@ WEBHOOK_EVENT_TYPES = (
     "scan.completed",
     "scan.failed",
     "law.changed",
+    "check_record.issued",
     "certificate.issued",
     "certificate.lapsed",
     "certificate.revoked",
