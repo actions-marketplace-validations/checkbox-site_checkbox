@@ -1,7 +1,8 @@
 # `checkbox` CLI (`@checkbox-site/cli`)
 
-Subscription compliance (automatic-renewal laws: ROSCA, California ARL, New York GBL § 527-a and the other state
-laws) from a terminal, a CI job or an AI coding agent. Node 20+.
+Subscription compliance checks for auto-renewal law (automatic renewal laws: ROSCA, click-to-cancel, California ARL, New
+York GBL § 527-a and the other state laws) on Stripe Checkout, cancellation flows and renewal reminder emails, from a
+terminal, a CI job or an AI coding agent. Node 20+.
 
 ```sh
 npx @checkbox-site/cli ci init --yes      # checkbox.json + .github/workflows/checkbox.yml from your project
@@ -110,7 +111,9 @@ checkbox verify --wait                    # re-check the whole site
 
 The site comes from `--site`, `$CHECKBOX_SITE`, what `checkbox init` saved for this directory, or your only site.
 `fix --out fix.diff` also writes the diff for `git apply`. `verify` accepts `--html-file` (pre-deploy HTML),
-`--stripe-params <json>` and `--email-file <json>`. Exit codes: `plan --exit-code` 1 until the checks pass; `verify` 0 passed,
-1 failed, 2 still pending. Docs: https://checkbox.site/docs/cli
+`--stripe-params <json>` and `--email-file <json>`. Exit codes: `plan --exit-code` 1 until the checks pass; `verify` 0 passed
+or passed with notes (counts as passing; the note is about something outside your code), 1 failed, 2 not settled yet
+(still pending, needs review, not checked yet, live check pending, or passed with gaps: some checks were not observed
+yet, so the task is not verified). Docs: https://checkbox.site/docs/cli
 
 Not legal advice: Checkbox is an automated check against its catalog of automatic-renewal laws.

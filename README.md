@@ -1,6 +1,8 @@
 # Checkbox
 
-Check a subscription checkout's renewal terms in one command. Offline: no account, no key, nothing leaves your machine.
+Check a subscription checkout's renewal terms in one command. Free auto-renewal law checks (FTC ROSCA, click-to-cancel,
+California, New York and other state automatic renewal laws) for Stripe Checkout, cancellation flows and renewal
+reminder emails. Offline: no account, no key, nothing leaves your machine.
 
 ```bash
 npx @checkbox-site/cli check disclosure --offline \

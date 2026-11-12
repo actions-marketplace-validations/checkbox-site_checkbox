@@ -128,6 +128,10 @@ export interface DeviceAuthorizationParams {
   client?: SetupClient;
   /** Site URL detected in the project (shown on the approval screen; the test-mode site is created for it). */
   site_url?: string;
+  /** Page where customers subscribe (pricing page or checkout). Carried into the setup session and the test-mode site. */
+  checkout_url?: string;
+  /** Account page where subscribers manage or cancel. Carried into the setup session. */
+  account_url?: string;
   /** Project name. */
   project_name?: string;
   /** Detected framework. */
@@ -291,6 +295,13 @@ export type GoLive = {
   }>;
   /** What the agent tells the person instead of "done": set up in test mode, N steps left before real customers. */
   summary: string;
+  /** Steps Checkbox closed by inference from what the billing platform showed (the Stripe Terms of Service URL, which Stripe does not report directly), each with the reason. Tell the owner these too. Absent when none. */
+  closed?: Array<{
+    /** Stable step key. */
+    key: "verify_domain" | "stripe_terms_url" | "live_stripe_key" | "live_portal_cancel" | "live_checkout" | "deactivate_old_live_link" | "swap_test_urls" | "promote_site";
+    /** Why Checkbox closed the step, in plain words (what Stripe showed). */
+    text: string;
+  }>;
 } | null;
 
 /** One step of the setup checklist. */
@@ -343,23 +354,23 @@ export interface SetupSession {
     site_url: string | null;
     /** Checkout / pricing page. */
     checkout_url: string | null;
-    /** Account page. */
+    /** Account page where subscribers manage and cancel. */
     account_url: string | null;
-    /** Terms of service. */
+    /** Terms of service page (fetched and checked). */
     terms_url: string | null;
-    /** Privacy policy. */
+    /** Privacy policy page. */
     privacy_url: string | null;
-    /** Refund policy. */
+    /** Refund policy page. */
     refund_url: string | null;
-    /** Cancellation policy. */
+    /** Separate cancellation policy page (checked like the Terms), not the page where subscribers cancel (account_url). */
     cancellation_url: string | null;
-    /** Support email. */
+    /** Support address subscribers can write to. */
     support_email: string | null;
     /** Merchant (brand) name used in generated legal copy (the site name). */
     merchant_name: string | null;
-    /** Billing platform. */
+    /** Billing platform (stripe, shopify, recharge, …). */
     billing_platform: string | null;
-    /** Plans. */
+    /** Plans and prices as registered (the free-trial and term facts the law depends on). */
     plans: Array<SetupPlan>;
   };
   /** Notes about this request's input (createSetupSession / updateSetupSession only; never stored): plan amounts below 100 minor units or different from the connected Stripe Price. */
@@ -377,6 +388,8 @@ export interface SetupSession {
   install: {
     /** The exact tag to put in <head> of the homepage, pricing, checkout / sign-up and account pages (not needed on every page). */
     script_tag: string | null;
+    /** The same tag pinned to the current snippet release with Subresource Integrity (integrity + crossorigin): the bytes never change until you update the tag (/s/latest.json names newer releases). Null when the deployment has no pinned release. */
+    pinned_script_tag: string | null;
     /** The site's public snippet key: the data-key of script_tag (and the local part of inbound_email). Use only this key in the snippet tag. */
     snippet_key: string | null;
     /** A different key: the account's test-mode publishable key (pk_test_…) for Checkbox Elements (<checkbox-disclosure>) and consent receipts (data-publishable-key). Not the snippet's data-key. */
@@ -452,6 +465,8 @@ export interface SetupSession {
         /** One line: why Checkbox needs it. */
         why?: string;
       }>;
+      /** The same key as plain numbered steps for the owner (the permissions grouped: Write, then Read). Send them as they are. */
+      steps: Array<string>;
     };
   };
   /** Latest lifecycle test run of the site. */
@@ -469,10 +484,14 @@ export interface SetupSession {
   owner_questions?: {
     /** How to ask them: once, in one message, while the fixes go on. */
     description: string;
-    /** Every choice only the owner makes, together. */
+    /** Every choice only the owner makes, together. Empty when nothing is left to ask and only closed questions are reported. */
     questions: Array<{
-      /** "email_sender" (who sends the required emails), "notices_support_email" / "notices_cancel_timing" (what Checkbox Notices needs before it sends), "stripe_terms_url" (a step only the owner takes in the Stripe Dashboard: the Terms of Service URL Stripe needs before it collects consent, in test mode too), or the id of the task whose question it is. */
+      /** The id answerTask takes: the id of the task whose question it is (task_…), or the question's name for those that are not one task's: "email_sender", "notices_support_email", "notices_cancel_timing", "stripe_terms_url", "stripe_portal_login", "replace_payment_link" (send site with the answer when the account has several sites). Every listed question is answered with answerTask and this id. */
       id: string;
+      /** What the question is: "email_sender" (who sends the required emails), "notices_support_email" / "notices_cancel_timing" (what Checkbox Notices needs before it sends), "stripe_terms_url" (the Terms of Service URL Stripe needs before it collects consent, in test mode too), "stripe_portal_login" / "replace_payment_link" (Stripe Dashboard steps of a Payment Link site), or the key of the task whose question it is. */
+      key: string;
+      /** true when the question was not in the first batch the owner was asked: if they already answered the others, ask only these. Absent otherwise. */
+      added_later?: boolean;
       /** The question, in plain words for the owner. */
       text: string;
       /** The answers. */
@@ -481,6 +500,19 @@ export interface SetupSession {
       tasks: Array<string>;
       /** What the agent does with each answer. */
       on_answer: Record<string, string>;
+    }>;
+    /** Questions listed earlier that closed by themselves (reported for a day), each with the reason. Absent when none. */
+    closed?: Array<{
+      /** The question's id as it was listed. */
+      id: string;
+      /** What the question was (see questions[].key). */
+      key: string;
+      /** The question as it was listed. */
+      text: string;
+      /** Why it closed without an answer, in plain words. Tell the owner they need not answer it. */
+      reason: string;
+      /** When Checkbox saw it closed. Unix timestamp in seconds. */
+      closed: number;
     }>;
   } | null;
   /** The plans Checkbox judges the site against: the declared plans as reconciled with the connected Stripe Prices (Stripe wins), the plans the pay buttons sell and the account's Prices of a declared plan. Empty until a plan is known (updateSetupSession plans[], or connect Stripe). */
@@ -508,7 +540,7 @@ export interface SetupSession {
     } | null;
     /** Every Stripe Price id that names this plan. */
     stripe_price_ids: Array<string>;
-    /** declared in setup, chosen in site facts, sold by the pay buttons, or read from the connected Stripe account. */
+    /** Where the terms come from: declared in setup (no connected Stripe Price confirms them), chosen in site facts, sold by the pay buttons, or stripe: read from a Price in the connected Stripe account (also a declared plan once Stripe's Price replaced its terms). */
     source: "declared" | "chosen" | "sold" | "stripe";
   }>;
   /** Latest verdict of the test-mode site. */
@@ -601,15 +633,15 @@ export interface SetupSessionUpdate {
   site_url?: string;
   /** Page where customers subscribe (pricing page or checkout). */
   checkout_url?: string;
-  /** Account page where subscribers manage / cancel. null clears it. */
+  /** Account page where subscribers manage and cancel their subscription (where they cancel; not a policy page). Checkbox never treats it as the cancellation policy page. null clears it. */
   account_url?: string | null;
-  /** Terms of service page. Checkbox fetches and checks it. null clears it. */
+  /** Terms of service page. Checkbox fetches it, keeps a copy as evidence and checks its automatic-renewal and cancellation terms. null clears it. */
   terms_url?: string | null;
-  /** Privacy policy page. null clears it. */
+  /** Privacy policy page. Checkbox fetches it and keeps a copy with the other policy pages. null clears it. */
   privacy_url?: string | null;
-  /** Refund policy page. null clears it. */
+  /** Refund policy page, if separate from the Terms. Checkbox fetches it and keeps a copy as evidence. null clears it. */
   refund_url?: string | null;
-  /** Cancellation policy page (if separate from the Terms). null clears it. */
+  /** A separate page that states your cancellation policy (how and when subscribers can cancel), only if it is not in your Terms. Checkbox fetches it, keeps a copy as evidence and checks it, like the Terms, for the cancellation terms the laws require. It is not the page where subscribers cancel: send that as account_url. A Stripe customer portal link sent here is used only as the cancel link (emails, test runs), never read as a policy. null clears it. */
   cancellation_url?: string | null;
   /** Support address subscribers can write to. */
   support_email?: string;
@@ -1255,6 +1287,7 @@ export interface Site {
   latest_scan?: Scan;
   unverified_scan: UnverifiedScan;
   domain_verification?: DomainVerification;
+  next_action?: NextAction;
 }
 
 /** A page of sites, newest first. */
@@ -1799,6 +1832,20 @@ export interface PlanNextAction {
   command: string | null;
 }
 
+/** A setup Checkbox has not seen before, logged for review. Informational: it never changes a status, a task or a verdict, and nothing needs to be done about it. */
+export interface UnfamiliarNote {
+  /** Why it was flagged. */
+  code: "more_checkouts_than_plans" | "unclassified_email" | "unmodelled_stripe_object" | "cancel_flow_unexpected" | "low_confidence_wording";
+  /** What to tell the human. */
+  headline: string;
+  /** What was unusual, in plain words. */
+  line: string;
+  /** The status shown next to the line. */
+  status_text: "Logged for review";
+  /** The task it sits next to (null: the site as a whole). */
+  task: string | null;
+}
+
 /** One ordered compliance task: the requirement, where to change, the exact change and how to verify it. */
 export interface Task {
   /** Unique identifier of the task (task_…). */
@@ -1883,7 +1930,7 @@ export interface Task {
     /** What Checkbox must observe for the task to be done. */
     expected: string;
   };
-  /** What Checkbox needs before it can give the exact change or verify it (observation: it has not seen the page / email yet; facts: plan, price, cancel URL or merchant name; verify_domain: the site's domain is not verified yet, so Checkbox cannot visit it to verify this task: do the verify_domain task first). The title stays the same either way. */
+  /** What Checkbox needs before it can give the exact change or verify it (observation: it has not seen the page / email yet; facts: plan, price, cancel URL or merchant name; verify_domain: the site's domain is not verified yet, so Checkbox cannot visit it to verify this task: do the verify_domain task first; online_cancellation: the change names where subscribers cancel, so it waits on that task, listed in blocked_by). The title stays the same either way. */
   blocked_on: string | null;
   /** Done / declined tasks: verified (its checks pass), no_longer_applicable (its checks no longer apply, e.g. the data source changed), superseded, declined, decided (the owner confirmed a decision, e.g. New York notices by email only: closed, but its checks are not verified). */
   closed_reason: "verified" | "no_longer_applicable" | "superseded" | "declined" | "decided" | null;
@@ -1954,6 +2001,8 @@ export interface Task {
   };
   /** When it was done. Unix timestamp in seconds. */
   done_at: number | null;
+  /** Setups next to this task Checkbox has not seen before, logged for review (informational; never changes the task). Absent unless the deployment shows them. */
+  unfamiliar?: Array<UnfamiliarNote>;
 }
 
 /** The ordered, machine-readable list of changes that makes a site's checks pass, recomputed from its latest evaluation. */
@@ -2027,10 +2076,14 @@ export interface CompliancePlan {
   owner_questions?: {
     /** How to ask them: once, in one message, while the fixes go on. */
     description: string;
-    /** Every choice only the owner makes, together. */
+    /** Every choice only the owner makes, together. Empty when nothing is left to ask and only closed questions are reported. */
     questions: Array<{
-      /** "email_sender" (who sends the required emails), "notices_support_email" / "notices_cancel_timing" (what Checkbox Notices needs before it sends), "stripe_terms_url" (a step only the owner takes in the Stripe Dashboard: the Terms of Service URL Stripe needs before it collects consent, in test mode too), or the id of the task whose question it is. */
+      /** The id answerTask takes: the id of the task whose question it is (task_…), or the question's name for those that are not one task's: "email_sender", "notices_support_email", "notices_cancel_timing", "stripe_terms_url", "stripe_portal_login", "replace_payment_link" (send site with the answer when the account has several sites). Every listed question is answered with answerTask and this id. */
       id: string;
+      /** What the question is: "email_sender" (who sends the required emails), "notices_support_email" / "notices_cancel_timing" (what Checkbox Notices needs before it sends), "stripe_terms_url" (the Terms of Service URL Stripe needs before it collects consent, in test mode too), "stripe_portal_login" / "replace_payment_link" (Stripe Dashboard steps of a Payment Link site), or the key of the task whose question it is. */
+      key: string;
+      /** true when the question was not in the first batch the owner was asked: if they already answered the others, ask only these. Absent otherwise. */
+      added_later?: boolean;
       /** The question, in plain words for the owner. */
       text: string;
       /** The answers. */
@@ -2039,6 +2092,19 @@ export interface CompliancePlan {
       tasks: Array<string>;
       /** What the agent does with each answer. */
       on_answer: Record<string, string>;
+    }>;
+    /** Questions listed earlier that closed by themselves (reported for a day), each with the reason. Absent when none. */
+    closed?: Array<{
+      /** The question's id as it was listed. */
+      id: string;
+      /** What the question was (see questions[].key). */
+      key: string;
+      /** The question as it was listed. */
+      text: string;
+      /** Why it closed without an answer, in plain words. Tell the owner they need not answer it. */
+      reason: string;
+      /** When Checkbox saw it closed. Unix timestamp in seconds. */
+      closed: number;
     }>;
   };
   go_live?: GoLive;
@@ -2055,6 +2121,8 @@ export interface CompliancePlan {
     /** delivery_seen only: the real event the email came from. */
     basis: "test_run" | "synthetic_signup" | "checkbox_sent" | "notice_due" | "billing_event" | null;
   }>;
+  /** Setups on this site Checkbox has not seen before, logged for review (informational; never changes the status). Tell the human the headline and the line; do not promise a reply. Absent unless the deployment shows them. */
+  unfamiliar?: Array<UnfamiliarNote>;
   /** Rules / catalog version of the evaluation. */
   rules_version: string | null;
   /** Automated assessment; not legal advice. */
@@ -2093,13 +2161,34 @@ export interface UpdateTaskParams {
 export type AnsweredTask = Task & {
   /** When the answer waits for the human: the link they open (signed in to Checkbox) to confirm it. Same as answer.pending_confirmation_url; null when nothing waits for confirmation. */
   confirmation_url: string | null;
+  /** false when nothing was recorded because the task no longer asks a question (it changed since the plan was read); next_action says why and what to do. Absent when the answer was handled. */
+  recorded?: false;
 };
 
+/** What to do with the owner's answer to a question that is not one task's own: the exact call (next_action). */
+export interface AnsweredOwnerQuestion {
+  /** String representing the object's type. */
+  object: "owner_question_answer";
+  /** The question's id, as owner_questions lists it (its name). */
+  id: string;
+  /** What the question is (owner_questions[].key). */
+  key: string;
+  /** The answer as understood (one of the question's options). */
+  answer: string;
+  /** Always false: these questions are settled by a setting (updateNoticeSettings) or by what Stripe shows, never by a stored answer. */
+  recorded: false;
+  /** Whether the plan still asks this question. */
+  open: boolean;
+  next_action: PlanNextAction;
+}
+
 export interface AnswerTaskParams {
-  /** One of the task's question.options (yes / no, or confirmed / needs_change). */
+  /** One of the question's options (yes / no, or confirmed / needs_change). For the owner question notices_support_email, the support email address itself. */
   answer: string;
   /** Context from the human (stored with the attestation). */
   note?: string;
+  /** Only for an owner question named like email_sender: the site it belongs to (needed when the account has several sites). */
+  site?: string;
 }
 
 /** Expected vs observed for one check. */
@@ -2526,6 +2615,17 @@ export interface NoticeSettings {
   real_sends: "test_mode" | "confirmed" | "needs_confirmation" | "off";
   /** Where subscribers cancel online (site domain, hosted cancellation page or billing portal). */
   cancel_url: string | null;
+  /** Round 36: on updateNoticeSettings, the plan's email tasks Checkbox Notices now covers (no longer on your to-do list). An empty list when none; absent on retrieve. */
+  closed_tasks?: Array<{
+    /** The plan task (task_…). */
+    id: string;
+    /** The task key. */
+    key: string;
+    /** The task title. */
+    title: string;
+    /** Its plan status now: pending_live_check (Checkbox Notices sends it; it completes on the first real send or a test run) or done. */
+    status: string;
+  }>;
   /** Round 35: set when every notice links to cancel_url while Checkbox has not seen a working online cancellation (cancel.online_available is not passing). Fix the cancel option there, or point cancel_url at one that works (e.g. the hosted cancellation page). */
   cancel_url_warning?: string | null;
   /** Hex brand colour. */
@@ -4731,7 +4831,7 @@ export interface TestRunStep {
   observations: Record<string, unknown>;
   /** Evidence records (screenshots, page captures, raw emails) behind the step. */
   evidence: Array<string>;
-  /** Warning or failure code of the step (stable): key_missing, key_not_test_mode, key_invalid, key_permission_missing, checkout_config_missing, price_not_in_test_mode, checkout_session_failed, checkout_page_unreadable, checkout_not_completed, subscription_create_failed, test_clock_failed, no_email_received_within, reminder_not_received, portal_not_configured, cancel_not_completed, cancellation_email_not_received, checkout_url_missing, real_checkout_not_completed, payment_link_not_found, webhook_not_delivered, reminder_outside_window, reminder_timing_not_observed, cancel_flow_not_configured, cancel_not_confirmed_in_stripe, acknowledgment_content_incomplete, required_notice_skipped, cancel_replaced_by_other_subscription, not_judged, scan_config_missing, domain_not_verified, scanner_failed, stripe_api_error, timeout, canceled, internal_error. */
+  /** Warning or failure code of the step (stable): key_missing, key_not_test_mode, key_invalid, key_permission_missing, checkout_config_missing, price_not_in_test_mode, checkout_session_failed, checkout_page_unreadable, checkout_not_completed, subscription_create_failed, test_clock_failed, no_email_received_within, reminder_not_received, portal_not_configured, cancel_not_completed, cancellation_email_not_received, checkout_url_missing, real_checkout_not_completed, pre_checkout_steps_needed, check_failed, payment_link_not_found, webhook_not_delivered, reminder_outside_window, reminder_timing_not_observed, cancel_flow_not_configured, cancel_not_confirmed_in_stripe, acknowledgment_content_incomplete, required_notice_skipped, cancel_replaced_by_other_subscription, cancel_own_control_failed, cancel_own_control_not_tested, not_judged, scan_config_missing, domain_not_verified, scanner_failed, stripe_api_error, timeout, canceled, internal_error. */
   code: string | null;
   fix: TestRunFix;
 }
@@ -4791,7 +4891,7 @@ export interface TestRun {
   steps: Array<TestRunStep>;
   /** Why the run stopped (failed / canceled runs). */
   failure: {
-    /** Stable failure code: key_missing, key_not_test_mode, key_invalid, key_permission_missing, checkout_config_missing, price_not_in_test_mode, checkout_session_failed, checkout_page_unreadable, checkout_not_completed, subscription_create_failed, test_clock_failed, no_email_received_within, reminder_not_received, portal_not_configured, cancel_not_completed, cancellation_email_not_received, checkout_url_missing, real_checkout_not_completed, payment_link_not_found, webhook_not_delivered, reminder_outside_window, reminder_timing_not_observed, cancel_flow_not_configured, cancel_not_confirmed_in_stripe, acknowledgment_content_incomplete, required_notice_skipped, cancel_replaced_by_other_subscription, not_judged, scan_config_missing, domain_not_verified, scanner_failed, stripe_api_error, timeout, canceled, internal_error. */
+    /** Stable failure code: key_missing, key_not_test_mode, key_invalid, key_permission_missing, checkout_config_missing, price_not_in_test_mode, checkout_session_failed, checkout_page_unreadable, checkout_not_completed, subscription_create_failed, test_clock_failed, no_email_received_within, reminder_not_received, portal_not_configured, cancel_not_completed, cancellation_email_not_received, checkout_url_missing, real_checkout_not_completed, pre_checkout_steps_needed, check_failed, payment_link_not_found, webhook_not_delivered, reminder_outside_window, reminder_timing_not_observed, cancel_flow_not_configured, cancel_not_confirmed_in_stripe, acknowledgment_content_incomplete, required_notice_skipped, cancel_replaced_by_other_subscription, cancel_own_control_failed, cancel_own_control_not_tested, not_judged, scan_config_missing, domain_not_verified, scanner_failed, stripe_api_error, timeout, canceled, internal_error. */
     code: string;
     /** What went wrong. */
     message: string;
@@ -4915,7 +5015,37 @@ export interface TestRun {
       note: string | null;
     } | null;
   } | null;
+  /** Round 37: the one plan this run tested (its subscription's Stripe price); null before the run found a subscription. A run covers one plan: plans_not_run lists the others. */
+  plan_tested?: {
+    /** The plan's name: the registered checkout config the run used (plan), else the Stripe price's nickname. */
+    name: string | null;
+    /** The Stripe price (test mode) of the run's subscription. */
+    price: string | null;
+    /** Recurring amount in the smallest currency unit. */
+    amount: number | null;
+    /** ISO currency, lowercase. */
+    currency: string;
+    /** Billing interval. */
+    interval: string | null;
+    /** Intervals per billing period. */
+    interval_count: number;
+    /** Free-trial days of the run's subscription (0: none). */
+    trial_days: number;
+    /** The plan in words. */
+    summary: string;
+  } | null;
+  /** Round 37: registered plans (checkout configs) no test run of the site had observed when this run finished. Run each with createTestRun { plan: name }. */
+  plans_not_run?: Array<{
+    /** Registered checkout config id (stripe.checkout_config takes it; plan takes its name). */
+    config: string;
+    /** The config's name: pass it as plan to createTestRun. */
+    name: string | null;
+    /** Stripe prices its line_items sell. */
+    prices: Array<string>;
+  }>;
   next_action: NextAction;
+  /** Round 36: once the run finished, the site plan's status_label after it (the same words the plan, its verifications and the dashboard show, e.g. "Checks pass · 2 live checks pending"); null while the run is running or when the plan could not be read. A clean run is not the whole plan: owner steps and live checks pending stay on it. */
+  plan_status_label?: string | null;
 }
 
 /** A page of test runs, newest first. */
@@ -4984,7 +5114,7 @@ export interface Event {
   id: string;
   /** String representing the object's type. Always "event". */
   object: "event";
-  /** Event type: site.compliance_changed, finding.created, finding.resolved, scan.completed, scan.failed, law.changed, certificate.issued, certificate.lapsed, certificate.revoked, notice.sent, notice.due, notice.overdue, consent.created, receipt.created, test_run.completed, test_run.failed, plan.updated, site.checks_passed, site.compliant (deprecated), task.verified. */
+  /** Event type: site.compliance_changed, finding.created, finding.resolved, scan.completed, scan.failed, law.changed, check_record.issued, certificate.issued (deprecated), certificate.lapsed, certificate.revoked, notice.sent, notice.due, notice.overdue, consent.created, receipt.created, test_run.completed, test_run.failed, plan.updated, site.checks_passed, site.compliant (deprecated), task.verified. */
   type: string;
   /** API version used to render data.object. */
   api_version: string;
@@ -4994,7 +5124,7 @@ export interface Event {
   livemode: boolean;
   /** Event payload. */
   data: {
-    /** The object the event is about (a site, finding, scan, certificate, law_update or notice), as the API returns it. */
+    /** The object the event is about (a site, finding, scan, certificate (a check record), law_update or notice), as the API returns it. */
     object: Record<string, unknown>;
     /** For *_changed events: the previous values of the changed fields. */
     previous_attributes?: Record<string, unknown>;
@@ -5524,7 +5654,7 @@ export interface CreateTestRunParams {
   plan?: string;
   /** Stripe options. */
   stripe?: {
-    /** Registered checkout config (scc_…) to mirror; default: the newest one, else your latest live Checkout Session. "none" skips the registered configs (mirror your live checkout, stripe.price or stripe.payment_link instead). */
+    /** Registered checkout config id (scc_…) to mirror; to pick one by name or Price id, use the top-level plan field. Default: the newest one, else your latest live Checkout Session. "none" skips the registered configs (mirror your live checkout, stripe.price or stripe.payment_link instead). */
     checkout_config?: string;
     /** A test-mode price to subscribe to when nothing is registered. */
     price?: string;
@@ -5542,7 +5672,7 @@ export interface CreateTestRunParams {
     cancel_url?: string;
     /** Clicks that cancel in your flow (after login / cancel_url), e.g. [{ "action": "click", "text": "Cancel subscription" }, { "action": "click", "text": "Confirm" }]. */
     cancel_steps?: Array<ScanStep>;
-    /** How your customers cancel. Default: your flow when test_account / cancel_url / cancel_steps describe it; else the Stripe portal, taken as declared when Stripe has portal cancellation on and your site links to the portal, or when the account or cancellation page you registered redirects or links to the portal; otherwise reported as a warning (cancel_flow_not_configured: the cancel worked, but how your customers cancel was not given). */
+    /** How your customers cancel. Default: your flow when test_account / cancel_url / cancel_steps describe it; else the Stripe portal, taken as declared when Stripe has portal cancellation on and your site links to the portal, or when the account or cancellation page you registered redirects or links to the portal; otherwise reported as a warning (cancel_flow_not_configured: the cancel worked, but how your customers cancel was not given). "merchant_flow" is never replaced by the portal: without test_account / cancel_url / cancel_steps, Checkbox presses the cancel option the last scan saw on your site, else the account or cancellation page you registered (a link there to the Stripe portal login link counts as your control); with none of these, the step says what to pass. */
     cancel_via?: "merchant_flow" | "stripe_portal";
     /** A test account the shopper logs into: to buy as a logged-in user (real_checkout) and to cancel through your in-app flow. Mail to its address counts when you BCC the site's Checkbox address. */
     test_account?: {
@@ -5615,7 +5745,7 @@ export interface RetrieveTestRunParams {
 export interface CreateWebhookEndpointParams {
   /** HTTPS URL. */
   url: string;
-  /** Event types to send, or ["*"] for all: site.compliance_changed, finding.created, finding.resolved, scan.completed, scan.failed, law.changed, certificate.issued, certificate.lapsed, certificate.revoked, notice.sent, notice.due, notice.overdue, consent.created, receipt.created, test_run.completed, test_run.failed, plan.updated, site.checks_passed, site.compliant (deprecated), task.verified. */
+  /** Event types to send, or ["*"] for all: site.compliance_changed, finding.created, finding.resolved, scan.completed, scan.failed, law.changed, check_record.issued, certificate.issued (deprecated), certificate.lapsed, certificate.revoked, notice.sent, notice.due, notice.overdue, consent.created, receipt.created, test_run.completed, test_run.failed, plan.updated, site.checks_passed, site.compliant (deprecated), task.verified. */
   enabled_events: Array<string>;
   /** Description. */
   description?: string;
@@ -5637,7 +5767,7 @@ export interface ListWebhookEndpointsParams {
 export interface UpdateWebhookEndpointParams {
   /** HTTPS URL. */
   url?: string;
-  /** Event types to send, or ["*"] for all: site.compliance_changed, finding.created, finding.resolved, scan.completed, scan.failed, law.changed, certificate.issued, certificate.lapsed, certificate.revoked, notice.sent, notice.due, notice.overdue, consent.created, receipt.created, test_run.completed, test_run.failed, plan.updated, site.checks_passed, site.compliant (deprecated), task.verified. */
+  /** Event types to send, or ["*"] for all: site.compliance_changed, finding.created, finding.resolved, scan.completed, scan.failed, law.changed, check_record.issued, certificate.issued (deprecated), certificate.lapsed, certificate.revoked, notice.sent, notice.due, notice.overdue, consent.created, receipt.created, test_run.completed, test_run.failed, plan.updated, site.checks_passed, site.compliant (deprecated), task.verified. */
   enabled_events?: Array<string>;
   /** Description (null clears it). */
   description?: string | null;
@@ -5811,7 +5941,18 @@ export type LawChangedEvent = Event & {
   };
 };
 
-/** `certificate.issued`: A monitoring certificate was issued. */
+/** `check_record.issued`: A check record was issued: a signed record of which checks the site passed and when (API object: certificate). It is not a certification of legal compliance. */
+export type CheckRecordIssuedEvent = Event & {
+  /** Event type. */
+  type?: "check_record.issued";
+  data?: {
+    object: Certificate;
+    /** Previous values of changed fields. */
+    previous_attributes?: Record<string, unknown>;
+  };
+};
+
+/** `certificate.issued`: Deprecated alias of check_record.issued, kept so existing endpoints keep working: sent at the same moment with the same data.object. Subscribe to check_record.issued instead (an endpoint on "*" receives both). */
 export type CertificateIssuedEvent = Event & {
   /** Event type. */
   type?: "certificate.issued";
@@ -5822,7 +5963,7 @@ export type CertificateIssuedEvent = Event & {
   };
 };
 
-/** `certificate.lapsed`: A certificate lapsed (the site stopped meeting the requirements). */
+/** `certificate.lapsed`: A check record lapsed (the site stopped passing the checks it records). */
 export type CertificateLapsedEvent = Event & {
   /** Event type. */
   type?: "certificate.lapsed";
@@ -5833,7 +5974,7 @@ export type CertificateLapsedEvent = Event & {
   };
 };
 
-/** `certificate.revoked`: A certificate was revoked. */
+/** `certificate.revoked`: A check record was revoked. */
 export type CertificateRevokedEvent = Event & {
   /** Event type. */
   type?: "certificate.revoked";
@@ -5903,6 +6044,7 @@ export type WebhookEvent =
   | ScanCompletedEvent
   | ScanFailedEvent
   | LawChangedEvent
+  | CheckRecordIssuedEvent
   | CertificateIssuedEvent
   | CertificateLapsedEvent
   | CertificateRevokedEvent
@@ -5912,7 +6054,7 @@ export type WebhookEvent =
   | SiteCompliantEvent;
 
 /** Every webhook event type. */
-export const WEBHOOK_EVENT_TYPES = ["plan.updated","task.verified","notice.due","notice.overdue","receipt.created","test_run.completed","test_run.failed","site.compliance_changed","finding.created","finding.resolved","scan.completed","scan.failed","law.changed","certificate.issued","certificate.lapsed","certificate.revoked","notice.sent","consent.created","site.checks_passed","site.compliant"] as const;
+export const WEBHOOK_EVENT_TYPES = ["plan.updated","task.verified","notice.due","notice.overdue","receipt.created","test_run.completed","test_run.failed","site.compliance_changed","finding.created","finding.resolved","scan.completed","scan.failed","law.changed","check_record.issued","certificate.issued","certificate.lapsed","certificate.revoked","notice.sent","consent.created","site.checks_passed","site.compliant"] as const;
 export type WebhookEventType = (typeof WEBHOOK_EVENT_TYPES)[number];
 
 // ---- Errors ----------------------------------------------------------------------------------------------------

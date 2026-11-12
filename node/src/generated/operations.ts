@@ -1934,7 +1934,7 @@ export interface OperationTypes {
   retrieveCompliancePlan: { args: { site: string }; response: T.CompliancePlan };
   retrieveTask: { args: { task: string }; response: T.Task };
   updateTask: { args: { task: string } & T.UpdateTaskParams; response: T.Task };
-  answerTask: { args: { task: string } & T.AnswerTaskParams; response: T.AnsweredTask };
+  answerTask: { args: { task: string } & T.AnswerTaskParams; response: T.AnsweredTask | T.AnsweredOwnerQuestion };
   verifyTask: { args: { task: string } & T.VerifyTaskRequestParams; response: T.Verification };
   verifySite: { args: { site: string } & T.VerifySiteParams; response: T.Verification };
   retrieveVerification: { args: { verification: string } & T.RetrieveVerificationParams; response: T.Verification };
@@ -2470,13 +2470,13 @@ export class TasksResource extends Resource {
   /**
    * Record the human answer to a manual task.
    *
-   * For tasks with status manual: record the human's answer to task.question (ask them; never answer on their behalf). Answers that assert a legal fact (yes, confirmed) are stored as a proposal and return next_action.type "ask_human_to_confirm" with a link the human opens while signed in to Checkbox; only their confirmation writes the attestation, sets the site fact and re-evaluates. no / needs_change turn the task into a change for the agent; done (after a dashboard-only step) re-checks at once. Every answer is stored in the evidence vault.
+   * For tasks with status manual, and for every question the plan's owner_questions lists (by its id): record the human's answer (ask them; never answer on their behalf). An owner question that is not one task's own (owner_questions[].key email_sender, stripe_terms_url, …) returns an AnsweredOwnerQuestion: nothing is stored, next_action is the exact call that applies the answer. An answer to a task whose question closed since the plan was read records nothing (recorded: false) and says why. Answers that assert a legal fact (yes, confirmed) are stored as a proposal and return next_action.type "ask_human_to_confirm" with a link the human opens while signed in to Checkbox; only their confirmation writes the attestation, sets the site fact and re-evaluates. no / needs_change turn the task into a change for the agent; done (after a dashboard-only step) re-checks at once. Every answer is stored in the evidence vault.
    *
-   * @param task Unique identifier of the task (task_…).
+   * @param task The task id (task_…), or an owner_questions id that is not a task's (email_sender, notices_support_email, notices_cancel_timing, stripe_portal_login, replace_payment_link, stripe_terms_url).
    * @see POST /v1/tasks/{task}/answer (operation `answerTask`, scope `compliance_plans:write`)
    */
-  answer(task: string, params: T.AnswerTaskParams, options?: RequestOptions): Promise<T.AnsweredTask> {
-    return this._request(OPERATIONS.answerTask, [task], params, options) as Promise<T.AnsweredTask>;
+  answer(task: string, params: T.AnswerTaskParams, options?: RequestOptions): Promise<T.AnsweredTask | T.AnsweredOwnerQuestion> {
+    return this._request(OPERATIONS.answerTask, [task], params, options) as Promise<T.AnsweredTask | T.AnsweredOwnerQuestion>;
   }
 
   /**
@@ -2696,7 +2696,7 @@ export class NoticeSettingsResource extends Resource {
   /**
    * Update notice settings.
    *
-   * Chooses who sends the required emails (mode: merchant = you send them and Checkbox tracks them, the default; checkbox = Checkbox sends them), and sets branding, cancel_url and the confirmed cancellation policy. add_kinds / remove_kinds turn single notices on or off and leave the others as they are; enabled_kinds replaces the whole list. In checkbox mode, turning a notice on requires cancel_url, a confirmed policy, a support email, a connected Stripe, Recharge, Chargebee, Recurly or Paddle account and a sending address; otherwise resource_conflict explains what is missing. The support email may be the Stripe account's public one (used automatically); the account owner's login address only after the human confirms it in the dashboard (support_email_to_confirm; an agent cannot confirm it). Turning notices on through the API never emails a real subscriber: on a test-mode site only test-run inboxes (and marked test copies to the owner) are emailed, and on a live site real subscribers are emailed only after a person confirms it once in the dashboard, after a preview (real_sends). The account owner is emailed when an agent turns notices on.
+   * Chooses who sends the required emails (mode: merchant = you send them and Checkbox tracks them, the default; checkbox = Checkbox sends them), and sets branding, cancel_url and the confirmed cancellation policy. add_kinds / remove_kinds turn single notices on or off and leave the others as they are; enabled_kinds replaces the whole list. In checkbox mode, turning a notice on requires cancel_url, a confirmed policy, a support email, a connected Stripe, Recharge, Chargebee, Recurly or Paddle account and a sending address; otherwise resource_conflict explains what is missing. The support email may be the Stripe account's public one (used automatically); the account owner's login address only after the human confirms it in the dashboard (support_email_to_confirm; an agent cannot confirm it). Turning notices on through the API never emails a real subscriber: on a test-mode site only test-run inboxes (and marked test copies to the owner) are emailed, and on a live site real subscribers are emailed only after a person confirms it once in the dashboard, after a preview (real_sends). The account owner is emailed when an agent turns notices on (while an agent sets up a test-mode site, that change is listed in the setup summary email instead of an email of its own). The response lists the plan tasks Notices now covers (closed_tasks).
    *
    * @param site Unique identifier of the site (site_…).
    * @see POST /v1/sites/{site}/notice_settings (operation `updateNoticeSettings`, scope `notices:write`, live mode needs an activated account)
@@ -3296,7 +3296,7 @@ export class TestRunsResource extends Resource {
   /**
    * Retrieve a test run.
    *
-   * The run with every step's status, observations, check results and fixes. While it runs, next_action.type is "wait" and waiting_for says what it waits for; ?wait=30 answers as soon as the run moves on (or after 30 seconds). When it finished, next_action says what to fix (apply_fixes / review_warnings), retrieve_plan when the only warnings have nothing to change, or "none".
+   * The run with every step's status, observations, check results and fixes. While it runs, next_action.type is "wait" and waiting_for says what it waits for; ?wait=30 answers as soon as the run moves on (or after 30 seconds). When it finished, next_action says what to fix (apply_fixes / review_warnings), or retrieve_plan (retrieveCompliancePlan: the plan lists what is left; plan_status_label gives its status in words).
    *
    * @param testRun Unique identifier of the test run (run_…).
    * @see GET /v1/test_runs/{test_run} (operation `retrieveTestRun`, scope `test_runs:read`)

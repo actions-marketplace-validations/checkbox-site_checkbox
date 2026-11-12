@@ -239,6 +239,11 @@ export interface ToolOutput {
   next?: NextAction | null;
   /** Mark the result as an error the model should act on (still a normal result). */
   isError?: boolean;
+  /**
+   * Round 36 (pilot 35 item 18: setup and plan responses ran to 20-44 KB): print the JSON without indentation. The tools
+   * with a `verbose` argument use it by default.
+   */
+  compactJson?: boolean;
 }
 
 const MAX_JSON_CHARS = 60_000;
@@ -306,7 +311,11 @@ function fitNestedLists(data: unknown, arr: { path: string[]; items: unknown[] }
  * parse. Output is always valid JSON: an oversized list is paged (the first items that fit, plus `_page` naming the
  * ids of the rest to fetch one by one), never cut mid-value.
  */
-export function fitJson(data: unknown, max = MAX_JSON_CHARS): { json: string; page?: string } {
+export function fitJson(data: unknown, max = MAX_JSON_CHARS, flatFirst = false): { json: string; page?: string } {
+  if (flatFirst) {
+    const flat = JSON.stringify(data);
+    if (flat.length <= max) return { json: flat };
+  }
   const pretty = JSON.stringify(data, null, 2);
   if (pretty.length <= max) return { json: pretty };
   const arr = largestArray(data);
@@ -354,7 +363,7 @@ export function renderOutput(out: ToolOutput): CallToolResult {
   // Round 23 (pilot 22 item 27, agent-discovery: a result with no "Next:" line): every result names what comes next.
   lines.push(next ?? (out.isError ? FALLBACK_NEXT_ERROR : FALLBACK_NEXT));
   if (out.data !== undefined) {
-    const fitted = fitJson(forMcp(out.data));
+    const fitted = fitJson(forMcp(out.data), MAX_JSON_CHARS, out.compactJson === true);
     if (fitted.page) lines.push(`- ${fitted.page}`);
     lines.push('', '```json', fitted.json, '```');
   }
