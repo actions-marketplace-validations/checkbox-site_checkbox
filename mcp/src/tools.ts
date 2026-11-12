@@ -2486,7 +2486,7 @@ const getCompliantDisclosure: ToolDef = {
   // Round 15 (P4): a promo (intro price) is stated with how long it lasts.
   // Round 37 (pilot 36 item 12, core-codex): the terms may also come nested, { plan: {...}, merchant: {...} }, the shape
   // other tools use; they are flattened before anything is checked.
-  input: { ...elementsTermsShape, brand_name: planTermsShape.brand_name, intro_price: planTermsShape.intro_price, intro_percent_off: planTermsShape.intro_percent_off, intro_periods: planTermsShape.intro_periods, interval: z.enum(['day', 'week', 'month', 'year']).optional().describe('Billing interval.'), plan: z.record(z.unknown()).optional(), merchant: z.record(z.unknown()).optional(), site: z.string().max(100).optional().describe('Site id (site_…) to also get the Elements snippet for.'), jurisdictions: jurisdictions.optional() },
+  input: { ...elementsTermsShape, brand_name: planTermsShape.brand_name, intro_price: planTermsShape.intro_price, intro_percent_off: planTermsShape.intro_percent_off, intro_periods: planTermsShape.intro_periods, interval: z.enum(['day', 'week', 'month', 'year']).optional().describe('Billing interval.'), plan: z.record(z.string(), z.unknown()).optional(), merchant: z.record(z.string(), z.unknown()).optional(), site: z.string().max(100).optional().describe('Site id (site_…) to also get the Elements snippet for.'), jurisdictions: jurisdictions.optional() },
   scopes: ['checks:read'],
   annotations: { ...ro, readOnlyHint: false, title: 'Disclosure that passes the checks' },
   async run(rawArgs, { api, key }) {
