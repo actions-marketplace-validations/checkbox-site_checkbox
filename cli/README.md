@@ -25,8 +25,8 @@ Every command prints short human output, or exactly one JSON document with `--js
 ## `checkbox ci` — checks on every code change
 
 `checkbox.json` at the project root lists what to check: the merchant, the plans the checkout sells, and the files
-that produce the Stripe Checkout params, the disclosure next to the pay button, checkout / pricing pages and the
-lifecycle emails. `checkbox ci` runs every check with the rules engine bundled in this package (offline by default;
+that produce the Stripe Checkout params, the disclosure next to the pay button, checkout / pricing pages, the Terms
+of service page and the lifecycle emails. `checkbox ci` runs every check with the rules engine bundled in this package (offline by default;
 `--online` uses the API with `CHECKBOX_SECRET_KEY`, for preview URLs), prints one line per check and exits non-zero
 when one needs a fix. In GitHub Actions it annotates the file each check reads and writes a job summary with the fix
 and the corrected params / text.
@@ -38,6 +38,7 @@ and the corrected params / text.
   "plans": [{ "name": "Pro", "price": 19.99, "currency": "usd", "interval": "month", "trial_days": 14 }],
   "checks": {
     "stripe_checkout": [{ "name": "Pro checkout", "source": "app/api/checkout/route.ts" }],
+    "pages": [{ "name": "Terms of service", "kind": "terms", "file": "public/terms.html" }],
     "emails": [{ "name": "Welcome email", "kind": "acknowledgment", "file": "emails/welcome.html" }],
     "notice_schedule": true
   }

@@ -4,7 +4,7 @@
   "title": "Checkbox: subscription auto-renewal law checks",
   "description": "Auto-renewal law checks (ROSCA, click-to-cancel) for Stripe Checkout, cancellation, renewal emails",
   "websiteUrl": "https://checkbox.site/docs/mcp",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "remotes": [
     {
       "type": "streamable-http",
@@ -39,16 +39,19 @@
         "California ARL",
         "New York",
         "FTC",
-        "negative option"
+        "negative option",
+        "Stripe subscription compliance",
+        "click to cancel",
+        "subscription"
       ],
-      "summary": "Free checks of subscription checkouts (Stripe Checkout, Payment Links), terms, click-to-cancel cancellation flows and renewal reminder emails against U.S. auto-renewal laws (FTC ROSCA, California, New York and about 26 other states), with corrected Stripe Checkout parameters, disclosure text and email templates. Not legal advice."
+      "summary": "Free checks of subscription checkouts (Stripe Checkout, Payment Links), terms, click-to-cancel cancellation flows and renewal reminder emails against U.S. auto-renewal laws (FTC ROSCA and the laws of 27 states, DC and New York City, including California and New York), with corrected Stripe Checkout parameters, disclosure text and email templates. Not legal advice."
     }
   },
   "packages": [
     {
       "registryType": "npm",
       "identifier": "@checkbox-site/mcp",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "transport": {
         "type": "stdio"
       },

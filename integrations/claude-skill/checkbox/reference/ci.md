@@ -37,6 +37,10 @@ again. Use the plans and merchant facts you already sent to Checkbox.
 - Disclosure text that lives inside a component: move it to a .txt file the component imports, or check the built
   page under `"pages"` (`"file"`: static HTML; `"url"`: a preview, only with `--online`).
 - Several plans: every disclosure, page and email names its `"plan"`.
+- Terms of service: add the Terms page (`"kind": "terms"`, `"file"`: the HTML / Markdown file, or the built page) under
+  `"pages"`. It is checked against every plan, so a trial or price change cannot ship with stale Terms. Without one,
+  every run says "Terms: NOT checked in CI".
+- Put the run's "For the owner" checklist (`owner_items` in `--json`) in the pull request description.
 
 ## 2. Add the workflow
 

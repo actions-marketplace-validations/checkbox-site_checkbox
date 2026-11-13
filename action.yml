@@ -40,7 +40,7 @@ inputs:
     required: false
     # Always a version that is on npm (scripts/public-repos/published-versions.json "published"; the release check
     # fails otherwise). Raise it together with that file, after the new CLI is published (packages/cli/RELEASING.md).
-    default: "0.4.11"
+    default: "0.4.13"
   node-version:
     description: Node.js version (22+ runs TypeScript "module" entries without tsx).
     required: false
@@ -56,6 +56,12 @@ outputs:
   result:
     description: The outcome in words, consistent with the exit code (e.g. "passed with items to review (they do not fail this run)").
     value: ${{ steps.checkbox.outputs.result }}
+  terms-checked:
+    description: true when a Terms of service page ("kind" "terms" in checkbox.json) was checked; false means "Terms NOT checked in CI".
+    value: ${{ steps.checkbox.outputs.terms_checked }}
+  owner-items:
+    description: What only the owner can do, as a Markdown checklist for the pull request description (empty when none).
+    value: ${{ steps.checkbox.outputs.owner_items }}
 
 runs:
   using: composite

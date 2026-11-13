@@ -211,7 +211,7 @@ export interface SetupPlan {
   price_id?: string;
   /** Alias of `name` (the name the checks also accept). */
   plan_name?: string;
-  /** Alias of `amount` in MAJOR units (19 = $19.00); `amount` (minor units) is the canonical field. */
+  /** Alias of `amount` in MAJOR units (19 = $19.00), or as text ("$19/month", "19 USD/mo": its currency and interval fill those fields when absent); `amount` (minor units) is the canonical field. */
   price?: number | string;
   /** Alias of `intro_amount` in MAJOR units (8 = $8.00). */
   intro_price?: number | string;
@@ -479,6 +479,8 @@ export interface SetupSession {
     status_label?: string;
     /** When it started. Unix timestamp in seconds. */
     created: number;
+    /** Round 38: when it finished; null while it runs. Unix timestamp in seconds. */
+    finished_at?: number | null;
   } | null;
   /** Round 35: the plan's batched owner questions (the same as retrieveCompliancePlan owner_questions), so next_action's "as owner_questions says" can be followed from this response. Null when there is none. */
   owner_questions?: {
@@ -492,6 +494,8 @@ export interface SetupSession {
       key: string;
       /** true when the question was not in the first batch the owner was asked: if they already answered the others, ask only these. Absent otherwise. */
       added_later?: boolean;
+      /** true when the question closed earlier (see closed) and is asked again because what it is about changed back. Absent otherwise. */
+      reopened?: boolean;
       /** The question, in plain words for the owner. */
       text: string;
       /** The answers. */
@@ -501,7 +505,7 @@ export interface SetupSession {
       /** What the agent does with each answer. */
       on_answer: Record<string, string>;
     }>;
-    /** Questions listed earlier that closed by themselves (reported for a day), each with the reason. Absent when none. */
+    /** Questions listed earlier that closed (reported for a day), each with the reason: an answer the owner gave, or what Checkbox observed. A question closes only this way; it is never dropped silently. Absent when none. */
     closed?: Array<{
       /** The question's id as it was listed. */
       id: string;
@@ -1395,7 +1399,7 @@ export interface CreateSiteParams {
   regions?: Array<"US-FED" | "US-AL" | "US-AK" | "US-AZ" | "US-AR" | "US-CA" | "US-CO" | "US-CT" | "US-DE" | "US-DC" | "US-FL" | "US-GA" | "US-HI" | "US-ID" | "US-IL" | "US-IN" | "US-IA" | "US-KS" | "US-KY" | "US-LA" | "US-ME" | "US-MD" | "US-MA" | "US-MI" | "US-MN" | "US-MS" | "US-MO" | "US-MT" | "US-NE" | "US-NV" | "US-NH" | "US-NJ" | "US-NM" | "US-NY" | "US-NC" | "US-ND" | "US-OH" | "US-OK" | "US-OR" | "US-PA" | "US-RI" | "US-SC" | "US-SD" | "US-TN" | "US-TX" | "US-UT" | "US-VT" | "US-VA" | "US-WA" | "US-WV" | "US-WI" | "US-WY">;
   /** Devices to emulate. */
   devices?: Array<"desktop" | "mobile">;
-  /** Scheduled re-scan interval (0 = off, minimum 60). Default 1440 in live mode, 0 in test mode. */
+  /** Scheduled re-scan interval (0 = off, minimum 60). Default 60 (hourly) in live mode, 0 in test mode. */
   monitoring_interval_minutes?: number;
   /** Which requirement tiers Checkbox shows. minimum: the legal floor only (required items). balanced (default): required items plus recommended suggestions (consent receipts, a cancellation confirmation email…), collapsed and never blocking "Checks pass". maximum: everything, including extra protections (a separate checkbox per term, a pre-purchase summary). Only required items can keep a site's checks from passing, at every level. */
   protection_level?: "minimum" | "balanced" | "maximum";
@@ -1434,7 +1438,7 @@ export interface UpdateSiteParams {
   regions?: Array<"US-FED" | "US-AL" | "US-AK" | "US-AZ" | "US-AR" | "US-CA" | "US-CO" | "US-CT" | "US-DE" | "US-DC" | "US-FL" | "US-GA" | "US-HI" | "US-ID" | "US-IL" | "US-IN" | "US-IA" | "US-KS" | "US-KY" | "US-LA" | "US-ME" | "US-MD" | "US-MA" | "US-MI" | "US-MN" | "US-MS" | "US-MO" | "US-MT" | "US-NE" | "US-NV" | "US-NH" | "US-NJ" | "US-NM" | "US-NY" | "US-NC" | "US-ND" | "US-OH" | "US-OK" | "US-OR" | "US-PA" | "US-RI" | "US-SC" | "US-SD" | "US-TN" | "US-TX" | "US-UT" | "US-VT" | "US-VA" | "US-WA" | "US-WV" | "US-WI" | "US-WY">;
   /** Devices to emulate. */
   devices?: Array<"desktop" | "mobile">;
-  /** Scheduled re-scan interval (0 = off, minimum 60). Default 1440 in live mode, 0 in test mode. */
+  /** Scheduled re-scan interval (0 = off, minimum 60). Default 60 (hourly) in live mode, 0 in test mode. */
   monitoring_interval_minutes?: number;
   /** Which requirement tiers Checkbox shows. minimum: the legal floor only (required items). balanced (default): required items plus recommended suggestions (consent receipts, a cancellation confirmation email…), collapsed and never blocking "Checks pass". maximum: everything, including extra protections (a separate checkbox per term, a pre-purchase summary). Only required items can keep a site's checks from passing, at every level. */
   protection_level?: "minimum" | "balanced" | "maximum";
@@ -1866,6 +1870,8 @@ export interface Task {
   priority: "critical" | "high" | "medium" | "low";
   /** required (the legal floor: the only tier that can keep the site's checks from passing), recommended (clearer records beyond the legal floor, conversion-neutral; shown at protection level balanced and maximum, never blocks), extra (maximum protection only). Always present on API responses. */
   tier?: "required" | "recommended" | "extra";
+  /** before_launch (tier required: an open one concerns a requirement at checkout, cancellation or a required notice; only these keep the site from being ready to launch) or good_practice (tier recommended or extra: optional suggestions, never blocking). Always present on API responses. */
+  launch_tier?: "before_launch" | "good_practice";
   /** User-facing status. needs_fix (a requirement is clearly not met: `compliance.fix` is the one change), pending_live_check (everything Checkbox can see is right; the live event has not been observed yet — counts as passing the checks), verified_live (observed live: proof run, real BCC'd send, Stripe-confirmed cancellation), your_call (a real decision for a person: `compliance.question`), compliant (passes; grey areas carry a `compliance.note`), not_applicable, not_set_up (no sign the email or setting exists yet: `compliance.fix` is the one-click way to set it up; never counts as passing the checks), not_checked (Checkbox has not tried it yet, e.g. the cancel flow: `compliance.fix` says how; never counts as passing the checks). */
   compliance_status?: "needs_fix" | "pending_live_check" | "verified_live" | "your_call" | "compliant" | "not_applicable" | "not_set_up" | "not_checked";
   /** The status in words to show a person ("Needs a fix", "Your call", "Not set up yet", "Not checked yet", "Checks pass"…). Show this, never the machine value. */
@@ -2059,6 +2065,29 @@ export interface CompliancePlan {
     /** Extra protections (maximum only). */
     extra: Array<string>;
   };
+  /** The plan in two groups: what to do before you launch (tasks with launch_tier before_launch) and good practice (optional). Show label to people; list before_launch tasks first and good practice as one optional line. */
+  launch?: {
+    /** Every before_launch task is done and the checks pass. Good-practice suggestions may remain (optional). */
+    ready: boolean;
+    /** The words to show a person: "Ready to launch", "2 things before you launch" or "Checks still running". Never "compliant". */
+    label: string;
+    /** Before-launch tasks: open (the to-do list, the same count as status_label) and total. */
+    before_launch: {
+      /** Open before-launch tasks (the to-do list). */
+      open: number;
+      /** All before-launch tasks in the plan. */
+      total: number;
+    };
+    /** Good-practice suggestions: open and total. Optional; never blocks launch. */
+    good_practice: {
+      /** Open good-practice suggestions. */
+      open: number;
+      /** All good-practice suggestions in the plan. */
+      total: number;
+    };
+    /** "1 good-practice suggestion (optional)", or null when none is open. */
+    good_practice_line: string | null;
+  };
   compliance: ComplianceRollup | null;
   /** What the assessment rests on. Tell the human about not_observed and attested items; never tell them the site "is compliant". */
   coverage: {
@@ -2084,6 +2113,8 @@ export interface CompliancePlan {
       key: string;
       /** true when the question was not in the first batch the owner was asked: if they already answered the others, ask only these. Absent otherwise. */
       added_later?: boolean;
+      /** true when the question closed earlier (see closed) and is asked again because what it is about changed back. Absent otherwise. */
+      reopened?: boolean;
       /** The question, in plain words for the owner. */
       text: string;
       /** The answers. */
@@ -2093,7 +2124,7 @@ export interface CompliancePlan {
       /** What the agent does with each answer. */
       on_answer: Record<string, string>;
     }>;
-    /** Questions listed earlier that closed by themselves (reported for a day), each with the reason. Absent when none. */
+    /** Questions listed earlier that closed (reported for a day), each with the reason: an answer the owner gave, or what Checkbox observed. A question closes only this way; it is never dropped silently. Absent when none. */
     closed?: Array<{
       /** The question's id as it was listed. */
       id: string;
@@ -2277,6 +2308,17 @@ export interface Verification {
   plan_status: "action_required" | "verifying" | "compliant" | "blocked" | null;
   /** The plan status in words to show a person, from the same counts as the summary ("1 fix needed · 2 to set up", "1 decision for you"; else action_required "Fixes needed", blocked "Your call"), "Checks still running (N)" while checks are still running (verifying), compliant "Checks pass"; while an agent works the site and everything left waits for a deploy or the owner (next_action done_for_now): "Waiting on deploy and you" or "Waiting on deploy". Show this, never the machine value (`compliant` is a status name, not a legal conclusion). */
   plan_status_label?: string | null;
+  /** Open plan tasks this re-check (or the checks it started) found, new since the plan was read before it: work them too. Omitted when there are none. */
+  new_tasks?: Array<{
+    /** Task id. */
+    id: string;
+    /** Task key. */
+    key: string;
+    /** Task title. */
+    title: string;
+    /** What found it (a scan of a page, the read of your Stripe settings, ...). */
+    found_by: string | null;
+  }>;
   next_action: PlanNextAction;
   /** When it was requested. Unix timestamp in seconds. */
   created: number;
@@ -2304,9 +2346,9 @@ export interface VerifyTaskParams {
     /** HTML body. */
     html?: string;
   };
-  /** email_copy tasks: check the email against this plan only (its name, e.g. "Annual"). */
+  /** email_copy tasks: check the email against this plan only (its name, e.g. "Annual"). Stripe Checkout params tasks: judge (and wait for) only this plan's Checkout params. */
   plan?: string;
-  /** email_copy tasks: check the email against the plan with this Stripe Price id only. */
+  /** email_copy tasks: check the email against the plan with this Stripe Price id only. Stripe Checkout params tasks: judge only the params that sell this Price. */
   price_id?: string;
   /** Kept for compatibility: a task that is already done (or declined) is always re-checked now (Stripe re-read, registered checkout configs judged again, a fresh evaluation or a confirming scan), never answered from its last result. A task closed without anything observed passing (superseded, no longer applicable, or a person's decision) answers not_checked: nothing to verify. */
   recheck?: boolean;
@@ -4805,7 +4847,7 @@ export interface TestRunStep {
   key: string;
   /** Human-readable step title. */
   title: string;
-  /** passed: observed, with evidence, and every judged check passed (never on an assumption); failed: a check failed or the step broke the run; warning: needs review — could not be fully observed or proven (see code and fix); skipped: not applicable or turned off; info: informational only (e.g. a bare Stripe-hosted test checkout that is not your checkout): its checks are listed but not counted and need no fix. */
+  /** passed: observed, with evidence, and every judged check passed (never on an assumption), or the only open check is an owner decision, which summary then names ("Passed (owner decision: …)"); failed: a check failed or the step broke the run; warning: needs review — could not be fully observed or proven (see code and fix); skipped: not applicable or turned off; info: informational only (e.g. a bare Stripe-hosted test checkout that is not your checkout): its checks are listed but not counted and need no fix. */
   status: "pending" | "running" | "passed" | "failed" | "warning" | "skipped" | "info";
   /** What was observed, in one or two sentences. */
   summary: string | null;
@@ -4885,6 +4927,8 @@ export interface TestRun {
   finished: number | null;
   /** The same as finished (the name verifications use): when the run finished; null while it runs. Unix timestamp in seconds. */
   completed: number | null;
+  /** Round 38: the same as finished (unix seconds): when the run finished; null while it runs. Unix timestamp in seconds. */
+  finished_at: number | null;
   /** How long the run took, from started (or created) to finished, in seconds; null while it runs. */
   duration_seconds: number | null;
   /** Lifecycle steps in order. */
