@@ -4,7 +4,7 @@
   "title": "Checkbox: subscription auto-renewal law checks",
   "description": "Auto-renewal law checks (ROSCA, click-to-cancel) for Stripe Checkout, cancellation, renewal emails",
   "websiteUrl": "https://checkbox.site/docs/mcp",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "remotes": [
     {
       "type": "streamable-http",
@@ -51,7 +51,7 @@
     {
       "registryType": "npm",
       "identifier": "@checkbox-site/mcp",
-      "version": "0.4.1",
+      "version": "0.4.2",
       "transport": {
         "type": "stdio"
       },

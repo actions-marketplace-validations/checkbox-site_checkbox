@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 # Published to PyPI as checkbox-site ("checkbox" and "checkbox-sdk" belong to unrelated projects); the import name is `checkbox`.
 name = "checkbox-site"
-version = "0.4.1"
+version = "0.4.2"
 description = "Checkbox: auto-renewal law and subscription compliance checks (FTC ROSCA, California ARL, New York and other state laws) for Stripe Checkout and other subscription checkouts, click-to-cancel cancellation flows and renewal reminder emails. Official Python SDK."
 readme = "README.md"
 requires-python = ">=3.10"

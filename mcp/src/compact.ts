@@ -117,13 +117,17 @@ const nextType = (n: unknown): string | undefined => (isObj(n) && typeof n.type 
 
 /** owner_questions once: the ask (with the /todo link) and each question by id, text and options. */
 export function compactOwnerQuestions(oq: unknown): Obj | undefined {
-  if (!isObj(oq) || !Array.isArray(oq.questions) || !oq.questions.length) return undefined;
+  if (!isObj(oq) || !Array.isArray(oq.questions)) return undefined;
+  // Round 41: answers waiting for the owner's confirmation are never asked again: listed once, with the link.
+  const waiting = (Array.isArray(oq.awaiting_confirmation) ? (oq.awaiting_confirmation as unknown[]) : []).filter(isObj).map((a) => prune({ id: a.id, answer: a.answer, confirmation_url: a.confirmation_url }));
+  if (!oq.questions.length) return waiting.length ? { how: 'Do not ask these again: the owner confirms each answer at its link (their To-do page lists them all).', awaiting_confirmation: waiting } : undefined;
   const questions = (oq.questions as unknown[]).filter(isObj).map((q) => prune({ id: q.id, text: q.text, options: q.options }));
   // The ask's link to the owner's to-do page, when it names one.
   const link = /https?:\/\/\S+?\/todo\b\S*/.exec(String(oq.description ?? ''))?.[0]?.replace(/[.,:;]+$/, '');
   return prune({
-    how: `Ask the human these once, in one message${link ? ` (the legal one at ${link}: send the link)` : ''}; then answer_task { task: <id>, answer } for each: it says what to do. Keep fixing meanwhile.`,
+    how: `Ask the human these once, in one message${link ? ` (the legal one at ${link}: send the link)` : ''}; then answer_task { task: <id>, answer } for each: it saves the answer and the question is never asked again. Keep fixing meanwhile.`,
     questions,
+    ...(waiting.length ? { awaiting_confirmation: waiting } : {}),
   });
 }
 

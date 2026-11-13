@@ -60,6 +60,8 @@ Manual tasks (`change.type: "manual"`) carry a `question`. Ask the human; record
 ## Synthetic test subscription (Stripe test mode)
 
 The human adds a restricted Stripe TEST key for the site in the Checkbox dashboard (the site's Proof page; live keys
-are refused; never ask for it in chat), then `start_test_run` (REST: `POST /v1/sites/{site}/test_runs {}`) and poll
+are refused; never ask for it in chat). In test mode, when the plan asks for a test run, Checkbox starts it itself
+(`next_action.type` `wait_for_test_run`); otherwise call `start_test_run` (REST: `POST /v1/sites/{site}/test_runs {}`,
+which returns the automatic run while it is going). Poll
 `get_test_run` (REST: `GET /v1/test_runs/{run}`) every 15-30 s. Each step reports what was observed, check results
 and a fix. Nothing is charged.

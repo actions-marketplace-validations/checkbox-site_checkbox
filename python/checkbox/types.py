@@ -715,6 +715,24 @@ SetupSessionOwnerQuestionsClosedItem = TypedDict(
 )
 
 
+SetupSessionOwnerQuestionsAwaitingConfirmationItem = TypedDict(
+    "SetupSessionOwnerQuestionsAwaitingConfirmationItem",
+    {
+        #: Unique identifier of the task (task_…).
+        "id": str,
+        #: The key of the task whose question it is.
+        "key": str,
+        #: The question that was answered.
+        "text": str,
+        #: The proposed answer.
+        "answer": str,
+        #: The link the owner opens (signed in to Checkbox) to confirm or correct it.
+        "confirmation_url": str,
+    },
+    total=False,
+)
+
+
 #: Round 35: the plan's batched owner questions (the same as retrieveCompliancePlan owner_questions), so next_action's "as owner_questions says" can be followed from this response. Null when there is none.
 SetupSessionOwnerQuestions = TypedDict(
     "SetupSessionOwnerQuestions",
@@ -725,6 +743,8 @@ SetupSessionOwnerQuestions = TypedDict(
         "questions": List["SetupSessionOwnerQuestionsQuestionsItem"],
         #: Questions listed earlier that closed (reported for a day), each with the reason: an answer the owner gave, or what Checkbox observed. A question closes only this way; it is never dropped silently. Absent when none. (optional)
         "closed": List["SetupSessionOwnerQuestionsClosedItem"],
+        #: Answers the agent recorded that wait for the owner's confirmation. They are not questions to ask again: the owner opens the link once (their To-do page lists every one). Absent when none. (optional)
+        "awaiting_confirmation": List["SetupSessionOwnerQuestionsAwaitingConfirmationItem"],
     },
     total=False,
 )
@@ -3097,6 +3117,24 @@ CompliancePlanOwnerQuestionsClosedItem = TypedDict(
 )
 
 
+CompliancePlanOwnerQuestionsAwaitingConfirmationItem = TypedDict(
+    "CompliancePlanOwnerQuestionsAwaitingConfirmationItem",
+    {
+        #: Unique identifier of the task (task_…).
+        "id": str,
+        #: The key of the task whose question it is.
+        "key": str,
+        #: The question that was answered.
+        "text": str,
+        #: The proposed answer.
+        "answer": str,
+        #: The link the owner opens (signed in to Checkbox) to confirm or correct it.
+        "confirmation_url": str,
+    },
+    total=False,
+)
+
+
 #: Every open owner choice as ONE batched question (who sends the required emails, plus each question task such as the New York notice channel). Ask it once, early, in one message; the plan's next_action says the same. Absent when there is none.
 CompliancePlanOwnerQuestions = TypedDict(
     "CompliancePlanOwnerQuestions",
@@ -3107,6 +3145,8 @@ CompliancePlanOwnerQuestions = TypedDict(
         "questions": List["CompliancePlanOwnerQuestionsQuestionsItem"],
         #: Questions listed earlier that closed (reported for a day), each with the reason: an answer the owner gave, or what Checkbox observed. A question closes only this way; it is never dropped silently. Absent when none. (optional)
         "closed": List["CompliancePlanOwnerQuestionsClosedItem"],
+        #: Answers the agent recorded that wait for the owner's confirmation. They are not questions to ask again: the owner opens the link once (their To-do page lists every one). Absent when none. (optional)
+        "awaiting_confirmation": List["CompliancePlanOwnerQuestionsAwaitingConfirmationItem"],
     },
     total=False,
 )
@@ -3498,7 +3538,7 @@ AnsweredOwnerQuestion = TypedDict(
         "key": str,
         #: The answer as understood (one of the question's options).
         "answer": str,
-        #: Whether Checkbox saved the answer. true: a Stripe Dashboard step (stripe_terms_url, stripe_portal_login, replace_payment_link) the plan no longer asks. false: nothing was saved; for a notice setting (email_sender, notices_support_email, notices_cancel_timing) next_action is the one call that applies it.
+        #: Whether Checkbox saved the answer. true: the plan no longer asks it (a Stripe Dashboard step, or a notice setting (email_sender, notices_support_email, notices_cancel_timing) applied to the Notices settings). false: nothing was saved (only a person can apply it, or the key lacks notices:write); next_action says the one step or call that applies it.
         "recorded": bool,
         #: Whether the plan still asks this question.
         "open": bool,
@@ -7264,6 +7304,37 @@ DeletedTestCredential = TypedDict(
 )
 
 
+StripeCheckoutConfigJudgementFailingItem = TypedDict(
+    "StripeCheckoutConfigJudgementFailingItem",
+    {
+        #: The failing check.
+        "check_id": str,
+        #: Short title of the check.
+        "title": str,
+        #: What the params do wrong and how to fix it.
+        "detail": str,
+    },
+    total=False,
+)
+
+
+#: Registration only: how the compliance plan judges the registered params.
+StripeCheckoutConfigJudgement = TypedDict(
+    "StripeCheckoutConfigJudgement",
+    {
+        #: The compliance plan's verdict on these params (the same judgement as checkStripeCheckoutSession with site).
+        "verdict": Literal["pass", "fail", "needs_review"],
+        #: Checks the params fail (fail) or leave open (needs_review).
+        "failing": List["StripeCheckoutConfigJudgementFailingItem"],
+        #: Engine-verified params that pass, when Checkbox can correct them: put them in your code, then register again.
+        "corrected_params": Optional[Dict[str, Any]],
+        #: needs_review only: why Checkbox could not judge them yet (e.g. a Price it has not read from Stripe). (optional)
+        "problem": str,
+    },
+    total=False,
+)
+
+
 #: Checkout Session parameters your code uses, registered so test runs mirror exactly your checkout into Stripe test mode.
 StripeCheckoutConfig = TypedDict(
     "StripeCheckoutConfig",
@@ -7292,6 +7363,8 @@ StripeCheckoutConfig = TypedDict(
         "metadata": Dict[str, str],
         #: When the config was registered. Unix timestamp in seconds.
         "created": int,
+        #: (optional)
+        "judgement": "StripeCheckoutConfigJudgement",
         #: (optional)
         "next_action": "NextAction",
     },
@@ -7745,6 +7818,8 @@ TestRun = TypedDict(
         "finished_at": Optional[int],
         #: How long the run took, from started (or created) to finished, in seconds; null while it runs.
         "duration_seconds": Optional[int],
+        #: Round 41: true when Checkbox started the run itself because the compliance plan asked for one (test mode, with the site's Stripe TEST key stored). createTestRun returns this run while it is active instead of starting another.
+        "auto_started": bool,
         #: Lifecycle steps in order.
         "steps": List["TestRunStep"],
         #: Why the run stopped (failed / canceled runs).
@@ -8757,7 +8832,7 @@ CreateTestRunParamsGeneric = TypedDict(
 CreateTestRunParams = TypedDict(
     "CreateTestRunParams",
     {
-        #: Stripe runs. mirror (default): Checkbox mirrors your checkout into test mode and moves a test clock through every legal notice window. real_checkout ("Run proof"): the shopper buys through YOUR checkout on your test deployment (stripe.checkout_url or stripe.payment_link) with card 4242 and the run inbox, so your own webhook handlers and email code fire; Checkbox watches the inbox, Stripe's events and your cancel flow. Needs your test deployment on Stripe TEST keys with a test-mode webhook endpoint. (optional)
+        #: Stripe runs. mirror (default): Checkbox mirrors your checkout into test mode and moves a test clock through every legal notice window. On a Payment Link site it mirrors the test-mode Payment Link your page links to, and the shopper opens that link's own Stripe page from your page, so its real consent box and text are judged. real_checkout ("Run proof"): the shopper buys through YOUR checkout on your test deployment (stripe.checkout_url or stripe.payment_link) with card 4242 and the run inbox, so your own webhook handlers and email code fire; Checkbox watches the inbox, Stripe's events and your cancel flow. Needs your test deployment on Stripe TEST keys with a test-mode webhook endpoint. (optional)
         "mode": Literal["mirror", "real_checkout"],
         #: stripe (default when a Stripe test key is stored or the site uses Stripe) or generic (test coupon / test account, no time travel). (optional)
         "type": Literal["stripe", "generic"],

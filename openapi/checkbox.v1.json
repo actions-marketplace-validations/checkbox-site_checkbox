@@ -2100,6 +2100,56 @@
                     "closed": 1793318400
                   }
                 ]
+              },
+              "awaiting_confirmation": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "description": "Unique identifier of the task (task_…).",
+                      "example": "task_3f9a1c2e7b4d4e0f9a8b7c6d5e4f3a2b"
+                    },
+                    "key": {
+                      "type": "string",
+                      "description": "The key of the task whose question it is.",
+                      "example": "attest_ny_notice_channel"
+                    },
+                    "text": {
+                      "type": "string",
+                      "description": "The question that was answered.",
+                      "example": "New York: do subscribers choose how they get notices?"
+                    },
+                    "answer": {
+                      "type": "string",
+                      "description": "The proposed answer.",
+                      "example": "email_only"
+                    },
+                    "confirmation_url": {
+                      "type": "string",
+                      "description": "The link the owner opens (signed in to Checkbox) to confirm or correct it.",
+                      "example": "https://app.checkbox.site/confirm-answer?task=task_…&token=…"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "key",
+                    "text",
+                    "answer",
+                    "confirmation_url"
+                  ]
+                },
+                "description": "Answers the agent recorded that wait for the owner's confirmation. They are not questions to ask again: the owner opens the link once (their To-do page lists every one). Absent when none.",
+                "example": [
+                  {
+                    "id": "task_3f9a1c2e7b4d4e0f9a8b7c6d5e4f3a2b",
+                    "key": "attest_ny_notice_channel",
+                    "text": "New York: do subscribers choose how they get notices?",
+                    "answer": "email_only",
+                    "confirmation_url": "https://app.checkbox.site/confirm-answer?task=task_…&token=…"
+                  }
+                ]
               }
             },
             "required": [
@@ -2133,6 +2183,15 @@
                   "text": "In the Stripe Dashboard, Settings → Public details, set your Terms of Service URL.",
                   "reason": "Closed: the Terms of Service URL in the Stripe Dashboard (Settings > Public details) is set.",
                   "closed": 1793318400
+                }
+              ],
+              "awaiting_confirmation": [
+                {
+                  "id": "task_3f9a1c2e7b4d4e0f9a8b7c6d5e4f3a2b",
+                  "key": "attest_ny_notice_channel",
+                  "text": "New York: do subscribers choose how they get notices?",
+                  "answer": "email_only",
+                  "confirmation_url": "https://app.checkbox.site/confirm-answer?task=task_…&token=…"
                 }
               ]
             }
@@ -2957,6 +3016,15 @@
                       "text": "In the Stripe Dashboard, Settings → Public details, set your Terms of Service URL.",
                       "reason": "Closed: the Terms of Service URL in the Stripe Dashboard (Settings > Public details) is set.",
                       "closed": 1793318400
+                    }
+                  ],
+                  "awaiting_confirmation": [
+                    {
+                      "id": "task_3f9a1c2e7b4d4e0f9a8b7c6d5e4f3a2b",
+                      "key": "attest_ny_notice_channel",
+                      "text": "New York: do subscribers choose how they get notices?",
+                      "answer": "email_only",
+                      "confirmation_url": "https://app.checkbox.site/confirm-answer?task=task_…&token=…"
                     }
                   ]
                 },
@@ -10068,6 +10136,56 @@
                     "closed": 1793318400
                   }
                 ]
+              },
+              "awaiting_confirmation": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "description": "Unique identifier of the task (task_…).",
+                      "example": "task_3f9a1c2e7b4d4e0f9a8b7c6d5e4f3a2b"
+                    },
+                    "key": {
+                      "type": "string",
+                      "description": "The key of the task whose question it is.",
+                      "example": "attest_ny_notice_channel"
+                    },
+                    "text": {
+                      "type": "string",
+                      "description": "The question that was answered.",
+                      "example": "New York: do subscribers choose how they get notices?"
+                    },
+                    "answer": {
+                      "type": "string",
+                      "description": "The proposed answer.",
+                      "example": "email_only"
+                    },
+                    "confirmation_url": {
+                      "type": "string",
+                      "description": "The link the owner opens (signed in to Checkbox) to confirm or correct it.",
+                      "example": "https://app.checkbox.site/confirm-answer?task=task_…&token=…"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "key",
+                    "text",
+                    "answer",
+                    "confirmation_url"
+                  ]
+                },
+                "description": "Answers the agent recorded that wait for the owner's confirmation. They are not questions to ask again: the owner opens the link once (their To-do page lists every one). Absent when none.",
+                "example": [
+                  {
+                    "id": "task_3f9a1c2e7b4d4e0f9a8b7c6d5e4f3a2b",
+                    "key": "attest_ny_notice_channel",
+                    "text": "New York: do subscribers choose how they get notices?",
+                    "answer": "email_only",
+                    "confirmation_url": "https://app.checkbox.site/confirm-answer?task=task_…&token=…"
+                  }
+                ]
               }
             },
             "required": [
@@ -10101,6 +10219,15 @@
                   "text": "In the Stripe Dashboard, Settings → Public details, set your Terms of Service URL.",
                   "reason": "Closed: the Terms of Service URL in the Stripe Dashboard (Settings > Public details) is set.",
                   "closed": 1793318400
+                }
+              ],
+              "awaiting_confirmation": [
+                {
+                  "id": "task_3f9a1c2e7b4d4e0f9a8b7c6d5e4f3a2b",
+                  "key": "attest_ny_notice_channel",
+                  "text": "New York: do subscribers choose how they get notices?",
+                  "answer": "email_only",
+                  "confirmation_url": "https://app.checkbox.site/confirm-answer?task=task_…&token=…"
                 }
               ]
             }
@@ -10455,7 +10582,7 @@
           },
           "recorded": {
             "type": "boolean",
-            "description": "Whether Checkbox saved the answer. true: a Stripe Dashboard step (stripe_terms_url, stripe_portal_login, replace_payment_link) the plan no longer asks. false: nothing was saved; for a notice setting (email_sender, notices_support_email, notices_cancel_timing) next_action is the one call that applies it.",
+            "description": "Whether Checkbox saved the answer. true: the plan no longer asks it (a Stripe Dashboard step, or a notice setting (email_sender, notices_support_email, notices_cancel_timing) applied to the Notices settings). false: nothing was saved (only a person can apply it, or the key lacks notices:write); next_action says the one step or call that applies it.",
             "example": false
           },
           "open": {
@@ -22279,6 +22406,77 @@
         ],
         "description": "A deleted test credential."
       },
+      "StripeCheckoutConfigJudgement": {
+        "type": "object",
+        "properties": {
+          "verdict": {
+            "type": "string",
+            "enum": [
+              "pass",
+              "fail",
+              "needs_review"
+            ],
+            "description": "The compliance plan's verdict on these params (the same judgement as checkStripeCheckoutSession with site).",
+            "example": "fail"
+          },
+          "failing": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "check_id": {
+                  "type": "string",
+                  "description": "The failing check.",
+                  "example": "stripe.consent_checkbox"
+                },
+                "title": {
+                  "type": "string",
+                  "description": "Short title of the check.",
+                  "example": "Consent checkbox at sign-up"
+                },
+                "detail": {
+                  "type": "string",
+                  "description": "What the params do wrong and how to fix it.",
+                  "example": "consent_collection.terms_of_service is not \"required\"."
+                }
+              },
+              "required": [
+                "check_id",
+                "title",
+                "detail"
+              ]
+            },
+            "description": "Checks the params fail (fail) or leave open (needs_review).",
+            "example": [
+              {
+                "check_id": "stripe.consent_checkbox",
+                "title": "Consent checkbox at sign-up",
+                "detail": "consent_collection.terms_of_service is not \"required\"."
+              }
+            ]
+          },
+          "corrected_params": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": {},
+            "description": "Engine-verified params that pass, when Checkbox can correct them: put them in your code, then register again.",
+            "example": {}
+          },
+          "problem": {
+            "type": "string",
+            "description": "needs_review only: why Checkbox could not judge them yet (e.g. a Price it has not read from Stripe).",
+            "example": "Checkbox has not read price_123 from Stripe yet."
+          }
+        },
+        "required": [
+          "verdict",
+          "failing",
+          "corrected_params"
+        ],
+        "description": "Registration only: how the compliance plan judges the registered params."
+      },
       "StripeCheckoutConfig": {
         "type": "object",
         "properties": {
@@ -22385,6 +22583,9 @@
             "description": "When the config was registered. Unix timestamp in seconds.",
             "example": 1793318400
           },
+          "judgement": {
+            "$ref": "#/components/schemas/StripeCheckoutConfigJudgement"
+          },
           "next_action": {
             "allOf": [
               {
@@ -22473,6 +22674,18 @@
                   "order_ref": "A-1001"
                 },
                 "created": 1793318400,
+                "judgement": {
+                  "verdict": "fail",
+                  "failing": [
+                    {
+                      "check_id": "stripe.consent_checkbox",
+                      "title": "Consent checkbox at sign-up",
+                      "detail": "consent_collection.terms_of_service is not \"required\"."
+                    }
+                  ],
+                  "corrected_params": {},
+                  "problem": "Checkbox has not read price_123 from Stripe yet."
+                },
                 "next_action": {
                   "type": "verify_domain",
                   "message": "Verify your site domain to turn on live mode.",
@@ -23023,6 +23236,11 @@
             ],
             "description": "How long the run took, from started (or created) to finished, in seconds; null while it runs.",
             "example": 56
+          },
+          "auto_started": {
+            "type": "boolean",
+            "description": "Round 41: true when Checkbox started the run itself because the compliance plan asked for one (test mode, with the site's Stripe TEST key stored). createTestRun returns this run while it is active instead of starting another.",
+            "example": false
           },
           "steps": {
             "type": "array",
@@ -23798,6 +24016,7 @@
           "completed",
           "finished_at",
           "duration_seconds",
+          "auto_started",
           "steps",
           "failure",
           "result",
@@ -23852,6 +24071,7 @@
                 "completed": 1793318400,
                 "finished_at": 1793318400,
                 "duration_seconds": 56,
+                "auto_started": false,
                 "steps": [],
                 "failure": {
                   "code": "price_not_in_test_mode",
@@ -28067,7 +28287,7 @@
       "post": {
         "operationId": "answerTask",
         "summary": "Record the human answer to a manual task",
-        "description": "For tasks with status manual, and for every question the plan's owner_questions lists (by its id): record the human's answer (ask them; never answer on their behalf). An owner question that is not one task's own (owner_questions[].key email_sender, stripe_terms_url, …) returns an AnsweredOwnerQuestion: recorded says whether it was saved (a Stripe Dashboard step closes on the answer); a notice setting is not saved by the answer, and next_action is the one call that applies it. site is needed only when the account has several sites. An answer to a task whose question closed since the plan was read records nothing (recorded: false) and says why. Answers that assert a legal fact (yes, confirmed) are stored as a proposal and return next_action.type \"ask_human_to_confirm\" with a link the human opens while signed in to Checkbox; only their confirmation writes the attestation, sets the site fact and re-evaluates. no / needs_change turn the task into a change for the agent; done (after a dashboard-only step) re-checks at once. Every answer is stored in the evidence vault.",
+        "description": "For tasks with status manual, and for every question the plan's owner_questions lists (by its id): record the human's answer (ask them; never answer on their behalf). An owner question that is not one task's own (owner_questions[].key email_sender, stripe_terms_url, …) returns an AnsweredOwnerQuestion: recorded says whether it was saved (a Stripe Dashboard step closes on the answer; a notice setting is applied to the Notices settings at once, and emails that wait for Stripe or another answer turn on by themselves later), and a saved question is never asked again. site is needed only when the account has several sites. An answer to a task whose question closed since the plan was read records nothing (recorded: false) and says why. Answers that assert a legal fact (yes, confirmed) are stored as a proposal and return next_action.type \"ask_human_to_confirm\" with a link the human opens while signed in to Checkbox; only their confirmation writes the attestation, sets the site fact and re-evaluates. no / needs_change turn the task into a change for the agent; done (after a dashboard-only step) re-checks at once. Every answer is stored in the evidence vault.",
         "tags": [
           "Compliance plans"
         ],
@@ -32932,7 +33152,7 @@
       "post": {
         "operationId": "createTestCredential",
         "summary": "Store a billing test-mode key",
-        "description": "Stores the site's Stripe TEST-mode restricted key (rk_test_…), after checking it with Stripe the way the dashboard's Connect Stripe does. An agent may call this itself once the owner approved the setup; every store is logged on the site's setup timeline and Billing connection line, and the human can revoke it in one click. Live keys are refused (test_key_not_test_mode: a human adds live keys in the dashboard); the owner must have ticked the box “Let your agent store a Stripe test-mode restricted key for this project” (agent sign-in) or “Let this app store a Stripe test-mode restricted key for your sites” (app connection) (checkbox id consent-stripe-test-key) on the approval page of the agent's sign-in or connection (else test_key_declined); a key whose Stripe account looks like another site's is refused with billing_account_mismatch (with confirm_account_mismatch: true the key is connected on hold until a person confirms the account in the dashboard; only a person can confirm it); secret keys (sk_test_…) are refused (test_key_not_restricted). On a test-mode site without a Stripe connection the key also becomes the site's Stripe connection: one key for checks, fixes (only after the human approves each) and test runs. The key's checklist: Customers: Write, Products: Read, Prices: Read, Coupons: Read, Subscriptions: Write, Test clocks: Write, Customer portal: Write, Checkout Sessions: Write, Payment Links: Write, Webhook Endpoints: Write. Replaces an existing key. Next: createTestRun.",
+        "description": "Stores the site's Stripe TEST-mode restricted key (rk_test_…), after checking it with Stripe the way the dashboard's Connect Stripe does. An agent may call this itself once the owner approved the setup; every store is logged on the site's setup timeline and Billing connection line, and the human can revoke it in one click. Live keys are refused (test_key_not_test_mode: a human adds live keys in the dashboard); the owner must have ticked the box “Let your agent store a Stripe test-mode restricted key for this project” (agent sign-in) or “Let this app store a Stripe test-mode restricted key for your sites” (app connection) (checkbox id consent-stripe-test-key) on the approval page of the agent's sign-in or connection (else test_key_declined); a key whose Stripe account looks like another site's is refused with billing_account_mismatch (with confirm_account_mismatch: true the key is connected on hold until a person confirms the account in the dashboard; only a person can confirm it); secret keys (sk_test_…) are refused (test_key_not_restricted). On a test-mode site without a Stripe connection the key also becomes the site's Stripe connection: one key for checks, fixes (only after the human approves each) and test runs. The key's checklist: Customers: Write, Products: Read, Prices: Read, Coupons: Read, Subscriptions: Write, Test clocks: Write, Customer portal: Write, Checkout Sessions: Write, Payment Links: Write, Webhook Endpoints: Write. Replaces an existing key. When the compliance plan asks for a test run, Checkbox starts it at once (test mode; next_action wait_for_test_run); else next_action names the next step (often createTestRun).",
         "tags": [
           "Test runs"
         ],
@@ -33739,7 +33959,7 @@
                       "mirror",
                       "real_checkout"
                     ],
-                    "description": "Stripe runs. mirror (default): Checkbox mirrors your checkout into test mode and moves a test clock through every legal notice window. real_checkout (\"Run proof\"): the shopper buys through YOUR checkout on your test deployment (stripe.checkout_url or stripe.payment_link) with card 4242 and the run inbox, so your own webhook handlers and email code fire; Checkbox watches the inbox, Stripe's events and your cancel flow. Needs your test deployment on Stripe TEST keys with a test-mode webhook endpoint.",
+                    "description": "Stripe runs. mirror (default): Checkbox mirrors your checkout into test mode and moves a test clock through every legal notice window. On a Payment Link site it mirrors the test-mode Payment Link your page links to, and the shopper opens that link's own Stripe page from your page, so its real consent box and text are judged. real_checkout (\"Run proof\"): the shopper buys through YOUR checkout on your test deployment (stripe.checkout_url or stripe.payment_link) with card 4242 and the run inbox, so your own webhook handlers and email code fire; Checkbox watches the inbox, Stripe's events and your cancel flow. Needs your test deployment on Stripe TEST keys with a test-mode webhook endpoint.",
                     "example": "real_checkout"
                   },
                   "type": {
@@ -36116,6 +36336,7 @@
                             "completed": 1793318400,
                             "finished_at": 1793318400,
                             "duration_seconds": 56,
+                            "auto_started": false,
                             "steps": [],
                             "failure": {
                               "code": "price_not_in_test_mode",
@@ -36311,6 +36532,7 @@
                             "completed": 1793318400,
                             "finished_at": 1793318400,
                             "duration_seconds": 56,
+                            "auto_started": false,
                             "steps": [],
                             "failure": {
                               "code": "price_not_in_test_mode",
