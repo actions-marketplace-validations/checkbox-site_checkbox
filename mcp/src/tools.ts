@@ -1376,7 +1376,8 @@ async function answerTaskOutput(args: Record<string, unknown>, { api }: ToolCont
   {
     const task = await api.request<{ id: string; object?: string; status?: string; title?: string; recorded?: boolean; next_action?: NextAction | null }>('POST', `/v1/tasks/${enc(String(args.task))}/answer`, { body: pick(args, ['answer', 'note', 'site']) });
     // Round 37 (pilot 36 item 8): an owner question that is not one task's own, and a task whose question closed.
-    if (task.object === 'owner_question_answer') return { headline: `Answer accepted for ${task.id}; nothing stored: ${task.next_action?.description ?? 'see next_action.'}`, data: task };
+    // Round 40 (pilot 39 item 7): the API's own sentence says whether it was saved; no second, contradicting prefix.
+    if (task.object === 'owner_question_answer') return { headline: `${task.id}: ${task.next_action?.description ?? 'see next_action.'}`, data: task };
     if (task.recorded === false) return { headline: `Nothing recorded on ${task.id}: ${task.next_action?.description ?? 'it no longer asks a question.'}`, data: task };
     // Round 21 (pilot 20 item 16): "done" on a task Checkbox already closed succeeds without recording anything.
     if (task.status === 'done' && task.next_action?.type === 'retrieve_plan') return { headline: `${task.id} was already done (Checkbox closed it itself): nothing to answer, nothing recorded.`, data: task };
