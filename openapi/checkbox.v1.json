@@ -1979,6 +1979,11 @@
                       "description": "true when the question was not in the first batch the owner was asked: if they already answered the others, ask only these. Absent otherwise.",
                       "example": true
                     },
+                    "reopened": {
+                      "type": "boolean",
+                      "description": "true when the question closed earlier (see closed) and is asked again because what it is about changed back. Absent otherwise.",
+                      "example": true
+                    },
                     "text": {
                       "type": "string",
                       "description": "The question, in plain words for the owner.",
@@ -2031,6 +2036,7 @@
                     "id": "email_sender",
                     "key": "email_sender",
                     "added_later": true,
+                    "reopened": true,
                     "text": "Who sends the required emails (renewal reminder, charge notice): you (your code), or Checkbox Notices?",
                     "options": [
                       "me",
@@ -2082,7 +2088,7 @@
                     "closed"
                   ]
                 },
-                "description": "Questions listed earlier that closed by themselves (reported for a day), each with the reason. Absent when none.",
+                "description": "Questions listed earlier that closed (reported for a day), each with the reason: an answer the owner gave, or what Checkbox observed. A question closes only this way; it is never dropped silently. Absent when none.",
                 "example": [
                   {
                     "id": "stripe_terms_url",
@@ -2106,6 +2112,7 @@
                   "id": "email_sender",
                   "key": "email_sender",
                   "added_later": true,
+                  "reopened": true,
                   "text": "Who sends the required emails (renewal reminder, charge notice): you (your code), or Checkbox Notices?",
                   "options": [
                     "me",
@@ -2929,6 +2936,7 @@
                       "id": "email_sender",
                       "key": "email_sender",
                       "added_later": true,
+                      "reopened": true,
                       "text": "Who sends the required emails (renewal reminder, charge notice): you (your code), or Checkbox Notices?",
                       "options": [
                         "me",
@@ -4036,7 +4044,7 @@
           "interval_minutes": {
             "type": "integer",
             "description": "Re-scan interval (0 = off).",
-            "example": 1440
+            "example": 60
           },
           "held_for_activation": {
             "type": "boolean",
@@ -5651,7 +5659,7 @@
                 },
                 "monitoring": {
                   "enabled": true,
-                  "interval_minutes": 1440,
+                  "interval_minutes": 60,
                   "held_for_activation": false,
                   "last_scanned": 1793318400,
                   "held_for_domain_verification": false,
@@ -6343,8 +6351,8 @@
           "monitoring_interval_minutes": {
             "type": "integer",
             "minimum": 0,
-            "description": "Scheduled re-scan interval (0 = off, minimum 60). Default 1440 in live mode, 0 in test mode.",
-            "example": 1440
+            "description": "Scheduled re-scan interval (0 = off, minimum 60). Default 60 (hourly) in live mode, 0 in test mode.",
+            "example": 60
           },
           "protection_level": {
             "type": "string",
@@ -6632,8 +6640,8 @@
           "monitoring_interval_minutes": {
             "type": "integer",
             "minimum": 0,
-            "description": "Scheduled re-scan interval (0 = off, minimum 60). Default 1440 in live mode, 0 in test mode.",
-            "example": 1440
+            "description": "Scheduled re-scan interval (0 = off, minimum 60). Default 60 (hourly) in live mode, 0 in test mode.",
+            "example": 60
           },
           "protection_level": {
             "type": "string",
@@ -8656,6 +8664,15 @@
             "description": "required (the legal floor: the only tier that can keep the site's checks from passing), recommended (clearer records beyond the legal floor, conversion-neutral; shown at protection level balanced and maximum, never blocks), extra (maximum protection only). Always present on API responses.",
             "example": "required"
           },
+          "launch_tier": {
+            "type": "string",
+            "enum": [
+              "before_launch",
+              "good_practice"
+            ],
+            "description": "before_launch (tier required: an open one concerns a requirement at checkout, cancellation or a required notice; only these keep the site from being ready to launch) or good_practice (tier recommended or extra: optional suggestions, never blocking). Always present on API responses.",
+            "example": "before_launch"
+          },
           "compliance_status": {
             "type": "string",
             "enum": [
@@ -9515,6 +9532,7 @@
                 "status": "open",
                 "priority": "critical",
                 "tier": "required",
+                "launch_tier": "before_launch",
                 "compliance_status": "pending_live_check",
                 "compliance_status_label": "Checks pass",
                 "order": 1,
@@ -9694,6 +9712,98 @@
               "extra": []
             }
           },
+          "launch": {
+            "type": "object",
+            "properties": {
+              "ready": {
+                "type": "boolean",
+                "description": "Every before_launch task is done and the checks pass. Good-practice suggestions may remain (optional).",
+                "example": false
+              },
+              "label": {
+                "type": "string",
+                "description": "The words to show a person: \"Ready to launch\", \"2 things before you launch\" or \"Checks still running\". Never \"compliant\".",
+                "example": "2 things before you launch"
+              },
+              "before_launch": {
+                "type": "object",
+                "properties": {
+                  "open": {
+                    "type": "integer",
+                    "description": "Open before-launch tasks (the to-do list).",
+                    "example": 2
+                  },
+                  "total": {
+                    "type": "integer",
+                    "description": "All before-launch tasks in the plan.",
+                    "example": 9
+                  }
+                },
+                "required": [
+                  "open",
+                  "total"
+                ],
+                "description": "Before-launch tasks: open (the to-do list, the same count as status_label) and total.",
+                "example": {
+                  "open": 2,
+                  "total": 9
+                }
+              },
+              "good_practice": {
+                "type": "object",
+                "properties": {
+                  "open": {
+                    "type": "integer",
+                    "description": "Open good-practice suggestions.",
+                    "example": 1
+                  },
+                  "total": {
+                    "type": "integer",
+                    "description": "All good-practice suggestions in the plan.",
+                    "example": 3
+                  }
+                },
+                "required": [
+                  "open",
+                  "total"
+                ],
+                "description": "Good-practice suggestions: open and total. Optional; never blocks launch.",
+                "example": {
+                  "open": 1,
+                  "total": 3
+                }
+              },
+              "good_practice_line": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "\"1 good-practice suggestion (optional)\", or null when none is open.",
+                "example": "1 good-practice suggestion (optional)"
+              }
+            },
+            "required": [
+              "ready",
+              "label",
+              "before_launch",
+              "good_practice",
+              "good_practice_line"
+            ],
+            "description": "The plan in two groups: what to do before you launch (tasks with launch_tier before_launch) and good practice (optional). Show label to people; list before_launch tasks first and good practice as one optional line.",
+            "example": {
+              "ready": false,
+              "label": "2 things before you launch",
+              "before_launch": {
+                "open": 2,
+                "total": 9
+              },
+              "good_practice": {
+                "open": 1,
+                "total": 3
+              },
+              "good_practice_line": "1 good-practice suggestion (optional)"
+            }
+          },
           "compliance": {
             "allOf": [
               {
@@ -9837,6 +9947,11 @@
                       "description": "true when the question was not in the first batch the owner was asked: if they already answered the others, ask only these. Absent otherwise.",
                       "example": true
                     },
+                    "reopened": {
+                      "type": "boolean",
+                      "description": "true when the question closed earlier (see closed) and is asked again because what it is about changed back. Absent otherwise.",
+                      "example": true
+                    },
                     "text": {
                       "type": "string",
                       "description": "The question, in plain words for the owner.",
@@ -9889,6 +10004,7 @@
                     "id": "email_sender",
                     "key": "email_sender",
                     "added_later": true,
+                    "reopened": true,
                     "text": "Who sends the required emails (renewal reminder, charge notice): you (your code), or Checkbox Notices?",
                     "options": [
                       "me",
@@ -9940,7 +10056,7 @@
                     "closed"
                   ]
                 },
-                "description": "Questions listed earlier that closed by themselves (reported for a day), each with the reason. Absent when none.",
+                "description": "Questions listed earlier that closed (reported for a day), each with the reason: an answer the owner gave, or what Checkbox observed. A question closes only this way; it is never dropped silently. Absent when none.",
                 "example": [
                   {
                     "id": "stripe_terms_url",
@@ -9964,6 +10080,7 @@
                   "id": "email_sender",
                   "key": "email_sender",
                   "added_later": true,
+                  "reopened": true,
                   "text": "Who sends the required emails (renewal reminder, charge notice): you (your code), or Checkbox Notices?",
                   "options": [
                     "me",
@@ -22568,7 +22685,7 @@
               "skipped",
               "info"
             ],
-            "description": "passed: observed, with evidence, and every judged check passed (never on an assumption); failed: a check failed or the step broke the run; warning: needs review — could not be fully observed or proven (see code and fix); skipped: not applicable or turned off; info: informational only (e.g. a bare Stripe-hosted test checkout that is not your checkout): its checks are listed but not counted and need no fix.",
+            "description": "passed: observed, with evidence, and every judged check passed (never on an assumption), or the only open check is an owner decision, which summary then names (\"Passed (owner decision: …)\"); failed: a check failed or the step broke the run; warning: needs review — could not be fully observed or proven (see code and fix); skipped: not applicable or turned off; info: informational only (e.g. a bare Stripe-hosted test checkout that is not your checkout): its checks are listed but not counted and need no fix.",
             "example": "passed"
           },
           "summary": {
@@ -36426,7 +36543,7 @@
                             },
                             "monitoring": {
                               "enabled": true,
-                              "interval_minutes": 1440,
+                              "interval_minutes": 60,
                               "held_for_activation": false,
                               "last_scanned": 1793318400,
                               "held_for_domain_verification": false,
@@ -37904,7 +38021,7 @@
                             },
                             "monitoring": {
                               "enabled": true,
-                              "interval_minutes": 1440,
+                              "interval_minutes": 60,
                               "held_for_activation": false,
                               "last_scanned": 1793318400,
                               "held_for_domain_verification": false,
@@ -38200,7 +38317,7 @@
                             },
                             "monitoring": {
                               "enabled": true,
-                              "interval_minutes": 1440,
+                              "interval_minutes": 60,
                               "held_for_activation": false,
                               "last_scanned": 1793318400,
                               "held_for_domain_verification": false,

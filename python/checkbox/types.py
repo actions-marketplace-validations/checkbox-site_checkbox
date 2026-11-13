@@ -682,6 +682,8 @@ SetupSessionOwnerQuestionsQuestionsItem = TypedDict(
         "key": str,
         #: true when the question was not in the first batch the owner was asked: if they already answered the others, ask only these. Absent otherwise. (optional)
         "added_later": bool,
+        #: true when the question closed earlier (see closed) and is asked again because what it is about changed back. Absent otherwise. (optional)
+        "reopened": bool,
         #: The question, in plain words for the owner.
         "text": str,
         #: The answers.
@@ -721,7 +723,7 @@ SetupSessionOwnerQuestions = TypedDict(
         "description": str,
         #: Every choice only the owner makes, together. Empty when nothing is left to ask and only closed questions are reported.
         "questions": List["SetupSessionOwnerQuestionsQuestionsItem"],
-        #: Questions listed earlier that closed by themselves (reported for a day), each with the reason. Absent when none. (optional)
+        #: Questions listed earlier that closed (reported for a day), each with the reason: an answer the owner gave, or what Checkbox observed. A question closes only this way; it is never dropped silently. Absent when none. (optional)
         "closed": List["SetupSessionOwnerQuestionsClosedItem"],
     },
     total=False,
@@ -2072,7 +2074,7 @@ CreateSiteParams = TypedDict(
         "regions": List[Literal["US-FED", "US-AL", "US-AK", "US-AZ", "US-AR", "US-CA", "US-CO", "US-CT", "US-DE", "US-DC", "US-FL", "US-GA", "US-HI", "US-ID", "US-IL", "US-IN", "US-IA", "US-KS", "US-KY", "US-LA", "US-ME", "US-MD", "US-MA", "US-MI", "US-MN", "US-MS", "US-MO", "US-MT", "US-NE", "US-NV", "US-NH", "US-NJ", "US-NM", "US-NY", "US-NC", "US-ND", "US-OH", "US-OK", "US-OR", "US-PA", "US-RI", "US-SC", "US-SD", "US-TN", "US-TX", "US-UT", "US-VT", "US-VA", "US-WA", "US-WV", "US-WI", "US-WY"]],
         #: Devices to emulate. (optional)
         "devices": List[Literal["desktop", "mobile"]],
-        #: Scheduled re-scan interval (0 = off, minimum 60). Default 1440 in live mode, 0 in test mode. (optional)
+        #: Scheduled re-scan interval (0 = off, minimum 60). Default 60 (hourly) in live mode, 0 in test mode. (optional)
         "monitoring_interval_minutes": int,
         #: Which requirement tiers Checkbox shows. minimum: the legal floor only (required items). balanced (default): required items plus recommended suggestions (consent receipts, a cancellation confirmation email…), collapsed and never blocking "Checks pass". maximum: everything, including extra protections (a separate checkbox per term, a pre-purchase summary). Only required items can keep a site's checks from passing, at every level. (optional)
         "protection_level": Literal["minimum", "balanced", "maximum"],
@@ -2141,7 +2143,7 @@ UpdateSiteParams = TypedDict(
         "regions": List[Literal["US-FED", "US-AL", "US-AK", "US-AZ", "US-AR", "US-CA", "US-CO", "US-CT", "US-DE", "US-DC", "US-FL", "US-GA", "US-HI", "US-ID", "US-IL", "US-IN", "US-IA", "US-KS", "US-KY", "US-LA", "US-ME", "US-MD", "US-MA", "US-MI", "US-MN", "US-MS", "US-MO", "US-MT", "US-NE", "US-NV", "US-NH", "US-NJ", "US-NM", "US-NY", "US-NC", "US-ND", "US-OH", "US-OK", "US-OR", "US-PA", "US-RI", "US-SC", "US-SD", "US-TN", "US-TX", "US-UT", "US-VT", "US-VA", "US-WA", "US-WV", "US-WI", "US-WY"]],
         #: Devices to emulate. (optional)
         "devices": List[Literal["desktop", "mobile"]],
-        #: Scheduled re-scan interval (0 = off, minimum 60). Default 1440 in live mode, 0 in test mode. (optional)
+        #: Scheduled re-scan interval (0 = off, minimum 60). Default 60 (hourly) in live mode, 0 in test mode. (optional)
         "monitoring_interval_minutes": int,
         #: Which requirement tiers Checkbox shows. minimum: the legal floor only (required items). balanced (default): required items plus recommended suggestions (consent receipts, a cancellation confirmation email…), collapsed and never blocking "Checks pass". maximum: everything, including extra protections (a separate checkbox per term, a pre-purchase summary). Only required items can keep a site's checks from passing, at every level. (optional)
         "protection_level": Literal["minimum", "balanced", "maximum"],
@@ -2897,6 +2899,8 @@ Task = TypedDict(
         "priority": Literal["critical", "high", "medium", "low"],
         #: required (the legal floor: the only tier that can keep the site's checks from passing), recommended (clearer records beyond the legal floor, conversion-neutral; shown at protection level balanced and maximum, never blocks), extra (maximum protection only). Always present on API responses. (optional)
         "tier": Literal["required", "recommended", "extra"],
+        #: before_launch (tier required: an open one concerns a requirement at checkout, cancellation or a required notice; only these keep the site from being ready to launch) or good_practice (tier recommended or extra: optional suggestions, never blocking). Always present on API responses. (optional)
+        "launch_tier": Literal["before_launch", "good_practice"],
         #: User-facing status. needs_fix (a requirement is clearly not met: `compliance.fix` is the one change), pending_live_check (everything Checkbox can see is right; the live event has not been observed yet — counts as passing the checks), verified_live (observed live: proof run, real BCC'd send, Stripe-confirmed cancellation), your_call (a real decision for a person: `compliance.question`), compliant (passes; grey areas carry a `compliance.note`), not_applicable, not_set_up (no sign the email or setting exists yet: `compliance.fix` is the one-click way to set it up; never counts as passing the checks), not_checked (Checkbox has not tried it yet, e.g. the cancel flow: `compliance.fix` says how; never counts as passing the checks). (optional)
         "compliance_status": Literal["needs_fix", "pending_live_check", "verified_live", "your_call", "compliant", "not_applicable", "not_set_up", "not_checked"],
         #: The status in words to show a person ("Needs a fix", "Your call", "Not set up yet", "Not checked yet", "Checks pass"…). Show this, never the machine value. (optional)
@@ -2989,6 +2993,51 @@ CompliancePlanGroups = TypedDict(
 )
 
 
+#: Before-launch tasks: open (the to-do list, the same count as status_label) and total.
+CompliancePlanLaunchBeforeLaunch = TypedDict(
+    "CompliancePlanLaunchBeforeLaunch",
+    {
+        #: Open before-launch tasks (the to-do list).
+        "open": int,
+        #: All before-launch tasks in the plan.
+        "total": int,
+    },
+    total=False,
+)
+
+
+#: Good-practice suggestions: open and total. Optional; never blocks launch.
+CompliancePlanLaunchGoodPractice = TypedDict(
+    "CompliancePlanLaunchGoodPractice",
+    {
+        #: Open good-practice suggestions.
+        "open": int,
+        #: All good-practice suggestions in the plan.
+        "total": int,
+    },
+    total=False,
+)
+
+
+#: The plan in two groups: what to do before you launch (tasks with launch_tier before_launch) and good practice (optional). Show label to people; list before_launch tasks first and good practice as one optional line.
+CompliancePlanLaunch = TypedDict(
+    "CompliancePlanLaunch",
+    {
+        #: Every before_launch task is done and the checks pass. Good-practice suggestions may remain (optional).
+        "ready": bool,
+        #: The words to show a person: "Ready to launch", "2 things before you launch" or "Checks still running". Never "compliant".
+        "label": str,
+        #: Before-launch tasks: open (the to-do list, the same count as status_label) and total.
+        "before_launch": "CompliancePlanLaunchBeforeLaunch",
+        #: Good-practice suggestions: open and total. Optional; never blocks launch.
+        "good_practice": "CompliancePlanLaunchGoodPractice",
+        #: "1 good-practice suggestion (optional)", or null when none is open.
+        "good_practice_line": Optional[str],
+    },
+    total=False,
+)
+
+
 #: What the assessment rests on. Tell the human about not_observed and attested items; never tell them the site "is compliant".
 CompliancePlanCoverage = TypedDict(
     "CompliancePlanCoverage",
@@ -3015,6 +3064,8 @@ CompliancePlanOwnerQuestionsQuestionsItem = TypedDict(
         "key": str,
         #: true when the question was not in the first batch the owner was asked: if they already answered the others, ask only these. Absent otherwise. (optional)
         "added_later": bool,
+        #: true when the question closed earlier (see closed) and is asked again because what it is about changed back. Absent otherwise. (optional)
+        "reopened": bool,
         #: The question, in plain words for the owner.
         "text": str,
         #: The answers.
@@ -3054,7 +3105,7 @@ CompliancePlanOwnerQuestions = TypedDict(
         "description": str,
         #: Every choice only the owner makes, together. Empty when nothing is left to ask and only closed questions are reported.
         "questions": List["CompliancePlanOwnerQuestionsQuestionsItem"],
-        #: Questions listed earlier that closed by themselves (reported for a day), each with the reason. Absent when none. (optional)
+        #: Questions listed earlier that closed (reported for a day), each with the reason: an answer the owner gave, or what Checkbox observed. A question closes only this way; it is never dropped silently. Absent when none. (optional)
         "closed": List["CompliancePlanOwnerQuestionsClosedItem"],
     },
     total=False,
@@ -3145,6 +3196,8 @@ CompliancePlan = TypedDict(
         "protection_level": Literal["minimum", "balanced", "maximum"],
         #: Task ids grouped by tier, in plan order.
         "groups": "CompliancePlanGroups",
+        #: The plan in two groups: what to do before you launch (tasks with launch_tier before_launch) and good practice (optional). Show label to people; list before_launch tasks first and good practice as one optional line. (optional)
+        "launch": "CompliancePlanLaunch",
         "compliance": Optional["ComplianceRollup"],
         #: What the assessment rests on. Tell the human about not_observed and attested items; never tell them the site "is compliant".
         "coverage": "CompliancePlanCoverage",
@@ -3373,6 +3426,8 @@ AnsweredTask = TypedDict(
         "priority": Literal["critical", "high", "medium", "low"],
         #: required (the legal floor: the only tier that can keep the site's checks from passing), recommended (clearer records beyond the legal floor, conversion-neutral; shown at protection level balanced and maximum, never blocks), extra (maximum protection only). Always present on API responses. (optional)
         "tier": Literal["required", "recommended", "extra"],
+        #: before_launch (tier required: an open one concerns a requirement at checkout, cancellation or a required notice; only these keep the site from being ready to launch) or good_practice (tier recommended or extra: optional suggestions, never blocking). Always present on API responses. (optional)
+        "launch_tier": Literal["before_launch", "good_practice"],
         #: User-facing status. needs_fix (a requirement is clearly not met: `compliance.fix` is the one change), pending_live_check (everything Checkbox can see is right; the live event has not been observed yet — counts as passing the checks), verified_live (observed live: proof run, real BCC'd send, Stripe-confirmed cancellation), your_call (a real decision for a person: `compliance.question`), compliant (passes; grey areas carry a `compliance.note`), not_applicable, not_set_up (no sign the email or setting exists yet: `compliance.fix` is the one-click way to set it up; never counts as passing the checks), not_checked (Checkbox has not tried it yet, e.g. the cancel flow: `compliance.fix` says how; never counts as passing the checks). (optional)
         "compliance_status": Literal["needs_fix", "pending_live_check", "verified_live", "your_call", "compliant", "not_applicable", "not_set_up", "not_checked"],
         #: The status in words to show a person ("Needs a fix", "Your call", "Not set up yet", "Not checked yet", "Checks pass"…). Show this, never the machine value. (optional)
@@ -7362,7 +7417,7 @@ TestRunStep = TypedDict(
         "key": str,
         #: Human-readable step title.
         "title": str,
-        #: passed: observed, with evidence, and every judged check passed (never on an assumption); failed: a check failed or the step broke the run; warning: needs review — could not be fully observed or proven (see code and fix); skipped: not applicable or turned off; info: informational only (e.g. a bare Stripe-hosted test checkout that is not your checkout): its checks are listed but not counted and need no fix.
+        #: passed: observed, with evidence, and every judged check passed (never on an assumption), or the only open check is an owner decision, which summary then names ("Passed (owner decision: …)"); failed: a check failed or the step broke the run; warning: needs review — could not be fully observed or proven (see code and fix); skipped: not applicable or turned off; info: informational only (e.g. a bare Stripe-hosted test checkout that is not your checkout): its checks are listed but not counted and need no fix.
         "status": Literal["pending", "running", "passed", "failed", "warning", "skipped", "info"],
         #: What was observed, in one or two sentences.
         "summary": Optional[str],

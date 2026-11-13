@@ -2,6 +2,7 @@
 // JSON. Errors are tool results with isError (not protocol errors) so the model can read the stable code and recover.
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { CheckboxApiError, type NextAction } from './api.ts';
+import { dedupeResult, nextToolCall } from './compact.ts';
 
 /** API operationId → the MCP tool that performs it. Operations without a tool are reached with call_api. */
 export const OPERATION_TOOLS: Record<string, string> = {
@@ -188,13 +189,10 @@ export function forMcp(value: unknown, depth = 0): unknown {
   return out;
 }
 
-/** The argument hint for the tool a next step names (the right id for that tool). */
-function argHint(tool: string, next: NextAction, ctx: { data?: unknown }): string {
-  const d = (ctx.data ?? {}) as { object?: unknown; id?: unknown };
-  if (tool === 'get_verification') return d.object === 'verification' && typeof d.id === 'string' ? ` (verification: ${d.id})` : '';
-  if (tool === 'get_setup_status' && next.operation_id === 'verifySetupSession') return ' (verify: true)';
-  const task = next.task ?? /\/v1\/tasks\/(task_[A-Za-z0-9]+)/.exec(next.endpoint ?? '')?.[1];
-  return task && ['get_task', 'verify_task', 'answer_task'].includes(tool) ? ` (task: ${task})` : '';
+/** The arguments of the tool a next step names (the right ids for that tool), as one JSON object. */
+function argHint(next: NextAction, ctx: { data?: unknown }): string {
+  const call = nextToolCall(next, ctx.data, OPERATION_TOOLS);
+  return call && Object.keys(call.args).length ? ` ${JSON.stringify(call.args)}` : '';
 }
 
 /** One line telling the model what to call next, in MCP terms. */
@@ -209,7 +207,7 @@ export function describeNextAction(next: NextAction | null | undefined, ctx: { d
   const named = next.mcp_tool && next.mcp_tool !== 'call_api' ? next.mcp_tool : undefined;
   const tool = named ?? (op ? OPERATION_TOOLS[op] : undefined);
   const parts = [`Next (${next.type}): ${text || 'see next_action.'}`];
-  if (tool) parts.push(`→ MCP tool \`${tool}\`${argHint(tool, next, ctx)}.`);
+  if (tool) parts.push(`→ MCP tool \`${tool}\`${argHint(next, ctx)}.`);
   else if (op) {
     let endpoint = next.endpoint ?? OPERATION_ENDPOINTS[op];
     const site = (ctx.data as { site?: unknown; id?: unknown } | undefined) ?? {};
@@ -217,7 +215,6 @@ export function describeNextAction(next: NextAction | null | undefined, ctx: { d
     if (endpoint && siteId) endpoint = endpoint.replace('{site}', siteId);
     parts.push(endpoint ? `→ MCP tool \`call_api\` with ${endpoint}.` : `→ MCP tool \`call_api\` (operation ${op}; paths in /v1/openapi.json).`);
   }
-  if (next.command && CLI_PUBLISHED) parts.push(`CLI equivalent: \`${next.command}\`.`);
   if (next.url && !tool) parts.push(`Docs: ${next.url}`);
   return parts.join(' ');
 }
@@ -233,8 +230,13 @@ export interface ToolOutput {
   headline: string;
   /** Extra lines (bullets) between the headline and the JSON. */
   notes?: string[];
-  /** The API object (or a composite). Printed as JSON. */
+  /** The API object (or a composite). Printed as JSON with verbose=true (and when there is no `compact`). */
   data?: unknown;
+  /**
+   * Round 39 (founder: an agent runs a whole setup in a small context): the default JSON, with only what an agent acts
+   * on (compact.ts). `data` is printed instead with verbose=true.
+   */
+  compact?: unknown;
   /** Overrides data.next_action for the "Next:" line. */
   next?: NextAction | null;
   /** Mark the result as an error the model should act on (still a normal result). */
@@ -356,14 +358,24 @@ export function fitJson(data: unknown, max = MAX_JSON_CHARS, flatFirst = false):
 export const FALLBACK_NEXT = 'Next: nothing more is needed for this result; get_compliance_plan names the site\'s next step.';
 export const FALLBACK_NEXT_ERROR = 'Next: fix what the error names (see the hint above, if any) and call the tool again.';
 
-export function renderOutput(out: ToolOutput): CallToolResult {
+export interface RenderOptions {
+  /** verbose=true: the full API object (`data`); otherwise the compact JSON, never a block twice. */
+  verbose?: boolean;
+}
+
+export function renderOutput(out: ToolOutput, opts: RenderOptions = {}): CallToolResult {
   const lines = [mcpText(out.headline.trim())];
-  for (const n of out.notes ?? []) if (n) lines.push(`- ${mcpText(n)}`);
   const next = describeNextAction(out.next === undefined ? nextActionOf(out.data) : out.next, { data: out.data });
+  // Round 39: a note the Next line already says word for word (the go-live summary in a done step) is not repeated.
+  for (const n of out.notes ?? []) if (n && !(n.length >= 60 && next?.includes(mcpText(n)))) lines.push(`- ${mcpText(n)}`);
   // Round 23 (pilot 22 item 27, agent-discovery: a result with no "Next:" line): every result names what comes next.
   lines.push(next ?? (out.isError ? FALLBACK_NEXT_ERROR : FALLBACK_NEXT));
-  if (out.data !== undefined) {
-    const fitted = fitJson(forMcp(out.data), MAX_JSON_CHARS, out.compactJson === true);
+  const shown = opts.verbose || out.compact === undefined ? out.data : out.compact;
+  if (shown !== undefined) {
+    // Round 39: by default no block is printed twice, and next_action is its tool call (the words are on the Next line).
+    const data = opts.verbose ? forMcp(shown) : dedupeResult(forMcp(shown), { opTools: OPERATION_TOOLS });
+    // Flat JSON (no indentation) fits the most; a full plan over the limit is paged by task.
+    const fitted = fitJson(data, MAX_JSON_CHARS, true);
     if (fitted.page) lines.push(`- ${fitted.page}`);
     lines.push('', '```json', fitted.json, '```');
   }

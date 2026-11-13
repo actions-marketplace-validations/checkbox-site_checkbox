@@ -88,7 +88,7 @@ what to change. Free. Every feature. No credit card. Fair-use limits.
    real customers, with who takes each: verify the domain, the live Stripe key — a person only —, the live checkout,
    promoting the site). Tell the human "set up in test mode; N steps before real customers", never just "done".
 
-Every tool result ends with "Next: …" naming the tool to call. Errors carry a stable \`code\` and often a next_action.
+Every tool result is a short summary and a compact JSON, ending with "Next: …" naming the tool to call and its arguments; \`verbose: true\` on any tool returns the full API object, and **get_task** has one task in full. Errors carry a stable \`code\` and often a next_action.
 
 ## Before shipping code (no site needed)
 
