@@ -102,3 +102,31 @@ jobs:
       - uses: pypa/gh-action-pypi-publish@release/v1
         with:
           skip-existing: true
+
+  mcp-registry:
+    name: Publish to the official MCP Registry
+    needs: npm # the registry checks that the npm package version in server.json exists
+    runs-on: ubuntu-latest
+    env:
+      MCP_REGISTRY_PRIVATE_KEY: ${{ secrets.MCP_REGISTRY_PRIVATE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Skip when the registry key is not set
+        if: ${{ env.MCP_REGISTRY_PRIVATE_KEY == '' }}
+        run: echo "MCP_REGISTRY_PRIVATE_KEY is not set; skipping the registry (see RELEASING.md)."
+      - name: Install mcp-publisher
+        if: ${{ env.MCP_REGISTRY_PRIVATE_KEY != '' }}
+        run: |
+          curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_linux_amd64.tar.gz" | tar xz mcp-publisher
+          ./mcp-publisher --help >/dev/null
+      - name: Publish server.json (skipped when this server version is already listed)
+        if: ${{ env.MCP_REGISTRY_PRIVATE_KEY != '' }}
+        run: |
+          name=$(node -p "require('./mcp-registry/server.json').name")
+          version=$(node -p "require('./mcp-registry/server.json').version")
+          if curl -fsS "https://registry.modelcontextprotocol.io/v0/servers?search=$name&version=$version" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const r=JSON.parse(s);process.exit((r.servers||[]).some(x=>x.server&&x.server.version===process.argv[1])?0:1)})" "$version"; then
+            echo "$name $version is already in the registry; skipping."
+            exit 0
+          fi
+          ./mcp-publisher login http --domain checkbox.site --private-key "$MCP_REGISTRY_PRIVATE_KEY"
+          cd mcp-registry && ../mcp-publisher publish

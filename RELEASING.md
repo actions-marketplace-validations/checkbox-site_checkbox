@@ -7,10 +7,14 @@ One tag releases everything in this repository at one version:
 | npm | [`@checkbox-site/node`](https://www.npmjs.com/package/@checkbox-site/node) | [`node/`](node) |
 | npm | [`@checkbox-site/mcp`](https://www.npmjs.com/package/@checkbox-site/mcp) (binary `checkbox-mcp`) | [`mcp/`](mcp) |
 | PyPI | [`checkbox-site`](https://pypi.org/project/checkbox-site/) (import name `checkbox`) | [`python/`](python) |
+| MCP Registry | `site.checkbox/checkbox` | [`mcp-registry/server.json`](mcp-registry/server.json) |
 
 [`.github/workflows/release.yml`](.github/workflows/release.yml) runs on a pushed `v*` tag (or by hand from the
-Actions tab). It checks that the tag matches every package version, then publishes to npm (with provenance) and to
-PyPI. Versions already on a registry are skipped, so a failed run can be re-run.
+Actions tab). It checks that the tag matches every package version, then publishes to npm (with provenance), to
+PyPI and, after npm, to the official MCP Registry. Versions already on a registry are skipped, so a failed run can be
+re-run. The registry step logs in as `checkbox.site` with the repository secret `MCP_REGISTRY_PRIVATE_KEY` (the hex
+Ed25519 private key whose public half checkbox.site serves at `/.well-known/mcp-registry-auth`); without the secret it
+is skipped. Bump `version` in `mcp-registry/server.json` with every release (the registry accepts each version once).
 
 ## Cutting a release
 
