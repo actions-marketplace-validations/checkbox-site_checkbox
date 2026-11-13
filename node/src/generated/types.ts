@@ -285,7 +285,7 @@ export type GoLive = {
   /** The steps, in order. */
   steps: Array<{
     /** Stable step key. */
-    key: "verify_domain" | "stripe_terms_url" | "live_stripe_key" | "live_portal_cancel" | "live_checkout" | "deactivate_old_live_link" | "swap_test_urls" | "promote_site";
+    key: "verify_domain" | "stripe_terms_url" | "live_stripe_key" | "live_portal_cancel" | "live_checkout" | "deactivate_old_live_link" | "swap_portal_login" | "swap_test_urls" | "promote_site";
     /** Who takes the step: person (only the owner can: DNS, the Stripe Dashboard, live keys) or agent (a code change). */
     who: "person" | "agent";
     /** The step in plain words. */
@@ -298,7 +298,7 @@ export type GoLive = {
   /** Steps Checkbox closed by inference from what the billing platform showed (the Stripe Terms of Service URL, which Stripe does not report directly), each with the reason. Tell the owner these too. Absent when none. */
   closed?: Array<{
     /** Stable step key. */
-    key: "verify_domain" | "stripe_terms_url" | "live_stripe_key" | "live_portal_cancel" | "live_checkout" | "deactivate_old_live_link" | "swap_test_urls" | "promote_site";
+    key: "verify_domain" | "stripe_terms_url" | "live_stripe_key" | "live_portal_cancel" | "live_checkout" | "deactivate_old_live_link" | "swap_portal_login" | "swap_test_urls" | "promote_site";
     /** Why Checkbox closed the step, in plain words (what Stripe showed). */
     text: string;
   }>;
@@ -2206,8 +2206,8 @@ export interface AnsweredOwnerQuestion {
   key: string;
   /** The answer as understood (one of the question's options). */
   answer: string;
-  /** Always false: these questions are settled by a setting (updateNoticeSettings) or by what Stripe shows, never by a stored answer. */
-  recorded: false;
+  /** Whether Checkbox saved the answer. true: a Stripe Dashboard step (stripe_terms_url, stripe_portal_login, replace_payment_link) the plan no longer asks. false: nothing was saved; for a notice setting (email_sender, notices_support_email, notices_cancel_timing) next_action is the one call that applies it. */
+  recorded: boolean;
   /** Whether the plan still asks this question. */
   open: boolean;
   next_action: PlanNextAction;
@@ -4873,7 +4873,7 @@ export interface TestRunStep {
   observations: Record<string, unknown>;
   /** Evidence records (screenshots, page captures, raw emails) behind the step. */
   evidence: Array<string>;
-  /** Warning or failure code of the step (stable): key_missing, key_not_test_mode, key_invalid, key_permission_missing, checkout_config_missing, price_not_in_test_mode, checkout_session_failed, checkout_page_unreadable, checkout_not_completed, subscription_create_failed, test_clock_failed, no_email_received_within, reminder_not_received, portal_not_configured, cancel_not_completed, cancellation_email_not_received, checkout_url_missing, real_checkout_not_completed, pre_checkout_steps_needed, check_failed, payment_link_not_found, webhook_not_delivered, reminder_outside_window, reminder_timing_not_observed, cancel_flow_not_configured, cancel_not_confirmed_in_stripe, acknowledgment_content_incomplete, required_notice_skipped, cancel_replaced_by_other_subscription, cancel_own_control_failed, cancel_own_control_not_tested, not_judged, scan_config_missing, domain_not_verified, scanner_failed, stripe_api_error, timeout, canceled, internal_error. */
+  /** Warning or failure code of the step (stable): key_missing, key_not_test_mode, key_invalid, key_permission_missing, checkout_config_missing, price_not_in_test_mode, checkout_session_failed, checkout_page_unreadable, checkout_not_completed, subscription_create_failed, test_clock_failed, no_email_received_within, reminder_not_received, portal_not_configured, cancel_not_completed, cancellation_email_not_received, checkout_url_missing, real_checkout_not_completed, pre_checkout_steps_needed, check_failed, payment_link_not_found, webhook_not_delivered, reminder_outside_window, reminder_timing_not_observed, cancel_flow_not_configured, cancel_not_confirmed_in_stripe, acknowledgment_content_incomplete, required_notice_skipped, cancel_replaced_by_other_subscription, cancel_own_control_failed, cancel_own_control_not_tested, cancel_needs_sign_in, not_judged, scan_config_missing, domain_not_verified, scanner_failed, stripe_api_error, timeout, canceled, internal_error. */
   code: string | null;
   fix: TestRunFix;
 }
@@ -4935,7 +4935,7 @@ export interface TestRun {
   steps: Array<TestRunStep>;
   /** Why the run stopped (failed / canceled runs). */
   failure: {
-    /** Stable failure code: key_missing, key_not_test_mode, key_invalid, key_permission_missing, checkout_config_missing, price_not_in_test_mode, checkout_session_failed, checkout_page_unreadable, checkout_not_completed, subscription_create_failed, test_clock_failed, no_email_received_within, reminder_not_received, portal_not_configured, cancel_not_completed, cancellation_email_not_received, checkout_url_missing, real_checkout_not_completed, pre_checkout_steps_needed, check_failed, payment_link_not_found, webhook_not_delivered, reminder_outside_window, reminder_timing_not_observed, cancel_flow_not_configured, cancel_not_confirmed_in_stripe, acknowledgment_content_incomplete, required_notice_skipped, cancel_replaced_by_other_subscription, cancel_own_control_failed, cancel_own_control_not_tested, not_judged, scan_config_missing, domain_not_verified, scanner_failed, stripe_api_error, timeout, canceled, internal_error. */
+    /** Stable failure code: key_missing, key_not_test_mode, key_invalid, key_permission_missing, checkout_config_missing, price_not_in_test_mode, checkout_session_failed, checkout_page_unreadable, checkout_not_completed, subscription_create_failed, test_clock_failed, no_email_received_within, reminder_not_received, portal_not_configured, cancel_not_completed, cancellation_email_not_received, checkout_url_missing, real_checkout_not_completed, pre_checkout_steps_needed, check_failed, payment_link_not_found, webhook_not_delivered, reminder_outside_window, reminder_timing_not_observed, cancel_flow_not_configured, cancel_not_confirmed_in_stripe, acknowledgment_content_incomplete, required_notice_skipped, cancel_replaced_by_other_subscription, cancel_own_control_failed, cancel_own_control_not_tested, cancel_needs_sign_in, not_judged, scan_config_missing, domain_not_verified, scanner_failed, stripe_api_error, timeout, canceled, internal_error. */
     code: string;
     /** What went wrong. */
     message: string;

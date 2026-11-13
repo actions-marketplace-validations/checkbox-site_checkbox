@@ -1,2 +1,2 @@
 /** Version of this SDK (kept equal to packages/sdk-node/package.json "version"; a test checks it). */
-export const SDK_VERSION = '0.4.0';
+export const SDK_VERSION = '0.4.1';

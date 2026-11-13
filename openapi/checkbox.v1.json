@@ -1046,6 +1046,7 @@
                     "live_portal_cancel",
                     "live_checkout",
                     "deactivate_old_live_link",
+                    "swap_portal_login",
                     "swap_test_urls",
                     "promote_site"
                   ],
@@ -1107,6 +1108,7 @@
                     "live_portal_cancel",
                     "live_checkout",
                     "deactivate_old_live_link",
+                    "swap_portal_login",
                     "swap_test_urls",
                     "promote_site"
                   ],
@@ -10453,10 +10455,7 @@
           },
           "recorded": {
             "type": "boolean",
-            "enum": [
-              false
-            ],
-            "description": "Always false: these questions are settled by a setting (updateNoticeSettings) or by what Stripe shows, never by a stored answer.",
+            "description": "Whether Checkbox saved the answer. true: a Stripe Dashboard step (stripe_terms_url, stripe_portal_login, replace_payment_link) the plan no longer asks. false: nothing was saved; for a notice setting (email_sender, notices_support_email, notices_cancel_timing) next_action is the one call that applies it.",
             "example": false
           },
           "open": {
@@ -19447,12 +19446,12 @@
           "version": {
             "type": "string",
             "description": "Semver of the bundle.",
-            "example": "1.5.8"
+            "example": "1.5.9"
           },
           "url": {
             "type": "string",
             "description": "Immutable URL of this version.",
-            "example": "https://app.checkbox.site/v1/elements/1.5.8/elements.js"
+            "example": "https://app.checkbox.site/v1/elements/1.5.9/elements.js"
           },
           "integrity": {
             "type": "string",
@@ -19494,8 +19493,8 @@
             "description": "Every released version, newest first.",
             "example": [
               {
-                "version": "1.5.8",
-                "url": "https://app.checkbox.site/v1/elements/1.5.8/elements.js",
+                "version": "1.5.9",
+                "url": "https://app.checkbox.site/v1/elements/1.5.9/elements.js",
                 "integrity": "sha384-…",
                 "size": 33000
               }
@@ -19985,7 +19984,7 @@
               "null"
             ],
             "description": "elements.js version.",
-            "example": "1.5.8"
+            "example": "1.5.9"
           },
           "client_timestamp": {
             "type": [
@@ -20502,7 +20501,7 @@
             "type": "string",
             "maxLength": 20,
             "description": "elements.js version that rendered the disclosure.",
-            "example": "1.5.8"
+            "example": "1.5.9"
           },
           "presentation": {
             "$ref": "#/components/schemas/ConsentPresentationInput"
@@ -20627,7 +20626,7 @@
                 "customer_reference": "cs_test_a1b2c3",
                 "client_reference": null,
                 "source": "elements",
-                "element_version": "1.5.8",
+                "element_version": "1.5.9",
                 "client_timestamp": null,
                 "presentation": {
                   "violations": [],
@@ -22794,7 +22793,7 @@
               "string",
               "null"
             ],
-            "description": "Warning or failure code of the step (stable): key_missing, key_not_test_mode, key_invalid, key_permission_missing, checkout_config_missing, price_not_in_test_mode, checkout_session_failed, checkout_page_unreadable, checkout_not_completed, subscription_create_failed, test_clock_failed, no_email_received_within, reminder_not_received, portal_not_configured, cancel_not_completed, cancellation_email_not_received, checkout_url_missing, real_checkout_not_completed, pre_checkout_steps_needed, check_failed, payment_link_not_found, webhook_not_delivered, reminder_outside_window, reminder_timing_not_observed, cancel_flow_not_configured, cancel_not_confirmed_in_stripe, acknowledgment_content_incomplete, required_notice_skipped, cancel_replaced_by_other_subscription, cancel_own_control_failed, cancel_own_control_not_tested, not_judged, scan_config_missing, domain_not_verified, scanner_failed, stripe_api_error, timeout, canceled, internal_error.",
+            "description": "Warning or failure code of the step (stable): key_missing, key_not_test_mode, key_invalid, key_permission_missing, checkout_config_missing, price_not_in_test_mode, checkout_session_failed, checkout_page_unreadable, checkout_not_completed, subscription_create_failed, test_clock_failed, no_email_received_within, reminder_not_received, portal_not_configured, cancel_not_completed, cancellation_email_not_received, checkout_url_missing, real_checkout_not_completed, pre_checkout_steps_needed, check_failed, payment_link_not_found, webhook_not_delivered, reminder_outside_window, reminder_timing_not_observed, cancel_flow_not_configured, cancel_not_confirmed_in_stripe, acknowledgment_content_incomplete, required_notice_skipped, cancel_replaced_by_other_subscription, cancel_own_control_failed, cancel_own_control_not_tested, cancel_needs_sign_in, not_judged, scan_config_missing, domain_not_verified, scanner_failed, stripe_api_error, timeout, canceled, internal_error.",
             "example": "no_email_received_within"
           },
           "fix": {
@@ -23041,7 +23040,7 @@
             "properties": {
               "code": {
                 "type": "string",
-                "description": "Stable failure code: key_missing, key_not_test_mode, key_invalid, key_permission_missing, checkout_config_missing, price_not_in_test_mode, checkout_session_failed, checkout_page_unreadable, checkout_not_completed, subscription_create_failed, test_clock_failed, no_email_received_within, reminder_not_received, portal_not_configured, cancel_not_completed, cancellation_email_not_received, checkout_url_missing, real_checkout_not_completed, pre_checkout_steps_needed, check_failed, payment_link_not_found, webhook_not_delivered, reminder_outside_window, reminder_timing_not_observed, cancel_flow_not_configured, cancel_not_confirmed_in_stripe, acknowledgment_content_incomplete, required_notice_skipped, cancel_replaced_by_other_subscription, cancel_own_control_failed, cancel_own_control_not_tested, not_judged, scan_config_missing, domain_not_verified, scanner_failed, stripe_api_error, timeout, canceled, internal_error.",
+                "description": "Stable failure code: key_missing, key_not_test_mode, key_invalid, key_permission_missing, checkout_config_missing, price_not_in_test_mode, checkout_session_failed, checkout_page_unreadable, checkout_not_completed, subscription_create_failed, test_clock_failed, no_email_received_within, reminder_not_received, portal_not_configured, cancel_not_completed, cancellation_email_not_received, checkout_url_missing, real_checkout_not_completed, pre_checkout_steps_needed, check_failed, payment_link_not_found, webhook_not_delivered, reminder_outside_window, reminder_timing_not_observed, cancel_flow_not_configured, cancel_not_confirmed_in_stripe, acknowledgment_content_incomplete, required_notice_skipped, cancel_replaced_by_other_subscription, cancel_own_control_failed, cancel_own_control_not_tested, cancel_needs_sign_in, not_judged, scan_config_missing, domain_not_verified, scanner_failed, stripe_api_error, timeout, canceled, internal_error.",
                 "example": "price_not_in_test_mode"
               },
               "message": {
@@ -28068,7 +28067,7 @@
       "post": {
         "operationId": "answerTask",
         "summary": "Record the human answer to a manual task",
-        "description": "For tasks with status manual, and for every question the plan's owner_questions lists (by its id): record the human's answer (ask them; never answer on their behalf). An owner question that is not one task's own (owner_questions[].key email_sender, stripe_terms_url, …) returns an AnsweredOwnerQuestion: nothing is stored, next_action is the exact call that applies the answer. An answer to a task whose question closed since the plan was read records nothing (recorded: false) and says why. Answers that assert a legal fact (yes, confirmed) are stored as a proposal and return next_action.type \"ask_human_to_confirm\" with a link the human opens while signed in to Checkbox; only their confirmation writes the attestation, sets the site fact and re-evaluates. no / needs_change turn the task into a change for the agent; done (after a dashboard-only step) re-checks at once. Every answer is stored in the evidence vault.",
+        "description": "For tasks with status manual, and for every question the plan's owner_questions lists (by its id): record the human's answer (ask them; never answer on their behalf). An owner question that is not one task's own (owner_questions[].key email_sender, stripe_terms_url, …) returns an AnsweredOwnerQuestion: recorded says whether it was saved (a Stripe Dashboard step closes on the answer); a notice setting is not saved by the answer, and next_action is the one call that applies it. site is needed only when the account has several sites. An answer to a task whose question closed since the plan was read records nothing (recorded: false) and says why. Answers that assert a legal fact (yes, confirmed) are stored as a proposal and return next_action.type \"ask_human_to_confirm\" with a link the human opens while signed in to Checkbox; only their confirmation writes the attestation, sets the site fact and re-evaluates. no / needs_change turn the task into a change for the agent; done (after a dashboard-only step) re-checks at once. Every answer is stored in the evidence vault.",
         "tags": [
           "Compliance plans"
         ],
@@ -31412,7 +31411,7 @@
             "schema": {
               "type": "string",
               "description": "Semver, e.g. 1.0.0.",
-              "example": "1.5.8"
+              "example": "1.5.9"
             },
             "required": true,
             "name": "version",
@@ -37867,7 +37866,7 @@
                             "customer_reference": "cs_test_a1b2c3",
                             "client_reference": null,
                             "source": "elements",
-                            "element_version": "1.5.8",
+                            "element_version": "1.5.9",
                             "client_timestamp": null,
                             "presentation": {
                               "violations": [],

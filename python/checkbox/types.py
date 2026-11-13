@@ -395,7 +395,7 @@ GoLiveValueStepsItem = TypedDict(
     "GoLiveValueStepsItem",
     {
         #: Stable step key.
-        "key": Literal["verify_domain", "stripe_terms_url", "live_stripe_key", "live_portal_cancel", "live_checkout", "deactivate_old_live_link", "swap_test_urls", "promote_site"],
+        "key": Literal["verify_domain", "stripe_terms_url", "live_stripe_key", "live_portal_cancel", "live_checkout", "deactivate_old_live_link", "swap_portal_login", "swap_test_urls", "promote_site"],
         #: Who takes the step: person (only the owner can: DNS, the Stripe Dashboard, live keys) or agent (a code change).
         "who": Literal["person", "agent"],
         #: The step in plain words.
@@ -411,7 +411,7 @@ GoLiveValueClosedItem = TypedDict(
     "GoLiveValueClosedItem",
     {
         #: Stable step key.
-        "key": Literal["verify_domain", "stripe_terms_url", "live_stripe_key", "live_portal_cancel", "live_checkout", "deactivate_old_live_link", "swap_test_urls", "promote_site"],
+        "key": Literal["verify_domain", "stripe_terms_url", "live_stripe_key", "live_portal_cancel", "live_checkout", "deactivate_old_live_link", "swap_portal_login", "swap_test_urls", "promote_site"],
         #: Why Checkbox closed the step, in plain words (what Stripe showed).
         "text": str,
     },
@@ -3498,8 +3498,8 @@ AnsweredOwnerQuestion = TypedDict(
         "key": str,
         #: The answer as understood (one of the question's options).
         "answer": str,
-        #: Always false: these questions are settled by a setting (updateNoticeSettings) or by what Stripe shows, never by a stored answer.
-        "recorded": Literal[False],
+        #: Whether Checkbox saved the answer. true: a Stripe Dashboard step (stripe_terms_url, stripe_portal_login, replace_payment_link) the plan no longer asks. false: nothing was saved; for a notice setting (email_sender, notices_support_email, notices_cancel_timing) next_action is the one call that applies it.
+        "recorded": bool,
         #: Whether the plan still asks this question.
         "open": bool,
         "next_action": "PlanNextAction",
@@ -7433,7 +7433,7 @@ TestRunStep = TypedDict(
         "observations": Dict[str, Any],
         #: Evidence records (screenshots, page captures, raw emails) behind the step.
         "evidence": List[str],
-        #: Warning or failure code of the step (stable): key_missing, key_not_test_mode, key_invalid, key_permission_missing, checkout_config_missing, price_not_in_test_mode, checkout_session_failed, checkout_page_unreadable, checkout_not_completed, subscription_create_failed, test_clock_failed, no_email_received_within, reminder_not_received, portal_not_configured, cancel_not_completed, cancellation_email_not_received, checkout_url_missing, real_checkout_not_completed, pre_checkout_steps_needed, check_failed, payment_link_not_found, webhook_not_delivered, reminder_outside_window, reminder_timing_not_observed, cancel_flow_not_configured, cancel_not_confirmed_in_stripe, acknowledgment_content_incomplete, required_notice_skipped, cancel_replaced_by_other_subscription, cancel_own_control_failed, cancel_own_control_not_tested, not_judged, scan_config_missing, domain_not_verified, scanner_failed, stripe_api_error, timeout, canceled, internal_error.
+        #: Warning or failure code of the step (stable): key_missing, key_not_test_mode, key_invalid, key_permission_missing, checkout_config_missing, price_not_in_test_mode, checkout_session_failed, checkout_page_unreadable, checkout_not_completed, subscription_create_failed, test_clock_failed, no_email_received_within, reminder_not_received, portal_not_configured, cancel_not_completed, cancellation_email_not_received, checkout_url_missing, real_checkout_not_completed, pre_checkout_steps_needed, check_failed, payment_link_not_found, webhook_not_delivered, reminder_outside_window, reminder_timing_not_observed, cancel_flow_not_configured, cancel_not_confirmed_in_stripe, acknowledgment_content_incomplete, required_notice_skipped, cancel_replaced_by_other_subscription, cancel_own_control_failed, cancel_own_control_not_tested, cancel_needs_sign_in, not_judged, scan_config_missing, domain_not_verified, scanner_failed, stripe_api_error, timeout, canceled, internal_error.
         "code": Optional[str],
         "fix": "TestRunFix",
     },
@@ -7468,7 +7468,7 @@ TestRunWaitingFor = TypedDict(
 TestRunFailure = TypedDict(
     "TestRunFailure",
     {
-        #: Stable failure code: key_missing, key_not_test_mode, key_invalid, key_permission_missing, checkout_config_missing, price_not_in_test_mode, checkout_session_failed, checkout_page_unreadable, checkout_not_completed, subscription_create_failed, test_clock_failed, no_email_received_within, reminder_not_received, portal_not_configured, cancel_not_completed, cancellation_email_not_received, checkout_url_missing, real_checkout_not_completed, pre_checkout_steps_needed, check_failed, payment_link_not_found, webhook_not_delivered, reminder_outside_window, reminder_timing_not_observed, cancel_flow_not_configured, cancel_not_confirmed_in_stripe, acknowledgment_content_incomplete, required_notice_skipped, cancel_replaced_by_other_subscription, cancel_own_control_failed, cancel_own_control_not_tested, not_judged, scan_config_missing, domain_not_verified, scanner_failed, stripe_api_error, timeout, canceled, internal_error.
+        #: Stable failure code: key_missing, key_not_test_mode, key_invalid, key_permission_missing, checkout_config_missing, price_not_in_test_mode, checkout_session_failed, checkout_page_unreadable, checkout_not_completed, subscription_create_failed, test_clock_failed, no_email_received_within, reminder_not_received, portal_not_configured, cancel_not_completed, cancellation_email_not_received, checkout_url_missing, real_checkout_not_completed, pre_checkout_steps_needed, check_failed, payment_link_not_found, webhook_not_delivered, reminder_outside_window, reminder_timing_not_observed, cancel_flow_not_configured, cancel_not_confirmed_in_stripe, acknowledgment_content_incomplete, required_notice_skipped, cancel_replaced_by_other_subscription, cancel_own_control_failed, cancel_own_control_not_tested, cancel_needs_sign_in, not_judged, scan_config_missing, domain_not_verified, scanner_failed, stripe_api_error, timeout, canceled, internal_error.
         "code": str,
         #: What went wrong.
         "message": str,
