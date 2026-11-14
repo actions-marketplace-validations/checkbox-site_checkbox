@@ -518,6 +518,19 @@ export interface SetupSession {
       /** When Checkbox saw it closed. Unix timestamp in seconds. */
       closed: number;
     }>;
+    /** Answers the agent recorded that wait for the owner's confirmation. They are not questions to ask again: the owner opens the link once (their To-do page lists every one). Absent when none. */
+    awaiting_confirmation?: Array<{
+      /** Unique identifier of the task (task_…). */
+      id: string;
+      /** The key of the task whose question it is. */
+      key: string;
+      /** The question that was answered. */
+      text: string;
+      /** The proposed answer. */
+      answer: string;
+      /** The link the owner opens (signed in to Checkbox) to confirm or correct it. */
+      confirmation_url: string;
+    }>;
   } | null;
   /** The plans Checkbox judges the site against: the declared plans as reconciled with the connected Stripe Prices (Stripe wins), the plans the pay buttons sell and the account's Prices of a declared plan. Empty until a plan is known (updateSetupSession plans[], or connect Stripe). */
   site_plans: Array<{
@@ -2137,6 +2150,19 @@ export interface CompliancePlan {
       /** When Checkbox saw it closed. Unix timestamp in seconds. */
       closed: number;
     }>;
+    /** Answers the agent recorded that wait for the owner's confirmation. They are not questions to ask again: the owner opens the link once (their To-do page lists every one). Absent when none. */
+    awaiting_confirmation?: Array<{
+      /** Unique identifier of the task (task_…). */
+      id: string;
+      /** The key of the task whose question it is. */
+      key: string;
+      /** The question that was answered. */
+      text: string;
+      /** The proposed answer. */
+      answer: string;
+      /** The link the owner opens (signed in to Checkbox) to confirm or correct it. */
+      confirmation_url: string;
+    }>;
   };
   go_live?: GoLive;
   /** Evidence level per required email kind. A plan never reaches status compliant on template_checked emails. */
@@ -2206,7 +2232,7 @@ export interface AnsweredOwnerQuestion {
   key: string;
   /** The answer as understood (one of the question's options). */
   answer: string;
-  /** Whether Checkbox saved the answer. true: a Stripe Dashboard step (stripe_terms_url, stripe_portal_login, replace_payment_link) the plan no longer asks. false: nothing was saved; for a notice setting (email_sender, notices_support_email, notices_cancel_timing) next_action is the one call that applies it. */
+  /** Whether Checkbox saved the answer. true: the plan no longer asks it (a Stripe Dashboard step, or a notice setting (email_sender, notices_support_email, notices_cancel_timing) applied to the Notices settings). false: nothing was saved (only a person can apply it, or the key lacks notices:write); next_action says the one step or call that applies it. */
   recorded: boolean;
   /** Whether the plan still asks this question. */
   open: boolean;
@@ -4755,6 +4781,25 @@ export interface DeletedTestCredential {
   deleted: true;
 }
 
+/** Registration only: how the compliance plan judges the registered params. */
+export interface StripeCheckoutConfigJudgement {
+  /** The compliance plan's verdict on these params (the same judgement as checkStripeCheckoutSession with site). */
+  verdict: "pass" | "fail" | "needs_review";
+  /** Checks the params fail (fail) or leave open (needs_review). */
+  failing: Array<{
+    /** The failing check. */
+    check_id: string;
+    /** Short title of the check. */
+    title: string;
+    /** What the params do wrong and how to fix it. */
+    detail: string;
+  }>;
+  /** Engine-verified params that pass, when Checkbox can correct them: put them in your code, then register again. */
+  corrected_params: Record<string, unknown> | null;
+  /** needs_review only: why Checkbox could not judge them yet (e.g. a Price it has not read from Stripe). */
+  problem?: string;
+}
+
 /** Checkout Session parameters your code uses, registered so test runs mirror exactly your checkout into Stripe test mode. */
 export interface StripeCheckoutConfig {
   /** Unique identifier of the stripe checkout config (scc_…). */
@@ -4781,6 +4826,7 @@ export interface StripeCheckoutConfig {
   metadata: Record<string, string>;
   /** When the config was registered. Unix timestamp in seconds. */
   created: number;
+  judgement?: StripeCheckoutConfigJudgement;
   next_action?: NextAction;
 }
 
@@ -4931,6 +4977,8 @@ export interface TestRun {
   finished_at: number | null;
   /** How long the run took, from started (or created) to finished, in seconds; null while it runs. */
   duration_seconds: number | null;
+  /** Round 41: true when Checkbox started the run itself because the compliance plan asked for one (test mode, with the site's Stripe TEST key stored). createTestRun returns this run while it is active instead of starting another. */
+  auto_started: boolean;
   /** Lifecycle steps in order. */
   steps: Array<TestRunStep>;
   /** Why the run stopped (failed / canceled runs). */
@@ -5682,7 +5730,7 @@ export interface ListStripeCheckoutConfigsParams {
 
 /** Parameters of `testRuns.create()` (createTestRun). */
 export interface CreateTestRunParams {
-  /** Stripe runs. mirror (default): Checkbox mirrors your checkout into test mode and moves a test clock through every legal notice window. real_checkout ("Run proof"): the shopper buys through YOUR checkout on your test deployment (stripe.checkout_url or stripe.payment_link) with card 4242 and the run inbox, so your own webhook handlers and email code fire; Checkbox watches the inbox, Stripe's events and your cancel flow. Needs your test deployment on Stripe TEST keys with a test-mode webhook endpoint. */
+  /** Stripe runs. mirror (default): Checkbox mirrors your checkout into test mode and moves a test clock through every legal notice window. On a Payment Link site it mirrors the test-mode Payment Link your page links to, and the shopper opens that link's own Stripe page from your page, so its real consent box and text are judged. real_checkout ("Run proof"): the shopper buys through YOUR checkout on your test deployment (stripe.checkout_url or stripe.payment_link) with card 4242 and the run inbox, so your own webhook handlers and email code fire; Checkbox watches the inbox, Stripe's events and your cancel flow. Needs your test deployment on Stripe TEST keys with a test-mode webhook endpoint. */
   mode?: "mirror" | "real_checkout";
   /** stripe (default when a Stripe test key is stored or the site uses Stripe) or generic (test coupon / test account, no time travel). */
   type?: "stripe" | "generic";

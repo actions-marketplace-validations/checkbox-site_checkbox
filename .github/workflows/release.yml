@@ -114,6 +114,16 @@ jobs:
       - name: Skip when the registry key is not set
         if: ${{ env.MCP_REGISTRY_PRIVATE_KEY == '' }}
         run: echo "MCP_REGISTRY_PRIVATE_KEY is not set; skipping the registry (see RELEASING.md)."
+      - name: Wait until npm serves the MCP package version in server.json
+        if: ${{ env.MCP_REGISTRY_PRIVATE_KEY != '' }}
+        run: |
+          pkg=$(node -p "require('./mcp-registry/server.json').packages[0].identifier")
+          ver=$(node -p "require('./mcp-registry/server.json').packages[0].version")
+          for i in $(seq 1 30); do
+            if [ "$(npm view "$pkg@$ver" version 2>/dev/null)" = "$ver" ]; then echo "$pkg@$ver is on npm"; exit 0; fi
+            echo "waiting for $pkg@$ver on npm ($i/30)"; sleep 10
+          done
+          echo "$pkg@$ver is not on npm after 5 minutes"; exit 1
       - name: Install mcp-publisher
         if: ${{ env.MCP_REGISTRY_PRIVATE_KEY != '' }}
         run: |

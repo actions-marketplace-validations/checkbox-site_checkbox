@@ -1477,7 +1477,7 @@ const startTestRun: ToolDef = {
   title: 'Run a synthetic test subscription (test mode)',
   description: [
     'Observes the WHOLE subscription lifecycle in Stripe TEST mode: a test customer (card 4242…, a Checkbox inbox) subscribes; Checkbox waits for the acknowledgment, fast-forwards a test clock through each notice window (collecting reminders), cancels online and waits for the confirmation. Nothing is charged.',
-    'Needs the site\'s Stripe TEST restricted key (rk_test_…): store it with store_stripe_test_key; never ask the human to paste a key. Non-Stripe sites: type "generic".',
+    'Needs the site\'s Stripe TEST restricted key (rk_test_…): store it with store_stripe_test_key; never ask the human to paste a key. Non-Stripe sites: type "generic". When the compliance plan asks for a run and the key is stored, Checkbox starts it automatically (test mode); this tool then returns that run.',
     'Takes 1-2 minutes (real_checkout: a few): poll get_test_run with wait: 55. Each step reports observations, checks and fixes; apply them and run again.',
     'mode "real_checkout" is the PROOF run: the shopper buys through the merchant\'s own checkout on its test deployment (stripe.checkout_url or stripe.payment_link), so the merchant\'s webhook handlers and email code fire; give stripe.test_account + stripe.cancel_url when customers cancel in the app. Several plan buttons: pass plan, or stripe.pre_checkout_steps [{action:"click",text:"<button>"}]. A step is "passed" only with evidence; "warning" means needs review.',
     'Cancel: stripe.cancel_via "stripe_portal" (default) or "merchant_flow" (cancel_url + cancel_steps; behind a login, test_account { login_url, email, password }).',
@@ -1525,11 +1525,12 @@ const startTestRun: ToolDef = {
   annotations: { ...write(false, true), title: 'Start test run' },
   async run(args, { api }) {
     const site = await resolveSite(api, args.site);
-    const run = await api.request<{ id: string; status: string; type: string; inbox_address?: string }>('POST', `/v1/sites/${enc(site)}/test_runs`, {
+    const run = await api.request<{ id: string; status: string; type: string; inbox_address?: string; auto_started?: boolean }>('POST', `/v1/sites/${enc(site)}/test_runs`, {
       body: startTestRunBody(args),
     });
+    // Round 41: the run Checkbox already started itself (auto-start) is returned, never a second one.
     return {
-      headline: `Test run ${run.id} (${run.type}) ${run.status} for ${site}.${run.inbox_address ? ` Test subscriber inbox: ${run.inbox_address}.` : ''}`,
+      headline: `Test run ${run.id} (${run.type}) ${run.status} for ${site}${run.auto_started ? ' (Checkbox started it automatically; this is that run)' : ''}.${run.inbox_address ? ` Test subscriber inbox: ${run.inbox_address}.` : ''}`,
       data: run,
       compact: compactTestRunResult(run as unknown as Record<string, unknown>, OPERATION_TOOLS),
     };
@@ -1584,7 +1585,7 @@ const getTestRun: ToolDef = {
       run = await api.request<RunLite>('GET', `/v1/test_runs/${enc(id)}`, { query: { wait: Math.min(30, left) } });
     }
     const running = !TEST_RUN_DONE.has(run.status);
-    const next = running && run.next_action?.type === 'wait' ? { ...run.next_action, message: `${(run.next_action.message ?? '').replace(/\s*Call retrieveTestRun with \?wait=30[^.]*\.?/, '').trim()} Call get_test_run again with wait: ${TEST_RUN_MAX_WAIT}: it answers as soon as the run finishes.`.trim() } : undefined;
+    const next = running && run.next_action?.type === 'wait' ? { ...run.next_action, message: `${withoutRestPoll(run.next_action.message ?? '')} Call get_test_run again with wait: ${TEST_RUN_MAX_WAIT}: it answers as soon as the run finishes.`.trim() } : undefined;
     const w = run.waiting_for;
     const progress = w ? [w.step && w.steps_total ? `step ${w.step} of ${w.steps_total}` : '', w.minutes_left ? `about ${w.minutes_left} min left` : ''].filter(Boolean).join(', ') : '';
     const waiting = w ? `Waiting for: ${w.what}${w.until ? ` (until ${new Date(w.until * 1000).toISOString().slice(0, 16).replace('T', ' ')} UTC at the latest)` : ''}${progress ? ` [${progress}]` : ''}` : null;
@@ -3089,3 +3090,11 @@ export const TOOL_OPERATIONS: Record<string, string[]> = {
   send_feedback: ['createFeedback'],
   call_api: [],
 };
+
+/**
+ * Round 41 (pilot 40 core-new-app: "Step 8 of 10, finishing now.completed webhook."): the REST poll hint of a running
+ * test run's next_action, removed whole (it ends with "the test_run.completed webhook."), so the MCP hint replaces it.
+ */
+export function withoutRestPoll(message: string): string {
+  return message.replace(/\s*Call retrieveTestRun with \?wait=30.*?(?:webhook\.|$)/, '').trim();
+}
