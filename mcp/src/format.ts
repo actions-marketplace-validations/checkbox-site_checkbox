@@ -273,6 +273,20 @@ function withItems(data: unknown, path: string[], items: unknown[]): unknown {
   return root;
 }
 
+/** Round 42: one item of a paged list in one line: its id, name or title, status and order, when it has them. */
+function summaryOf(x: unknown): Record<string, unknown> | null {
+  if (!x || typeof x !== 'object' || Array.isArray(x)) return null;
+  const o = x as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const k of ['id', 'key', 'title', 'name', 'status', 'compliance_status', 'launch_tier', 'order']) {
+    const v = o[k];
+    if (typeof v === 'string' || typeof v === 'number') out[k] = typeof v === 'string' && v.length > 160 ? `${v.slice(0, 159)}…` : v;
+  }
+  const next = o.next_action as { type?: unknown } | undefined;
+  if (next && typeof next.type === 'string') out.next = next.type;
+  return Object.keys(out).length ? out : null;
+}
+
 /** A list this short is never paged down to fewer items: its items' nested lists are shortened instead. */
 const SMALL_LIST = 5;
 
@@ -327,7 +341,10 @@ export function fitJson(data: unknown, max = MAX_JSON_CHARS, flatFirst = false):
     const render = (n: number) => {
       const rest = arr.items.slice(n);
       const ids = rest.map((x) => (x && typeof x === 'object' ? (x as { id?: unknown }).id : undefined)).filter((x): x is string => typeof x === 'string');
-      return JSON.stringify(withItems({ ...(data as Record<string, unknown>), _page: { list: arr.path.join('.'), returned: n, total: arr.items.length, remaining_ids: ids.slice(0, 200) } }, arr.path, arr.items.slice(0, n)), null, 2);
+      // Round 42 (pilot 41 core-codex: a verbose plan showed 2 of 12 tasks, and 10 get_task calls followed before the
+      // owner could be asked once): every item left out is still listed, in a compact line (id, title, status).
+      const remaining = rest.slice(0, 200).map(summaryOf).filter((x): x is Record<string, unknown> => !!x);
+      return JSON.stringify(withItems({ ...(data as Record<string, unknown>), _page: { list: arr.path.join('.'), returned: n, total: arr.items.length, remaining_ids: ids.slice(0, 200), ...(remaining.length ? { remaining } : {}) } }, arr.path, arr.items.slice(0, n)), null, 2);
     };
     while (lo < hi) {
       const mid = Math.ceil((lo + hi) / 2);
@@ -343,7 +360,7 @@ export function fitJson(data: unknown, max = MAX_JSON_CHARS, flatFirst = false):
     }
     const json = render(lo);
     if (json.length <= max) {
-      return { json, page: `Output paged: ${lo} of ${arr.items.length} items of "${arr.path.join('.')}" shown. The JSON is complete and valid; fetch the others by id (_page.remaining_ids), e.g. get_task for plan tasks, or narrow the request (a smaller limit).` };
+      return { json, page: `Output paged: ${lo} of ${arr.items.length} items of "${arr.path.join('.')}" shown in full; _page.remaining lists every other one in one line each (id, title, status). The JSON is complete and valid; fetch any of them in full by id (e.g. get_task for plan tasks), or narrow the request (a smaller limit).` };
     }
   }
   const compact = JSON.stringify(data);

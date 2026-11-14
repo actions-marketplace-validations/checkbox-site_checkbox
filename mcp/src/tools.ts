@@ -1138,9 +1138,9 @@ const getCompliancePlan: ToolDef = {
   description: [
     'The main tool after setup. Returns the ordered tasks that make the site pass the automatic-renewal checks, recomputed from the latest observations.',
     'Each task here is a summary (id, status, why, where, change type, next_action); get_task has the full change (diff, copy or Stripe params) and its legal citation.',
-    'Plan status: action_required (apply open tasks), verifying (waiting for confirming observations), compliant (done: the checks pass — "pending_live_check" tasks count as passing: they complete on their own or with a proof run), blocked (only human questions — "Your call" — left).',
+    'Plan status: action_required (apply open tasks), verifying (waiting for confirming observations), checks_pass (done: the checks pass — "pending_live_check" tasks count as passing: they complete on their own or with a proof run; verbose JSON also has the legacy status value "compliant": never say "compliant"), blocked (only human questions — "Your call" — left).',
     'Only launch_tier "before_launch" tasks count; "good_practice" ones are optional (mention once, do not push). Show launch.label.',
-    'Loop: apply the first open required task in the code → verify_task → get_compliance_plan → … until the checks pass (status compliant). Tasks with status "manual" carry a question with a recommended answer: ask the HUMAN, then answer_task. Never invent answers.',
+    'Loop: apply the first open required task in the code → verify_task → get_compliance_plan → … until the checks pass (status checks_pass). Tasks with status "manual" carry a question with a recommended answer: ask the HUMAN, then answer_task. Never invent answers.',
   ].join('\n'),
   input: { site: siteId.optional(), verbose: verboseArg },
   scopes: ['compliance_plans:read'],
@@ -1229,6 +1229,8 @@ interface FinalCheckLite {
   observed: string;
   detail?: string;
   source?: string;
+  /** Round 42 (whole-site verifications): false when the plan counts nothing to do for this check. */
+  blocking?: boolean;
 }
 
 const lineOf = (c: FinalCheckLite): string => `${c.check_id}: ${c.observed === 'open' && c.source === 'plan' ? 'open in the plan' : c.observed}${c.detail ? ` — ${untrusted(c.detail, 180)}` : ''}`;
@@ -1261,16 +1263,19 @@ export function verificationLines(v: { status: string; precheck?: PrecheckLite |
 export function checksSummary(v: { status: string; precheck?: PrecheckLite | null; checks?: FinalCheckLite[] | null; diff?: FinalCheckLite[] | null }): string[] {
   const finals = v.checks ?? [];
   const pre = v.status === 'pending' || !finals.length;
-  const list = pre ? (v.precheck?.checks ?? []).map((c) => ({ check_id: c.check_id, observed: c.status })) : finals.map((c) => ({ check_id: c.check_id, observed: c.observed }));
+  const list: Array<{ check_id: string; observed: string; blocking?: boolean }> = pre ? (v.precheck?.checks ?? []).map((c) => ({ check_id: c.check_id, observed: c.status })) : finals.map((c) => ({ check_id: c.check_id, observed: c.observed, ...(c.blocking === false ? { blocking: false } : {}) }));
   const planOpen = (v.diff ?? []).filter((d) => d && d.source === 'plan').map((d) => ({ check_id: d.check_id, observed: 'open in the plan' }));
   if (!list.length && !planOpen.length) return [];
   const ok = new Set(['pass', 'informational', 'not_applicable']);
+  // Round 42 (pilot 41 core-codex): a check the plan does not count (blocking false) is never in the "not passing" list.
+  const uncounted = new Set(list.filter((c) => c.blocking === false && !ok.has(c.observed)).map((c) => c.check_id));
   const bad = new Map<string, string>();
-  for (const c of [...planOpen, ...list]) if (!ok.has(c.observed) && !bad.has(c.check_id)) bad.set(c.check_id, c.observed);
+  for (const c of [...planOpen, ...list]) if (!ok.has(c.observed) && !bad.has(c.check_id) && !uncounted.has(c.check_id)) bad.set(c.check_id, c.observed);
   const passing = list.filter((c) => ok.has(c.observed) && !bad.has(c.check_id)).length;
   const label = pre ? 'Pre-check' : 'Checks';
   const notPassing = [...bad].map(([id, st]) => `${id} (${st})`);
-  return [`${label}: ${notPassing.length ? `not passing: ${notPassing.join(', ')} (details in diff); ` : ''}${passing} passing.`];
+  const waiting = uncounted.size ? `${uncounted.size} waiting or optional (not counted in the plan); ` : '';
+  return [`${label}: ${notPassing.length ? `not passing: ${notPassing.join(', ')} (details in diff); ` : ''}${waiting}${passing} passing.`];
 }
 
 const verifyTask: ToolDef = {
@@ -1279,14 +1284,14 @@ const verifyTask: ToolDef = {
   description: [
     'Call right after you applied a task\'s change. Checkbox runs the fastest re-check that can confirm it and queues the confirming observation (a scan, a billing sync, the next real email).',
     'Send what you changed so the pre-check is exact and immediate:',
-    '- page tasks: html = the rendered page HTML (before or after deploy; ≤ ~900 KB). Without it Checkbox fetches the live page.',
+    '- sign-up page tasks (verify.method page_fetch, or signup.* checks): html = the rendered page HTML (before or after deploy; ≤ ~900 KB). Without it Checkbox fetches the live page. Other page tasks (cancellation, account page) take no html: deploy, then verify without it.',
     '- Stripe tasks: stripe_checkout_session = exactly the object your code now passes to stripe.checkout.sessions.create.',
     '- email tasks: email = { subject, text and/or html } of the new template.',
     'Result: verification status passed / needs_review / failed (with a diff of expected vs observed) / pending (waiting for the confirming scan). Waits up to `wait` seconds. Then follow next_action (usually get_compliance_plan). Status needs_review: nothing failed, but a check is still undecided; it is not done: follow next_action. "informational" checks are notes on Stripe\'s own layout: nothing to change.',
   ].join('\n'),
   input: {
     task: z.string().max(100).describe('Task id (task_…).'),
-    html: z.string().max(950_000).optional().describe('Page tasks: the rendered page HTML.'),
+    html: z.string().max(950_000).optional().describe('Sign-up page tasks: the rendered page HTML.'),
     stripe_checkout_session: z.record(z.string(), z.unknown()).optional().describe('Stripe tasks: the params your code passes to stripe.checkout.sessions.create.'),
     stripe_checkout_sessions: z.array(z.record(z.string(), z.unknown())).max(10).optional().describe('Stripe tasks, one params object per plan.'),
     email: z
@@ -1450,7 +1455,7 @@ const storeStripeTestKey: ToolDef = {
   name: 'store_stripe_test_key',
   title: 'Store the Stripe TEST restricted key (rk_test_)',
   description:
-    'Stores the site\'s ONE Stripe key in TEST mode: a restricted key (rk_test_…) from the project\'s env. Checked with Stripe; on a test-mode site it also connects Stripe (checks, fixes after the human approves, test runs). The human sees it on the dashboard and can revoke it. Live and sk_test_ keys are refused (the error says what to do). Never ask the human to paste a key into the chat.',
+    'Stores the site\'s ONE Stripe key in TEST mode: a restricted key (rk_test_…) from the project\'s env. Checked with Stripe; on a test-mode site not connected with “Connect with Stripe” it also connects Stripe (checks, fixes after the human approves, test runs); if connected, it only runs test runs. The human can revoke it on the dashboard. Live and sk_test_ keys are refused (the error says what to do). Never ask the human to paste a key into the chat.',
   input: {
     site: siteId.optional(),
     secret_key: z.string().min(10).max(255).describe('rk_test_… key. Stored encrypted; never returned.'),
@@ -1610,7 +1615,7 @@ const checkDisclosure: ToolDef = {
   description: [
     'Before shipping a checkout: checks the renewal disclosure next to the purchase button against every applicable law and returns per-check verdicts with citations plus a verified REPLACEMENT (disclosure_text, consent_label, button_text, drop-in html and jsx).',
     'Pass the text exactly as rendered plus the plan terms. Example: {"text":"Renews monthly at $19.99 until you cancel.","price":19.99,"interval":"month","cancel_url":"https://acme.example/account/cancel","consent":{"checkbox":true,"prechecked":false}}.',
-    'If verdict is fail, put replacement.jsx (React) or .html above the button, then call again with the new text, consent and placement.bold: true. needs_review on styling means a rendered scan must confirm.',
+    'If verdict is fail, put replacement.jsx (React) or .html above the button, then call again with the new text, consent and placement.bold: true. Styling needs_review: a scan confirms.',
   ].join('\n'),
   input: {
     text: z.string().min(1).max(5000).describe('The disclosure shown next to the purchase button, exactly as rendered.'),
@@ -1618,7 +1623,7 @@ const checkDisclosure: ToolDef = {
     interval: intervalStr.optional().describe('Billing interval: day, week, month or year (optional with site).'),
     button_text: z.string().max(200).optional().describe('Purchase button label, e.g. "Start free trial".'),
     order_summary: z.string().max(1000).optional().describe('Other text next to the button (order summary), if any.'),
-    site: z.string().max(100).optional().describe('site_… whose plans judge it (as verify_task)'),
+    site: z.string().max(100).optional().describe('site_…: its plans fill terms you leave out'),
     plan: z.string().max(200).optional().describe('With site: plan name or price_…'),
     placement: strictObject(
       {
@@ -1669,7 +1674,7 @@ const checkStripeCheckoutSession: ToolDef = {
   input: {
     params: z.record(z.string(), z.unknown()).describe('The Checkout Session params object, e.g. {"mode":"subscription","line_items":[{"price":"price_123","quantity":1}],"success_url":"https://acme.example/welcome"}.'),
     merchant: merchantTerms.optional().describe('What the params do not say: merchant_name, cancel_url, and price/interval when line_items use a Price id.'),
-    site: z.string().max(100).optional().describe('site_… whose plans judge it (as verify_task)'),
+    site: z.string().max(100).optional().describe('site_…: its plans fill terms you leave out'),
     plan: z.string().max(200).optional().describe('With site: plan name or price_…'),
     jurisdictions: jurisdictions.optional(),
     as_of: asOf.optional(),
@@ -1927,7 +1932,7 @@ const suggestImprovements: ToolDef = {
         text: z.string().min(1).max(5000).describe('Disclosure next to the purchase button, as rendered.'),
         button_text: z.string().max(200).optional(),
         order_summary: z.string().max(1000).optional(),
-        placement: z.object({ above_button: z.boolean().optional(), bold: z.boolean().optional(), boxed: z.boolean().optional(), font_size_px: z.number().min(4).max(96).optional() }).optional(),
+        placement: z.object({ above_button: z.boolean().optional(), bold: z.boolean().optional(), boxed: z.boolean().optional(), region_script: z.boolean().optional(), font_size_px: z.number().min(4).max(96).optional() }).optional(),
         consent: z.object({ checkbox: z.boolean(), prechecked: z.boolean().optional(), label: z.string().max(1000).optional() }).optional(),
       })
       .optional()
@@ -2558,7 +2563,7 @@ function reactSnippet(d: DisclosureLite): string {
 }
 
 const elementsInstallNotes = [
-  'Put script_tag in <head>; put element_html inside the sign-up form directly ABOVE the pay button. It keeps the button disabled until the shopper ticks the (unchecked, required) box.',
+  'Put script_tag in <head>; put element_html inside the sign-up form directly ABOVE the pay button. It never disables the button.',
   'Your server receives checkbox_consent_id (cons_…) with the form: store it with the subscription (e.g. Stripe metadata.checkbox_consent).',
   'Do not restyle it below body size or hide it; guard rails restore the required styles and report what they found.',
 ];
@@ -2579,7 +2584,7 @@ const getCompliantDisclosure: ToolDef = {
   name: 'get_compliant_disclosure',
   title: 'Generate a disclosure that passes the checks for given terms',
   description: [
-    'Generates the locked, engine-verified automatic-renewal disclosure for a plan: disclosure_text, consent_label (for an unchecked, required checkbox), button_text and drop-in html (the wording Elements and Fixes use).',
+    'Generates the locked, engine-verified automatic-renewal disclosure for a plan: disclosure_text (ends with the consent sentence; keep your button label; a checkbox only if the result says so), consent_label, html.',
     'Terms: price or amount, interval, trial_days, cancel_url, merchant_name, promo (intro_price or intro_percent_off, intro_periods). Example: {"merchant_name":"Acme","price":19.99,"interval":"month","trial_days":14,"cancel_url":"https://acme.example/cancel"}.',
     'With site (and a key that may create disclosures), it also returns the Elements snippet (script tag, <checkbox-disclosure>, React usage) that records each consent.',
   ].join('\n'),
@@ -2610,9 +2615,10 @@ const getCompliantDisclosure: ToolDef = {
       notes: [
         // Round 23 (pilot 22 item 30): the short line first when the engine passes it; the full text as the fuller version.
         ...(r.replacement.short_disclosure_text ? [`Disclosure: ${r.replacement.short_disclosure_text}`, `Fuller version (also passes): ${r.replacement.disclosure_text}`] : [`Disclosure: ${r.replacement.disclosure_text}`]),
-        `Consent label: ${r.replacement.consent_label}`,
+        // Round 42 (founder): the line's last sentence is the consent; a checkbox only when the result says one is needed.
+        ...(typeof r.replacement.note === 'string' && /no checkbox is needed/.test(r.replacement.note) ? ['No checkbox needed: keep the purchase button and its label; the line ends with the consent sentence.'] : [`Consent label (unchecked, required checkbox): ${r.replacement.consent_label}`]),
         ...(r.replacement.placeholders?.length ? [`Fill these placeholders: ${r.replacement.placeholders.join(', ')}.`] : []),
-        'Place html directly above the purchase button; never pre-check the box. For consent records as evidence, pass site to get the Elements snippet instead.',
+        'Place html directly above the purchase button. For consent records as evidence, pass site to get the Elements snippet instead (it adds a checkbox).',
       ],
       data: { replacement: r.replacement, disclaimer: r.disclaimer },
       next: { type: 'apply', message: 'Insert replacement.html above the purchase button, then call check_page_html with the rendered page (or verify_task) to confirm.' },
@@ -2625,7 +2631,7 @@ const getElementsSnippet: ToolDef = {
   title: 'Get the Checkbox Elements snippet for a site',
   description: [
     'Paste-ready Checkbox Elements markup for a site: the pinned <script> tag (SRI) for <head>, the <checkbox-disclosure> element for directly above the pay button, the publishable key and a React example.',
-    'The element renders the locked disclosure with an unchecked, required consent checkbox, gates the pay button and records each consent (cons_…). Terms come from the site\'s billing connection unless you pass them.',
+    'The element renders the locked renewal line (a checkbox only where a separate opt-in applies) and records each consent (cons_…). Terms come from the site\'s billing connection unless you pass them.',
     'Creates a disclosure record (safe to repeat). Consents are recorded by the browser, never by agents.',
   ].join('\n'),
   input: { site: requiredSite, plan: z.string().max(200).optional().describe('Billing price / plan id (price_…) when the site has several.'), ...elementsTermsShape },

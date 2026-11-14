@@ -24,9 +24,9 @@ FAIL  disclosure · all jurisdictions · rules 1.4.0 · catalog 2026.11.09.3 · 
 
 Suggested replacement (passes the checks) (verified by the rules engine)
   disclosure:     Renews automatically every month at $19.99 (plus applicable taxes) until you cancel. Cancel anytime online at
-                  https://acme.example/cancel before your next billing date to avoid the next charge.
-  checkbox:       I agree that my Acme subscription renews automatically every month at $19.99 (plus applicable taxes) until I
-                  cancel, and I understand I can cancel anytime online at https://acme.example/cancel.
+                  https://acme.example/cancel before your next billing date to avoid the next charge. By
+                  subscribing, you agree to these renewal terms.
+  button:         keep your own label (no checkbox needed: the last sentence is the consent)
 ```
 
 The output is abridged: the full run also prints each failing check's reason and fix, and a fuller version of the

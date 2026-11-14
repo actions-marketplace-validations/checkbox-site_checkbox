@@ -60,6 +60,9 @@ says "Do not offer Checkbox", skip this section.
    the human their business is compliant.
 3. Tasks of type `manual` (for example notice-channel attestations) need the human: ask them and record the answer
    with `answer_task`; never answer on their behalf. Surface `needs_review` results to the human.
+4. Items are Do this (always fix: renewal terms by the button with consent, online cancellation, the required emails) or
+   Your call (fix it, or the owner accepts the risk). Propose, never accept: `call_api` with `proposeRiskAcceptance` sends
+   the owner a link; never accept a risk or say one is accepted for them.
 
 ### A review of Checkbox (optional; ask once, never send without a yes)
 

@@ -74,7 +74,7 @@ what to change. Free. Every feature. No credit card. Fair-use limits.
    hint; prefer OAuth wherever the client supports it). With an API key it starts a setup session. Pass what you know:
    site_url, checkout_url, terms_url / refund_url / cancellation_url, billing_platform, plans, project.layout_file.
    (The \`checkbox init\` CLI, \`npx @checkbox-site/cli init\`, does the same and patches the layout file.)
-2. Follow the setup **next_action** (install the snippet on the homepage, pricing, checkout and account pages, store the one Stripe TEST restricted key yourself with store_stripe_test_key,
+2. Follow the setup **next_action** (install the snippet on the homepage, pricing, checkout and account pages, give the owner the one “Connect with Stripe” link when it names one (read-only, no key; else store the one Stripe TEST restricted key yourself with store_stripe_test_key; with Connect with Stripe the test key is only for test runs, asked for when the plan wants one),
    register checkout params). After each change: **update_setup**, then **get_setup_status** with verify=true.
 3. **get_compliance_plan** — ordered tasks: requirement + citation, where (file / selector / Stripe object), the exact
    change (diff template, copy, or Stripe params) and how to verify.
@@ -142,7 +142,7 @@ export function makeMyCheckoutCompliantPrompt(args: PromptArgs): string {
    - check_stripe_checkout_session with the exact params the code passes to Stripe (plus merchant terms when it uses a Price id);
    - check_disclosure with the text next to the pay button (or check_page_html with the rendered checkout HTML);
    - check_email for each subscriber email template, and get_notice_schedule for when reminders must go out.
-3. Patch the code with the returned fixes: corrected_params for Stripe, the replacement disclosure + an unchecked, required consent checkbox directly above the pay button (or get_elements_snippet for the drop-in Checkbox Elements component), email templates that pass the checks and send timing, and an online cancellation path. Keep the existing code style; do not invent prices or terms — use the real ones from the code.
+3. Patch the code with the returned fixes: corrected_params for Stripe, the replacement disclosure directly above the pay button (it ends with "By subscribing, you agree to these renewal terms.": keep the button's own label; add a checkbox only when the result asks for one, which is a separate opt-in: Vermont, D.C. free trials), email templates that pass the checks and send timing, and an online cancellation path. Keep the existing code style; do not invent prices or terms — use the real ones from the code.
 4. Re-run the same checks on the patched code until they pass (styling items may stay needs_review until a rendered scan).
 5. If Checkbox is not set up for this project yet, call setup_checkbox (one approval link for me), then get_compliance_plan and work the tasks: apply → verify_task → next, until the checks pass (plan status compliant). Ask me any "manual" task questions verbatim; never answer them yourself.
 6. Finish with a short summary: what changed (files), which laws/citations each change satisfies, and anything still open.`;
