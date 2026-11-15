@@ -7,7 +7,7 @@ import type { ToolAnnotations } from '@modelcontextprotocol/sdk/types.js';
 import { planTodo, todoLine, type TodoTaskLike } from './todo.ts';
 import { CheckboxApiError, type CheckboxApi, type NextAction } from './api.ts';
 import { OPERATION_TOOLS, ciHint, nextActionOf, untrusted, type ToolOutput } from './format.ts';
-import { compactPlanResult, compactSetupResult, compactTestRunResult, compactVerificationResult } from './compact.ts';
+import { compactCheckResult, compactPlanResult, compactSetupResult, compactTestRunResult, compactVerificationResult } from './compact.ts';
 import { keyAllows, type KeyContext, type ToolScope } from './permissions.ts';
 import { OPERATIONS } from '@checkbox-site/node';
 
@@ -1197,13 +1197,30 @@ const getTask: ToolDef = {
   async run(args, { api }) {
     const task = await api.request<{ id: string; title: string; status: string; requirement?: { citations?: unknown[] } }>('GET', `/v1/tasks/${enc(String(args.task))}`);
     // Audit P3: a task citing every state's law listed dozens of citations; the first 8 and a count are enough here.
-    const cites = task.requirement?.citations;
-    const shown = Array.isArray(cites) && cites.length > 8 ? { ...task, requirement: { ...task.requirement, citations: cites.slice(0, 8), citations_more: cites.length - 8 } } : task;
+    const shown = compactTask(task as unknown as Record<string, unknown>);
     const word = (task as { compliance_status?: string }).compliance_status === 'not_applicable' ? 'not applicable' : task.status;
     // Round 39: get_task is where one task's full detail lives (the plan lists ids and titles); verbose=true adds every citation.
     return { headline: `Task ${task.id} [${word}]: ${task.title}`, data: task, compact: shown };
   },
 };
+
+/**
+ * Round 44 (pilot 43 core-new-app / core-ai-builder: get_task was very long in compact mode): what an agent needs to
+ * apply one task (the change, where, why, how to verify, the next step, the question) with the legal basis as the
+ * citation line and the first 3 citations; the full citation list, finding ids, risk basis and decision history are
+ * behind verbose=true. Pure, exported for tests.
+ */
+export function compactTask(task: Record<string, unknown>): Record<string, unknown> {
+  const { findings: _f, requirement, risk_if_skipped, risk_decision, object: _o, livemode: _l, ...rest } = task as Record<string, unknown> & { requirement?: { citation?: unknown; citations?: unknown[]; jurisdictions?: unknown[] } & Record<string, unknown>; risk_if_skipped?: Record<string, unknown>; risk_decision?: Record<string, unknown> };
+  const cites = Array.isArray(requirement?.citations) ? requirement!.citations : [];
+  return {
+    ...rest,
+    ...(requirement ? { requirement: { citation: requirement.citation, ...(Array.isArray(requirement.jurisdictions) ? { jurisdictions: requirement.jurisdictions.length } : {}), citations: cites.slice(0, 3), ...(cites.length > 3 ? { citations_more: cites.length - 3 } : {}) } } : {}),
+    ...(risk_if_skipped ? { risk_if_skipped: { level: risk_if_skipped.level, reason: risk_if_skipped.reason } } : {}),
+    ...(risk_decision ? { risk_decision: { status: risk_decision.status, label: risk_decision.label, can_accept: risk_decision.can_accept } } : {}),
+    more: 'verbose=true: every citation, the finding ids, the risk basis and the decision history',
+  };
+}
 
 interface PrecheckLite {
   verdict?: string;
@@ -1530,12 +1547,15 @@ const startTestRun: ToolDef = {
   annotations: { ...write(false, true), title: 'Start test run' },
   async run(args, { api }) {
     const site = await resolveSite(api, args.site);
-    const run = await api.request<{ id: string; status: string; type: string; inbox_address?: string; auto_started?: boolean }>('POST', `/v1/sites/${enc(site)}/test_runs`, {
+    const run = await api.request<{ id: string; status: string; type: string; inbox_address?: string; auto_started?: boolean; plan?: { summary?: string } | null; plans_not_run?: Array<{ name: string | null; config: string }> }>('POST', `/v1/sites/${enc(site)}/test_runs`, {
       body: startTestRunBody(args),
     });
     // Round 41: the run Checkbox already started itself (auto-start) is returned, never a second one.
+    // Round 44 (pilot 43 core-new-app): also once it finished (within the hour), naming the plan it covered and the others.
+    const covered = run.plan?.summary ? ` It covered ${run.plan.summary}.` : '';
+    const others = run.auto_started && run.plans_not_run?.length ? ` Not run yet: ${run.plans_not_run.map((p) => p.name ?? p.config).join(', ')} (start_test_run with plan).` : '';
     return {
-      headline: `Test run ${run.id} (${run.type}) ${run.status} for ${site}${run.auto_started ? ' (Checkbox started it automatically; this is that run)' : ''}.${run.inbox_address ? ` Test subscriber inbox: ${run.inbox_address}.` : ''}`,
+      headline: `Test run ${run.id} (${run.type}) ${run.status} for ${site}${run.auto_started ? ' (Checkbox started it automatically; this is that run)' : ''}.${covered}${others}${run.inbox_address ? ` Test subscriber inbox: ${run.inbox_address}.` : ''}`,
       data: run,
       compact: compactTestRunResult(run as unknown as Record<string, unknown>, OPERATION_TOOLS),
     };
@@ -1689,11 +1709,11 @@ const checkStripeCheckoutSession: ToolDef = {
     );
     const fixing = !!r.correction?.patch?.length;
     const notes = checkNotes(r, 8, fixing && r.correction.verification?.passes ? { by: 'correction.corrected_params' } : undefined);
-    if (fixing) notes.unshift(`Replace the params in your code with correction.corrected_params (${r.correction.patch.length} change(s); verified passes: ${r.correction.verification?.passes ?? 'n/a'}).`);
+    if (fixing) notes.unshift(`Replace the params in your code with corrected_params below (correction.corrected_params in the full result; ${r.correction.patch.length} change(s); verified passes: ${r.correction.verification?.passes ?? 'n/a'}).`);
     // Agent audit round 2: on a pass the same Stripe-styling note was printed four times; it is printed once.
     if (fixing && r.correction?.verification?.note) notes.push(r.correction.verification.note);
     const { correction, ...rest } = withoutUnneededFix(slimCheckResult(r as unknown as Record<string, unknown>)) as Record<string, unknown>;
-    return { headline: verdictHeadline('Stripe Checkout Session', r), notes, data: { correction, ...rest } };
+    return { headline: verdictHeadline('Stripe Checkout Session', r), notes, data: { correction, ...rest }, compact: compactCheckResult({ correction, ...rest } as Record<string, unknown>, OPERATION_TOOLS) };
   },
 };
 
@@ -2566,6 +2586,7 @@ const elementsInstallNotes = [
   'Put script_tag in <head>; put element_html inside the sign-up form directly ABOVE the pay button. It never disables the button.',
   'Your server receives checkbox_consent_id (cons_…) with the form: store it with the subscription (e.g. Stripe metadata.checkbox_consent).',
   'Do not restyle it below body size or hide it; guard rails restore the required styles and report what they found.',
+  'Only if the owner chose "Handle Vermont and D.C." (the plan\'s optional Vermont and D.C. extras item), add extras="vt-dc" to the element: bold terms and the opt-in checkbox for visitors there, by IP. Otherwise leave it out.',
 ];
 
 const elementsTermsShape = {
@@ -2631,7 +2652,7 @@ const getElementsSnippet: ToolDef = {
   title: 'Get the Checkbox Elements snippet for a site',
   description: [
     'Paste-ready Checkbox Elements markup for a site: the pinned <script> tag (SRI) for <head>, the <checkbox-disclosure> element for directly above the pay button, the publishable key and a React example.',
-    'The element renders the locked renewal line (a checkbox only where a separate opt-in applies) and records each consent (cons_…). Terms come from the site\'s billing connection unless you pass them.',
+    'The element renders the locked renewal line (no checkbox by default) and records each consent (cons_…). Terms come from the site\'s billing connection unless you pass them.',
     'Creates a disclosure record (safe to repeat). Consents are recorded by the browser, never by agents.',
   ].join('\n'),
   input: { site: requiredSite, plan: z.string().max(200).optional().describe('Billing price / plan id (price_…) when the site has several.'), ...elementsTermsShape },

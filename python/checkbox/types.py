@@ -703,6 +703,8 @@ SetupSessionOwnerQuestionsQuestionsItem = TypedDict(
         "added_later": bool,
         #: true when the question closed earlier (see closed) and is asked again because what it is about changed back. Absent otherwise. (optional)
         "reopened": bool,
+        #: Round 44: a legal question the owner answers themselves at this link (their To-do page, signed in). Send it in the same message as the other questions: their answer there counts at once, with no second confirmation. Absent for other questions. (optional)
+        "owner_link": str,
         #: The question, in plain words for the owner.
         "text": str,
         #: The answers.
@@ -2987,8 +2989,8 @@ TaskLastVerification = TypedDict(
     {
         #: Unique identifier of the verification (ver_…).
         "id": str,
-        #: Result. incomplete: every check observed passes, but something the task covers was not given to Checkbox yet (e.g. a plan's Checkout config is not registered); not done.
-        "status": Literal["pending", "passed", "incomplete", "failed"],
+        #: Result, the same word retrieveVerification gives for this verification (see Verification.status; superseded and passed_with_notes are only said there, with the plan). incomplete: every check observed passes, but something the task covers was not given to Checkbox yet (e.g. a plan's Checkout config is not registered); not done.
+        "status": Literal["pending", "passed", "passed_with_gaps", "not_checked", "pending_live_check", "needs_review", "incomplete", "failed"],
         #: When it was requested. Unix timestamp in seconds.
         "created": int,
     },
@@ -3344,6 +3346,8 @@ CompliancePlanOwnerQuestionsQuestionsItem = TypedDict(
         "added_later": bool,
         #: true when the question closed earlier (see closed) and is asked again because what it is about changed back. Absent otherwise. (optional)
         "reopened": bool,
+        #: Round 44: a legal question the owner answers themselves at this link (their To-do page, signed in). Send it in the same message as the other questions: their answer there counts at once, with no second confirmation. Absent for other questions. (optional)
+        "owner_link": str,
         #: The question, in plain words for the owner.
         "text": str,
         #: The answers.
@@ -3785,8 +3789,8 @@ AnsweredTaskLastVerification = TypedDict(
     {
         #: Unique identifier of the verification (ver_…).
         "id": str,
-        #: Result. incomplete: every check observed passes, but something the task covers was not given to Checkbox yet (e.g. a plan's Checkout config is not registered); not done.
-        "status": Literal["pending", "passed", "incomplete", "failed"],
+        #: Result, the same word retrieveVerification gives for this verification (see Verification.status; superseded and passed_with_notes are only said there, with the plan). incomplete: every check observed passes, but something the task covers was not given to Checkbox yet (e.g. a plan's Checkout config is not registered); not done.
+        "status": Literal["pending", "passed", "passed_with_gaps", "not_checked", "pending_live_check", "needs_review", "incomplete", "failed"],
         #: When it was requested. Unix timestamp in seconds.
         "created": int,
     },
@@ -3942,6 +3946,10 @@ AnswerTaskParams = TypedDict(
         "note": str,
         #: Only for an owner question named like email_sender: the site it belongs to (needed when the account has several sites). (optional)
         "site": str,
+        #: Optional: the same id as in the path (a task id or an owner question's name). Accepted so a body that repeats it works; a different id is refused (parameter_invalid). (optional)
+        "task": str,
+        #: Optional: the owner question's key, the same as the path id (owner_questions[].key). Accepted and checked like task. (optional)
+        "key": str,
     },
     total=False,
 )
@@ -3961,6 +3969,8 @@ VerificationCheck = TypedDict(
         "source": str,
         #: What was observed.
         "detail": str,
+        #: Round 44: this check's result in one word, the same value as observed (pass, fail, needs_review, missing_data, not_checked, not_applicable, unknown, informational). Never null.
+        "status": str,
         #: Round 42, whole-site verifications only: true when the plan counts this check as something left to do (it fails, or a required task that owns it is still open); false for a check that passes or only waits (a live check that completes on its own, an optional suggestion, a check no open task owns). Count only blocking checks as "not passing". (optional)
         "blocking": bool,
     },
@@ -8297,7 +8307,7 @@ TestRun = TypedDict(
         "finished_at": Optional[int],
         #: How long the run took, from started (or created) to finished, in seconds; null while it runs.
         "duration_seconds": Optional[int],
-        #: Round 41: true when Checkbox started the run itself because the compliance plan asked for one (test mode, with the site's Stripe TEST key stored). createTestRun returns this run while it is active instead of starting another.
+        #: Round 41: true when Checkbox started the run itself because the compliance plan asked for one (test mode, with the site's Stripe TEST key stored). createTestRun without a plan returns this run while it is active, whichever plan it runs (plan says which plan it covers, plans_not_run the others), instead of starting another.
         "auto_started": bool,
         #: Lifecycle steps in order.
         "steps": List["TestRunStep"],

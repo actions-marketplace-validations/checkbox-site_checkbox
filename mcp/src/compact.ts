@@ -121,11 +121,14 @@ export function compactOwnerQuestions(oq: unknown): Obj | undefined {
   // Round 41: answers waiting for the owner's confirmation are never asked again: listed once, with the link.
   const waiting = (Array.isArray(oq.awaiting_confirmation) ? (oq.awaiting_confirmation as unknown[]) : []).filter(isObj).map((a) => prune({ id: a.id, answer: a.answer, confirmation_url: a.confirmation_url }));
   if (!oq.questions.length) return waiting.length ? { how: 'Do not ask these again: the owner confirms each answer at its link (their To-do page lists them all).', awaiting_confirmation: waiting } : undefined;
-  const questions = (oq.questions as unknown[]).filter(isObj).map((q) => prune({ id: q.id, text: q.text, options: q.options }));
+  // Round 44: a question the owner answers themselves (the legal one, the Vermont and D.C. skip) keeps its owner_link.
+  const questions = (oq.questions as unknown[]).filter(isObj).map((q) => prune({ id: q.id, text: q.text, options: q.options, owner_link: q.owner_link }));
   // The ask's link to the owner's to-do page, when it names one.
-  const link = /https?:\/\/\S+?\/todo\b\S*/.exec(String(oq.description ?? ''))?.[0]?.replace(/[.,:;]+$/, '');
+  // Round 44: a legal question carries its own owner_link (the same To-do page).
+  const ownerLink = (oq.questions as unknown[]).filter(isObj).map((q) => q.owner_link).find((u): u is string => typeof u === 'string');
+  const link = ownerLink ?? /https?:\/\/\S+?\/todo\b\S*/.exec(String(oq.description ?? ''))?.[0]?.replace(/[.,:;]+$/, '');
   return prune({
-    how: `Ask the human these once, in one message${link ? ` (the legal one at ${link}: send the link)` : ''}; then answer_task { task: <id>, answer } for each: it saves the answer and the question is never asked again. Keep fixing meanwhile.`,
+    how: `Ask the human these once, in one message${link ? ` (those with owner_link the owner answers themselves at ${link}: send the link)` : ''}; then answer_task { task: <id>, answer } for each other one: it saves the answer and the question is never asked again. Keep fixing meanwhile.`,
     questions,
     ...(waiting.length ? { awaiting_confirmation: waiting } : {}),
   });
@@ -184,7 +187,10 @@ export function compactPlanResult(plan: Obj, opTools: Record<string, string> = {
   const accepted = tasks.filter((t) => t.closed_reason === 'risk_accepted');
   const closed = tasks.filter((t) => CLOSED.has(String(t.status)) && !accepted.includes(t));
   // Round 43 (founder): Do this first (never acceptable as a risk), then Your call (fix or accept the risk: owner only).
-  const yourCall = open.filter((t) => t.kind === 'your_call');
+  // Round 44 (pilot 43 core-codex: a done plan listed the Checkbox-sent emails waiting for their first due date under
+  // your_call, "or the owner accepts the risk"): only a Your-call item the owner can still decide (not met: risk_decision
+  // can_accept) is listed there; one that is met and waits for a live observation is an ordinary task line.
+  const yourCall = open.filter((t) => t.kind === 'your_call' && !(isObj(t.risk_decision) && t.risk_decision.can_accept === false));
   const doThis = open.filter((t) => !yourCall.includes(t));
   const exposure = isObj(plan.exposure_summary) ? plan.exposure_summary.line : undefined;
   const od = isObj(plan.owner_decisions) ? plan.owner_decisions : null;
@@ -207,6 +213,35 @@ export function compactPlanResult(plan: Obj, opTools: Record<string, string> = {
     good_practice: good.length ? { line: `${good.length} good-practice ${good.length === 1 ? 'suggestion' : 'suggestions'} (optional; never ${good.length === 1 ? 'blocks' : 'block'} launch)`, tasks: good.map((t) => t.id) } : undefined,
     closed: closed.length || undefined,
     go_live: g && Array.isArray(g.steps) && g.steps.length ? { steps_left: g.steps.length } : undefined,
+  });
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Preflight checks
+// ---------------------------------------------------------------------------------------------------------------------
+
+/**
+ * Round 44 (pilot 43 core-new-app: check_stripe_checkout_session returned many KB in compact mode): a preflight check
+ * as compact JSON: the verdict, the corrected params ready to paste, the checks still open (id, status, one-line fix)
+ * and the next step. Per-check evidence, citations and requirement lists: verbose=true. Pure.
+ */
+export function compactCheckResult(r: Obj, opTools: Record<string, string> = {}): Obj {
+  const correction = isObj(r.correction) ? r.correction : null;
+  const checks = (Array.isArray(r.checks) ? r.checks : []).filter(isObj).filter((c) => c.status === 'fail' || c.status === 'needs_review' || c.compliance_status === 'pending_live_check');
+  const compliance = isObj(r.compliance) ? r.compliance : null;
+  return prune({
+    verdict: r.verdict,
+    livemode: r.livemode,
+    label: compliance?.label,
+    summary: r.summary,
+    corrected_params: correction && Array.isArray(correction.patch) && correction.patch.length ? correction.corrected_params : undefined,
+    changes: correction && Array.isArray(correction.patch) && correction.patch.length ? correction.patch.length : undefined,
+    corrected_passes: correction && isObj(correction.verification) ? correction.verification.passes : undefined,
+    note: correction && isObj(correction.verification) && typeof correction.verification.note === 'string' && !(Array.isArray(correction.patch) && correction.patch.length) ? correction.verification.note : undefined,
+    checks: checks.length ? checks.map((c) => prune({ check_id: c.check_id, status: c.status, fix: clip(c.fix ?? c.explanation, 240) })) : undefined,
+    warnings: Array.isArray(r.warnings) && r.warnings.length ? (r.warnings as unknown[]).filter(isObj).map((w) => w.code) : undefined,
+    next_action: slimNext(r.next_action, r, opTools),
+    more: 'verbose=true: every check with its evidence and citations, and the JSON patch',
   });
 }
 

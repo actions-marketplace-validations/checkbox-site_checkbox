@@ -1,7 +1,7 @@
 # Checkbox
 
-Check a subscription checkout's renewal terms in one command. Free auto-renewal law checks (FTC ROSCA, click-to-cancel,
-California, New York and other state automatic renewal laws) for Stripe Checkout, cancellation flows and renewal
+Check a subscription checkout's renewal terms in one command. Free auto-renewal law checks (FTC ROSCA,
+California, New York and other state automatic renewal laws) for Stripe Checkout, online cancellation and renewal
 reminder emails. Offline: no account, no key, nothing leaves your machine.
 
 ```bash

@@ -3016,7 +3016,7 @@ export class VisitorRegionsResource extends Resource {
   /**
    * Get the calling browser's region from its IP address.
    *
-   * Used by <checkbox-disclosure> (Elements 1.6.0): in Vermont it shows the renewal terms of a plan of a year or more in bold and adds the separate consent checkbox; in the District of Columbia it adds the separate consent checkbox for a free trial. No key; CORS *; not cached. The IP address is looked up in memory and not stored.
+   * Used by <checkbox-disclosure> (Elements 1.6.0 by default; 1.6.1 and later only with extras="vt-dc", the optional Vermont and D.C. extras): in Vermont it shows the renewal terms of a plan of a year or more in bold and adds the separate consent checkbox; in the District of Columbia it adds the separate consent checkbox for a free trial. No key; CORS *; not cached. The IP address is looked up in memory and not stored.
    *
    * @see GET /v1/visitor-region (operation `getVisitorRegion`, scope `none`)
    */

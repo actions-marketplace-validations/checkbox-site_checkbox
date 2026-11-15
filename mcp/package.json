@@ -1,7 +1,7 @@
 {
   "name": "@checkbox-site/mcp",
-  "version": "0.4.3",
-  "description": "Checkbox MCP server: auto-renewal law and subscription compliance checks for AI agents (FTC ROSCA, California ARL, New York and other states) on Stripe Checkout compliance (Checkout Session params, Payment Links), pricing pages, disclosures, click-to-cancel cancellation flows and renewal reminder emails. Remote at https://app.checkbox.site/mcp, or local stdio.",
+  "version": "0.4.4",
+  "description": "Checkbox MCP server: auto-renewal law and subscription compliance checks for AI agents (FTC ROSCA, California ARL, New York and other states) on Stripe Checkout compliance (Checkout Session params, Payment Links), pricing pages, disclosures, online cancellation flows and renewal reminder emails. Remote at https://app.checkbox.site/mcp, or local stdio.",
   "keywords": [
     "checkbox",
     "mcp",
@@ -84,7 +84,7 @@
     "prepack": "npm run build"
   },
   "dependencies": {
-    "@checkbox-site/node": "^0.4.3",
+    "@checkbox-site/node": "^0.4.4",
     "@modelcontextprotocol/sdk": "^1.32.2",
     "zod": "^4.6.7"
   }

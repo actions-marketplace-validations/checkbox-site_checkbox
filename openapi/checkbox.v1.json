@@ -84,7 +84,7 @@
     },
     {
       "name": "Elements",
-      "description": "Checkbox Elements: the drop-in <checkbox-disclosure> web component (and React wrapper) that shows the locked automatic-renewal disclosure above the pay button (since 1.6.0 ending with a clickwrap sentence, no checkbox; an unchecked consent checkbox only for Vermont's separate opt-in or on request), and the consent records it creates."
+      "description": "Checkbox Elements: the drop-in <checkbox-disclosure> web component (and React wrapper) that shows the locked automatic-renewal disclosure above the pay button (since 1.6.0 ending with a clickwrap sentence, no checkbox; an unchecked consent checkbox on request; since 1.6.1 the Vermont and D.C. extras only with extras=\"vt-dc\"), and the consent records it creates."
     },
     {
       "name": "Receipts",
@@ -2035,6 +2035,11 @@
                       "description": "true when the question closed earlier (see closed) and is asked again because what it is about changed back. Absent otherwise.",
                       "example": true
                     },
+                    "owner_link": {
+                      "type": "string",
+                      "description": "Round 44: a legal question the owner answers themselves at this link (their To-do page, signed in). Send it in the same message as the other questions: their answer there counts at once, with no second confirmation. Absent for other questions.",
+                      "example": "https://app.checkbox.site/todo"
+                    },
                     "text": {
                       "type": "string",
                       "description": "The question, in plain words for the owner.",
@@ -2088,6 +2093,7 @@
                     "key": "email_sender",
                     "added_later": true,
                     "reopened": true,
+                    "owner_link": "https://app.checkbox.site/todo",
                     "text": "Who sends the required emails (renewal reminder, charge notice): you (your code), or Checkbox Notices?",
                     "options": [
                       "me",
@@ -2214,6 +2220,7 @@
                   "key": "email_sender",
                   "added_later": true,
                   "reopened": true,
+                  "owner_link": "https://app.checkbox.site/todo",
                   "text": "Who sends the required emails (renewal reminder, charge notice): you (your code), or Checkbox Notices?",
                   "options": [
                     "me",
@@ -3048,6 +3055,7 @@
                       "key": "email_sender",
                       "added_later": true,
                       "reopened": true,
+                      "owner_link": "https://app.checkbox.site/todo",
                       "text": "Who sends the required emails (renewal reminder, charge notice): you (your code), or Checkbox Notices?",
                       "options": [
                         "me",
@@ -9601,10 +9609,14 @@
                 "enum": [
                   "pending",
                   "passed",
+                  "passed_with_gaps",
+                  "not_checked",
+                  "pending_live_check",
+                  "needs_review",
                   "incomplete",
                   "failed"
                 ],
-                "description": "Result. incomplete: every check observed passes, but something the task covers was not given to Checkbox yet (e.g. a plan's Checkout config is not registered); not done.",
+                "description": "Result, the same word retrieveVerification gives for this verification (see Verification.status; superseded and passed_with_notes are only said there, with the plan). incomplete: every check observed passes, but something the task covers was not given to Checkbox yet (e.g. a plan's Checkout config is not registered); not done.",
                 "example": "failed"
               },
               "created": {
@@ -10747,6 +10759,11 @@
                       "description": "true when the question closed earlier (see closed) and is asked again because what it is about changed back. Absent otherwise.",
                       "example": true
                     },
+                    "owner_link": {
+                      "type": "string",
+                      "description": "Round 44: a legal question the owner answers themselves at this link (their To-do page, signed in). Send it in the same message as the other questions: their answer there counts at once, with no second confirmation. Absent for other questions.",
+                      "example": "https://app.checkbox.site/todo"
+                    },
                     "text": {
                       "type": "string",
                       "description": "The question, in plain words for the owner.",
@@ -10800,6 +10817,7 @@
                     "key": "email_sender",
                     "added_later": true,
                     "reopened": true,
+                    "owner_link": "https://app.checkbox.site/todo",
                     "text": "Who sends the required emails (renewal reminder, charge notice): you (your code), or Checkbox Notices?",
                     "options": [
                       "me",
@@ -10926,6 +10944,7 @@
                   "key": "email_sender",
                   "added_later": true,
                   "reopened": true,
+                  "owner_link": "https://app.checkbox.site/todo",
                   "text": "Who sends the required emails (renewal reminder, charge notice): you (your code), or Checkbox Notices?",
                   "options": [
                     "me",
@@ -11612,6 +11631,18 @@
             "maxLength": 100,
             "description": "Only for an owner question named like email_sender: the site it belongs to (needed when the account has several sites).",
             "example": "site_3ce96a872b444dbb8c30bc247624d3ea"
+          },
+          "task": {
+            "type": "string",
+            "maxLength": 100,
+            "description": "Optional: the same id as in the path (a task id or an owner question's name). Accepted so a body that repeats it works; a different id is refused (parameter_invalid).",
+            "example": "email_sender"
+          },
+          "key": {
+            "type": "string",
+            "maxLength": 100,
+            "description": "Optional: the owner question's key, the same as the path id (owner_questions[].key). Accepted and checked like task.",
+            "example": "email_sender"
           }
         },
         "required": [
@@ -11646,6 +11677,11 @@
             "description": "What was observed.",
             "example": "No recurring price near the purchase button."
           },
+          "status": {
+            "type": "string",
+            "description": "Round 44: this check's result in one word, the same value as observed (pass, fail, needs_review, missing_data, not_checked, not_applicable, unknown, informational). Never null.",
+            "example": "pass"
+          },
           "blocking": {
             "type": "boolean",
             "description": "Round 42, whole-site verifications only: true when the plan counts this check as something left to do (it fails, or a required task that owns it is still open); false for a check that passes or only waits (a live check that completes on its own, an optional suggestion, a check no open task owns). Count only blocking checks as \"not passing\".",
@@ -11657,7 +11693,8 @@
           "expected",
           "observed",
           "source",
-          "detail"
+          "detail",
+          "status"
         ],
         "description": "Expected vs observed for one check."
       },
@@ -11941,6 +11978,7 @@
                 "observed": "fail",
                 "source": "static_fetch",
                 "detail": "No recurring price near the purchase button.",
+                "status": "pass",
                 "blocking": true
               }
             ]
@@ -11958,6 +11996,7 @@
                 "observed": "fail",
                 "source": "static_fetch",
                 "detail": "No recurring price near the purchase button.",
+                "status": "pass",
                 "blocking": true
               }
             ]
@@ -12239,6 +12278,7 @@
                     "observed": "fail",
                     "source": "static_fetch",
                     "detail": "No recurring price near the purchase button.",
+                    "status": "pass",
                     "blocking": true
                   }
                 ],
@@ -12249,6 +12289,7 @@
                     "observed": "fail",
                     "source": "static_fetch",
                     "detail": "No recurring price near the purchase button.",
+                    "status": "pass",
                     "blocking": true
                   }
                 ],
@@ -20807,12 +20848,12 @@
           "version": {
             "type": "string",
             "description": "Semver of the bundle.",
-            "example": "1.6.0"
+            "example": "1.6.1"
           },
           "url": {
             "type": "string",
             "description": "Immutable URL of this version.",
-            "example": "https://app.checkbox.site/v1/elements/1.6.0/elements.js"
+            "example": "https://app.checkbox.site/v1/elements/1.6.1/elements.js"
           },
           "integrity": {
             "type": "string",
@@ -20854,8 +20895,8 @@
             "description": "Every released version, newest first.",
             "example": [
               {
-                "version": "1.6.0",
-                "url": "https://app.checkbox.site/v1/elements/1.6.0/elements.js",
+                "version": "1.6.1",
+                "url": "https://app.checkbox.site/v1/elements/1.6.1/elements.js",
                 "integrity": "sha384-…",
                 "size": 33000
               }
@@ -21354,7 +21395,7 @@
               "null"
             ],
             "description": "elements.js version.",
-            "example": "1.6.0"
+            "example": "1.6.1"
           },
           "client_timestamp": {
             "type": [
@@ -21881,7 +21922,7 @@
             "type": "string",
             "maxLength": 20,
             "description": "elements.js version that rendered the disclosure.",
-            "example": "1.6.0"
+            "example": "1.6.1"
           },
           "presentation": {
             "$ref": "#/components/schemas/ConsentPresentationInput"
@@ -22006,7 +22047,7 @@
                 "customer_reference": "cs_test_a1b2c3",
                 "client_reference": null,
                 "source": "elements",
-                "element_version": "1.6.0",
+                "element_version": "1.6.1",
                 "client_timestamp": null,
                 "presentation": {
                   "violations": [],
@@ -24492,7 +24533,7 @@
           },
           "auto_started": {
             "type": "boolean",
-            "description": "Round 41: true when Checkbox started the run itself because the compliance plan asked for one (test mode, with the site's Stripe TEST key stored). createTestRun returns this run while it is active instead of starting another.",
+            "description": "Round 41: true when Checkbox started the run itself because the compliance plan asked for one (test mode, with the site's Stripe TEST key stored). createTestRun without a plan returns this run while it is active, whichever plan it runs (plan says which plan it covers, plans_not_run the others), instead of starting another.",
             "example": false
           },
           "steps": {
@@ -32877,7 +32918,7 @@
       "get": {
         "operationId": "getVisitorRegion",
         "summary": "Get the calling browser's region from its IP address",
-        "description": "Used by <checkbox-disclosure> (Elements 1.6.0): in Vermont it shows the renewal terms of a plan of a year or more in bold and adds the separate consent checkbox; in the District of Columbia it adds the separate consent checkbox for a free trial. No key; CORS *; not cached. The IP address is looked up in memory and not stored.",
+        "description": "Used by <checkbox-disclosure> (Elements 1.6.0 by default; 1.6.1 and later only with extras=\"vt-dc\", the optional Vermont and D.C. extras): in Vermont it shows the renewal terms of a plan of a year or more in bold and adds the separate consent checkbox; in the District of Columbia it adds the separate consent checkbox for a free trial. No key; CORS *; not cached. The IP address is looked up in memory and not stored.",
         "tags": [
           "Region"
         ],
@@ -33291,7 +33332,7 @@
             "schema": {
               "type": "string",
               "description": "Semver, e.g. 1.0.0.",
-              "example": "1.6.0"
+              "example": "1.6.1"
             },
             "required": true,
             "name": "version",
@@ -37565,6 +37606,7 @@
                                 "observed": "fail",
                                 "source": "static_fetch",
                                 "detail": "No recurring price near the purchase button.",
+                                "status": "pass",
                                 "blocking": true
                               }
                             ],
@@ -37575,6 +37617,7 @@
                                 "observed": "fail",
                                 "source": "static_fetch",
                                 "detail": "No recurring price near the purchase button.",
+                                "status": "pass",
                                 "blocking": true
                               }
                             ],
@@ -39752,7 +39795,7 @@
                             "customer_reference": "cs_test_a1b2c3",
                             "client_reference": null,
                             "source": "elements",
-                            "element_version": "1.6.0",
+                            "element_version": "1.6.1",
                             "client_timestamp": null,
                             "presentation": {
                               "violations": [],
