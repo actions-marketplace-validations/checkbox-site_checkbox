@@ -9,3 +9,5 @@ __pycache__
 .env.*
 !.env.example
 .DS_Store
+# The CLI is published from its committed build (synced from Checkbox's main codebase): keep it.
+!/cli/dist/

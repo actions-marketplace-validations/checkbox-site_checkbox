@@ -2586,7 +2586,7 @@ const elementsInstallNotes = [
   'Put script_tag in <head>; put element_html inside the sign-up form directly ABOVE the pay button. It never disables the button.',
   'Your server receives checkbox_consent_id (cons_…) with the form: store it with the subscription (e.g. Stripe metadata.checkbox_consent).',
   'Do not restyle it below body size or hide it; guard rails restore the required styles and report what they found.',
-  'Only if the owner chose "Handle Vermont and D.C." (the plan\'s optional Vermont and D.C. extras item), add extras="vt-dc" to the element: bold terms and the opt-in checkbox for visitors there, by IP. Otherwise leave it out.',
+  'Leave out extras="vt-dc" unless the owner asks for it (Vermont / D.C. rules, not checked by default: bold terms and an opt-in checkbox for visitors there, by IP).',
 ];
 
 const elementsTermsShape = {

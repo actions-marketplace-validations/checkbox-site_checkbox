@@ -84,7 +84,7 @@
     },
     {
       "name": "Elements",
-      "description": "Checkbox Elements: the drop-in <checkbox-disclosure> web component (and React wrapper) that shows the locked automatic-renewal disclosure above the pay button (since 1.6.0 ending with a clickwrap sentence, no checkbox; an unchecked consent checkbox on request; since 1.6.1 the Vermont and D.C. extras only with extras=\"vt-dc\"), and the consent records it creates."
+      "description": "Checkbox Elements: the drop-in <checkbox-disclosure> web component (and React wrapper) that shows the locked automatic-renewal disclosure above the pay button (since 1.6.0 ending with a clickwrap sentence, no checkbox; an unchecked consent checkbox on request; since 1.6.1 Vermont / D.C. bold terms and opt-in, not checked by default, only with extras=\"vt-dc\"), and the consent records it creates."
     },
     {
       "name": "Receipts",
@@ -15692,7 +15692,7 @@
           },
           "consent_label": {
             "type": "string",
-            "description": "Label for an unchecked, required consent checkbox, used only where a separate opt-in is required (Vermont; D.C. free trials) or with Checkbox Elements; see note.",
+            "description": "Label for an unchecked, required consent checkbox, for a page that adds its own consent checkbox or for Checkbox Elements; see note.",
             "example": "I agree that my Acme subscription renews automatically …"
           },
           "button_text": {
@@ -15702,7 +15702,7 @@
           },
           "html": {
             "type": "string",
-            "description": "Drop-in markup for directly above your own purchase button. By default the one renewal line ending with its consent sentence (\"By subscribing, you agree to these renewal terms.\"): no checkbox, no button, your button keeps its label. With a required, unchecked checkbox only where a separate opt-in is required (Vermont, a first term of a year or more; the District of Columbia, free trials; note says so). When consent_on is set (the purchase completes on a Stripe Payment Link or Stripe Checkout), the terms only.",
+            "description": "Drop-in markup for directly above your own purchase button. By default the one renewal line ending with its consent sentence (\"By subscribing, you agree to these renewal terms.\"): no checkbox, no button, your button keeps its label. A required, unchecked checkbox only when note says so. When consent_on is set (the purchase completes on a Stripe Payment Link or Stripe Checkout), the terms only.",
             "example": "<div class=\"checkbox-renewal-terms\">…</div>"
           },
           "consent_on": {
@@ -16415,12 +16415,14 @@
           "path": {
             "type": "string",
             "description": "JSON Pointer into params.",
-            "example": "/consent_collection"
+            "example": "/custom_text"
           },
           "value": {
             "description": "Value to set.",
             "example": {
-              "terms_of_service": "required"
+              "submit": {
+                "message": "Renews automatically at $12.00 every month until you cancel. Cancel anytime at https://example.com/account. By subscribing, you agree to these renewal terms."
+              }
             }
           }
         },
@@ -16749,9 +16751,11 @@
                 "example": [
                   {
                     "op": "add",
-                    "path": "/consent_collection",
+                    "path": "/custom_text",
                     "value": {
-                      "terms_of_service": "required"
+                      "submit": {
+                        "message": "Renews automatically at $12.00 every month until you cancel. Cancel anytime at https://example.com/account. By subscribing, you agree to these renewal terms."
+                      }
                     }
                   }
                 ]
@@ -16761,8 +16765,10 @@
                 "additionalProperties": {},
                 "description": "The full params with the fix applied.",
                 "example": {
-                  "consent_collection": {
-                    "terms_of_service": "required"
+                  "custom_text": {
+                    "submit": {
+                      "message": "Renews automatically at $12.00 every month until you cancel. Cancel anytime at https://example.com/account. By subscribing, you agree to these renewal terms."
+                    }
                   }
                 }
               },
@@ -16864,15 +16870,19 @@
               "patch": [
                 {
                   "op": "add",
-                  "path": "/consent_collection",
+                  "path": "/custom_text",
                   "value": {
-                    "terms_of_service": "required"
+                    "submit": {
+                      "message": "Renews automatically at $12.00 every month until you cancel. Cancel anytime at https://example.com/account. By subscribing, you agree to these renewal terms."
+                    }
                   }
                 }
               ],
               "corrected_params": {
-                "consent_collection": {
-                  "terms_of_service": "required"
+                "custom_text": {
+                  "submit": {
+                    "message": "Renews automatically at $12.00 every month until you cancel. Cancel anytime at https://example.com/account. By subscribing, you agree to these renewal terms."
+                  }
                 }
               },
               "verification": {
@@ -17438,9 +17448,11 @@
                 "example": [
                   {
                     "op": "add",
-                    "path": "/consent_collection",
+                    "path": "/custom_text",
                     "value": {
-                      "terms_of_service": "required"
+                      "submit": {
+                        "message": "Renews automatically at $12.00 every month until you cancel. Cancel anytime at https://example.com/account. By subscribing, you agree to these renewal terms."
+                      }
                     }
                   }
                 ]
@@ -17450,8 +17462,10 @@
                 "additionalProperties": {},
                 "description": "The full params with the fix applied.",
                 "example": {
-                  "consent_collection": {
-                    "terms_of_service": "required"
+                  "custom_text": {
+                    "submit": {
+                      "message": "Renews automatically at $12.00 every month until you cancel. Cancel anytime at https://example.com/account. By subscribing, you agree to these renewal terms."
+                    }
                   }
                 }
               },
@@ -17571,15 +17585,19 @@
               "patch": [
                 {
                   "op": "add",
-                  "path": "/consent_collection",
+                  "path": "/custom_text",
                   "value": {
-                    "terms_of_service": "required"
+                    "submit": {
+                      "message": "Renews automatically at $12.00 every month until you cancel. Cancel anytime at https://example.com/account. By subscribing, you agree to these renewal terms."
+                    }
                   }
                 }
               ],
               "corrected_params": {
-                "consent_collection": {
-                  "terms_of_service": "required"
+                "custom_text": {
+                  "submit": {
+                    "message": "Renews automatically at $12.00 every month until you cancel. Cancel anytime at https://example.com/account. By subscribing, you agree to these renewal terms."
+                  }
                 }
               },
               "verification": {
@@ -32548,7 +32566,7 @@
       "post": {
         "operationId": "checkStripeCheckoutSession",
         "summary": "Check Stripe Checkout Session params",
-        "description": "Body: `{ params, merchant }` (or `{ params, site }`). `params` is exactly the object your code gives stripe.checkout.sessions.create; `merchant` adds merchant_name, cancel_url, and price/interval when line_items use a Price id. Checkbox models the Stripe-hosted page those params render and returns findings plus `correction`: a JSON Patch (RFC 6902) and the full corrected params (custom_text.submit with the renewal terms, consent_collection.terms_of_service = \"required\", custom_text.terms_of_service_acceptance as the consent label), verified by the engine. Stripe's own small grey styling keeps \"clear and conspicuous\" at needs_review on any Stripe-hosted page; also show the terms on your page before redirecting. Stateless and deterministic: nothing is stored, the same input on the same as_of date gives the same verdicts. Every verdict comes from the Checkbox rules engine over the legal catalog (federal ROSCA / EFTA plus the state automatic-renewal laws); the response carries rules_version, catalog_version and a disclaimer (not legal advice). Read `verdict`, then `next_action`: it tells you exactly what to change and to call the check again until verdict is pass.",
+        "description": "Body: `{ params, merchant }` (or `{ params, site }`). `params` is exactly the object your code gives stripe.checkout.sessions.create; `merchant` adds merchant_name, cancel_url, and price/interval when line_items use a Price id. Checkbox models the Stripe-hosted page those params render and returns findings plus `correction`: a JSON Patch (RFC 6902) and the full corrected params, verified by the engine: by default only custom_text.submit with the renewal terms, ending with the sentence that makes the click consent (no checkbox); consent_collection only where a cited law asks for a separate opt-in. Stripe's own small grey styling keeps \"clear and conspicuous\" at needs_review on any Stripe-hosted page; also show the terms on your page before redirecting. Stateless and deterministic: nothing is stored, the same input on the same as_of date gives the same verdicts. Every verdict comes from the Checkbox rules engine over the legal catalog (federal ROSCA / EFTA plus the state automatic-renewal laws); the response carries rules_version, catalog_version and a disclaimer (not legal advice). Read `verdict`, then `next_action`: it tells you exactly what to change and to call the check again until verdict is pass.",
         "tags": [
           "Checks"
         ],
@@ -32918,7 +32936,7 @@
       "get": {
         "operationId": "getVisitorRegion",
         "summary": "Get the calling browser's region from its IP address",
-        "description": "Used by <checkbox-disclosure> (Elements 1.6.0 by default; 1.6.1 and later only with extras=\"vt-dc\", the optional Vermont and D.C. extras): in Vermont it shows the renewal terms of a plan of a year or more in bold and adds the separate consent checkbox; in the District of Columbia it adds the separate consent checkbox for a free trial. No key; CORS *; not cached. The IP address is looked up in memory and not stored.",
+        "description": "Used by <checkbox-disclosure> (Elements 1.6.0 by default; 1.6.1 and later only with extras=\"vt-dc\"; Vermont / D.C. are not checked by default): in Vermont it shows the renewal terms of a plan of a year or more in bold and adds the separate consent checkbox; in the District of Columbia it adds the separate consent checkbox for a free trial. No key; CORS *; not cached. The IP address is looked up in memory and not stored.",
         "tags": [
           "Region"
         ],

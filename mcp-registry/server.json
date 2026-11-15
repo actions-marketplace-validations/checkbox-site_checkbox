@@ -4,7 +4,7 @@
   "title": "Checkbox: subscription auto-renewal law checks",
   "description": "Auto-renewal law checks for Stripe Checkout: ROSCA, state laws (FTC click-to-cancel rule vacated)",
   "websiteUrl": "https://checkbox.site/docs/mcp",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "remotes": [
     {
       "type": "streamable-http",
@@ -56,7 +56,7 @@
     {
       "registryType": "npm",
       "identifier": "@checkbox-site/mcp",
-      "version": "0.4.4",
+      "version": "0.4.5",
       "transport": {
         "type": "stdio"
       },

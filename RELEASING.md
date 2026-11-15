@@ -1,18 +1,21 @@
 # Releasing
 
-One tag releases everything in this repository at one version:
+One tag releases everything in this repository: the SDKs and the MCP server at the tag's version, and the CLI at its
+own version:
 
 | Registry | Package | Source |
 |---|---|---|
 | npm | [`@checkbox-site/node`](https://www.npmjs.com/package/@checkbox-site/node) | [`node/`](node) |
 | npm | [`@checkbox-site/mcp`](https://www.npmjs.com/package/@checkbox-site/mcp) (binary `checkbox-mcp`) | [`mcp/`](mcp) |
+| npm | [`@checkbox-site/cli`](https://www.npmjs.com/package/@checkbox-site/cli) (binary `checkbox`; own version) | [`cli/`](cli) |
 | PyPI | [`checkbox-site`](https://pypi.org/project/checkbox-site/) (import name `checkbox`) | [`python/`](python) |
 | MCP Registry | `site.checkbox/checkbox` | [`mcp-registry/server.json`](mcp-registry/server.json) |
 
 [`.github/workflows/release.yml`](.github/workflows/release.yml) runs on a pushed `v*` tag (or by hand from the
-Actions tab). It checks that the tag matches every package version, then publishes to npm (with provenance), to
-PyPI and, after npm, to the official MCP Registry. Versions already on a registry are skipped, so a failed run can be
-re-run. The registry step logs in as `checkbox.site` with the repository secret `MCP_REGISTRY_PRIVATE_KEY` (the hex
+Actions tab). It checks that the tag matches every SDK / MCP package version, then publishes to npm (with
+provenance), to PyPI and, after npm, to the official MCP Registry. The job **Publish CLI to npm** publishes
+[`cli/`](cli) with provenance when `cli/package.json`'s version is not on npm yet, and skips otherwise. Versions
+already on a registry are skipped, so a failed run can be re-run. The registry step logs in as `checkbox.site` with the repository secret `MCP_REGISTRY_PRIVATE_KEY` (the hex
 Ed25519 private key whose public half checkbox.site serves at `/.well-known/mcp-registry-auth`); without the secret it
 is skipped. Bump `version` in `mcp-registry/server.json` with every release (the registry accepts each version once).
 
@@ -29,17 +32,32 @@ is skipped. Bump `version` in `mcp-registry/server.json` with every release (the
    git push origin v0.1.1
    ```
 
+## The CLI (`cli/`)
+
+`cli/` is the exact package npm receives: `dist/checkbox.js` (one bundled file: the CLI with the rules engine, no
+dependencies), `package.json`, `README.md` and `LICENSE`. It is built in Checkbox's main codebase, which holds the CLI's
+sources and tests, and synced here with the rest of the repository; do not edit it here. Its version
+(`cli/package.json`) is independent of the tag: `scripts/check-versions.mjs` checks the CLI on its own (well-formed,
+the bundle runs and reports that version, `action.yml`'s default is not newer) and never fails a tag because the CLI
+version differs.
+
+- A new CLI version arrives with a sync. Any release tag then publishes it; with no SDK release due, run the Release
+  workflow by hand (Actions → Release → Run workflow, on `main`): the SDK packages are skipped as already published.
+- A CLI version already on npm is skipped, so a run with an unchanged `cli/` publishes nothing for it.
+- After the CLI is on npm (the job waits until npm serves it), raise the GitHub Action's default (below).
+
 ## GitHub Action
 
-[`action.yml`](action.yml) runs the published CLI (`npx @checkbox-site/cli@<version input> ci`); the CLI itself is
-built and published from Checkbox's main codebase. Users pin the moving major tag `v1`, which never triggers the
+[`action.yml`](action.yml) runs the published CLI (`npx @checkbox-site/cli@<version input> ci`); the CLI is built in
+Checkbox's main codebase and published from [`cli/`](cli) by the Release workflow (above). Users pin the moving major tag `v1`, which never triggers the
 release workflow (it only runs on full versions, `v*.*.*`):
 
 ```sh
 git tag -f v1 && git push -f origin v1
 ```
 
-Publish the CLI version named in `action.yml` before moving `v1`, and move `v1` on every CLI release: users pinned to
+Publish the CLI version named in `action.yml` before moving `v1` (the Release workflow's CLI job checks that the
+default is on npm and names the next step when a newer CLI was just published), and move `v1` on every CLI release: users pinned to
 `@v1` run whatever CLI the tagged `action.yml` names until the tag moves. Checkbox's release check reads `action.yml`
 at the `v1` tag and fails when it names an older CLI than the newest on npm. Marketplace: draft a release from the `v1` tag and
 tick "Publish this Action to the GitHub Marketplace" (category Continuous integration).
@@ -58,9 +76,10 @@ short-lived token; afterwards the workflow authenticates with GitHub's OIDC toke
 3. In this GitHub repository: Settings → Secrets and variables → Actions → New repository secret, name `NPM_TOKEN`,
    value the token.
 4. Tag and push the release tag (above, e.g. `v0.1.1`). Both packages are published with provenance.
-5. For **each** package (`@checkbox-site/node`, `@checkbox-site/mcp`): npmjs.com → the package → Settings → Trusted
-   Publisher → GitHub Actions: organization or user `checkbox-site`, repository `checkbox`, workflow filename
-   `release.yml`, environment empty. Save. Optionally set Publishing access to "Require two-factor authentication and
+5. For **each** package (`@checkbox-site/node`, `@checkbox-site/mcp`, `@checkbox-site/cli`): npmjs.com → the package →
+   Settings → Trusted publishing → GitHub Actions: organization or user `checkbox-site`, repository `checkbox`,
+   workflow filename `release.yml`, environment empty. Save. (`@checkbox-site/cli` already exists on npm, so it needs
+   only this step: no token.) Optionally set Publishing access to "Require two-factor authentication and
    disallow tokens".
 6. Delete the `NPM_TOKEN` repository secret and revoke the token on npmjs.com. Later releases use trusted publishing
    (npm >= 11.5, which the workflow installs).
@@ -88,5 +107,7 @@ npm run typecheck:examples
 node scripts/smoke-mcp.mjs                       # stdio handshake with the built checkbox-mcp
 npm pack --dry-run --workspace node              # only dist/, README.md, LICENSE, package.json
 npm pack --dry-run --workspace mcp
+(cd cli && npm pack --dry-run)                   # 4 files: dist/checkbox.js, package.json, README.md, LICENSE
+node scripts/check-versions.mjs                  # also runs cli/dist/checkbox.js --version
 (cd python && python -m pytest && python -m build)
 ```

@@ -121,7 +121,7 @@ export function compactOwnerQuestions(oq: unknown): Obj | undefined {
   // Round 41: answers waiting for the owner's confirmation are never asked again: listed once, with the link.
   const waiting = (Array.isArray(oq.awaiting_confirmation) ? (oq.awaiting_confirmation as unknown[]) : []).filter(isObj).map((a) => prune({ id: a.id, answer: a.answer, confirmation_url: a.confirmation_url }));
   if (!oq.questions.length) return waiting.length ? { how: 'Do not ask these again: the owner confirms each answer at its link (their To-do page lists them all).', awaiting_confirmation: waiting } : undefined;
-  // Round 44: a question the owner answers themselves (the legal one, the Vermont and D.C. skip) keeps its owner_link.
+  // Round 44: a question the owner answers themselves (the legal one) keeps its owner_link.
   const questions = (oq.questions as unknown[]).filter(isObj).map((q) => prune({ id: q.id, text: q.text, options: q.options, owner_link: q.owner_link }));
   // The ask's link to the owner's to-do page, when it names one.
   // Round 44: a legal question carries its own owner_link (the same To-do page).

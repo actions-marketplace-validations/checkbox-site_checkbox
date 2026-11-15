@@ -107,8 +107,9 @@ projects.
 
 This repository mirrors the public parts of Checkbox's main codebase and is updated with each release: `node/`,
 `mcp/` (npm workspaces), `python/`, `openapi/`, `integrations/`, `plugins/`, `mcp-registry/`, the GitHub Action
-(`action.yml`) and the CLI's README (`cli/`; the CLI is built and published from the main codebase). Releases are
-published from tags by GitHub Actions ([RELEASING.md](RELEASING.md)). Issues and pull requests are welcome: see
+(`action.yml`) and the CLI package (`cli/`: the exact files npm publishes as `@checkbox-site/cli`, a single bundled
+`dist/checkbox.js` built from the main codebase, which also holds its sources and tests; do not edit it here).
+Releases, the CLI included, are published from tags by GitHub Actions ([RELEASING.md](RELEASING.md)). Issues and pull requests are welcome: see
 [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License

@@ -3387,11 +3387,11 @@ export interface CheckReplacement {
   disclosure_text: string;
   /** The same terms as one short line, verified by the engine like disclosure_text (present only when it passes every targeted check); disclosure_text is then the fuller version. */
   short_disclosure_text?: string;
-  /** Label for an unchecked, required consent checkbox, used only where a separate opt-in is required (Vermont; D.C. free trials) or with Checkbox Elements; see note. */
+  /** Label for an unchecked, required consent checkbox, for a page that adds its own consent checkbox or for Checkbox Elements; see note. */
   consent_label: string;
   /** Your purchase button label (the one you sent, else a plain "Subscribe" / "Start free trial"). Keep your own label: Checkbox never asks for an "Agree &" button. */
   button_text: string;
-  /** Drop-in markup for directly above your own purchase button. By default the one renewal line ending with its consent sentence ("By subscribing, you agree to these renewal terms."): no checkbox, no button, your button keeps its label. With a required, unchecked checkbox only where a separate opt-in is required (Vermont, a first term of a year or more; the District of Columbia, free trials; note says so). When consent_on is set (the purchase completes on a Stripe Payment Link or Stripe Checkout), the terms only. */
+  /** Drop-in markup for directly above your own purchase button. By default the one renewal line ending with its consent sentence ("By subscribing, you agree to these renewal terms."): no checkbox, no button, your button keeps its label. A required, unchecked checkbox only when note says so. When consent_on is set (the purchase completes on a Stripe Payment Link or Stripe Checkout), the terms only. */
   html: string;
   /** Set when consent is collected on the Stripe-hosted page, not on this page: html is then the terms only. */
   consent_on?: "payment_link" | "stripe_checkout";
