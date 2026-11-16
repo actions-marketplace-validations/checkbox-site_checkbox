@@ -3769,7 +3769,7 @@ var SDK_VERSION;
 var init_version = __esm({
   "packages/sdk-node/src/version.ts"() {
     "use strict";
-    SDK_VERSION = "0.4.5";
+    SDK_VERSION = "0.4.6";
   }
 });
 
@@ -12780,7 +12780,9 @@ function paymentLinkStatesRenewalTerms(l) {
   const a = analyzeTerms(l.customText?.submit ?? "");
   return a.autoRenew.length > 0 || a.untilCanceled.length > 0;
 }
-function unjudgedPaymentLinksWithoutTerms(links, captures, checkoutType) {
+function unjudgedPaymentLinksWithoutTerms(links, captures, checkoutType, registeredCheckoutUrls = []) {
+  const registered = new Set(registeredCheckoutUrls.filter((u) => typeof u === "string" && u.trim()).map((u) => payUrlKey(u.trim())));
+  links = registered.size ? links.filter((l) => !(l.url && registered.has(payUrlKey(l.url)))) : links;
   if (!captures.some((c) => c.source === "scanner" || c.source === void 0 && (c.links?.length ?? 0) > 0)) return [];
   const judged = new Set([...paymentLinksForSite(links, captures, checkoutType), ...oldPaymentLinksWithoutConsent(links, captures)].map((l) => l.id));
   const active = links.filter((l) => l.active !== false && (l.lineItems ?? []).some((li) => !!li.interval) && !judged.has(l.id));
@@ -15712,6 +15714,7 @@ function inAppPath(input) {
       if (flow.billingStatus === "active" || flow.billingStatus === "paused") {
         return { kind: "in_app", state: "broken", detail: `the test cancellation showed \u201Ccancelled\u201D, but Stripe still shows the subscription ${flow.billingStatus}` };
       }
+      if (portalCancelTurnedOff(flow, input)) return { kind: "in_app", state: "broken", detail: "your cancel link opens the Stripe customer portal, and a Stripe read newer than the test cancellation shows cancellation turned off there" };
       const unconfirmed = billingUnconfirmed(flow, input);
       if (unconfirmed) return { kind: "in_app", state: "unconfirmed", detail: `the test cancellation showed \u201Ccancelled\u201D on screen; ${unconfirmed.charAt(0).toLowerCase()}${unconfirmed.slice(1)}` };
       return { kind: "in_app", state: "works", detail: "a test cancellation completed online" };
@@ -15734,6 +15737,7 @@ function inAppPath(input) {
       const href = el.href;
       if (!href) return true;
       try {
+        if (isStripePortalUrl(new URL(href, p.url).href, input.ctx.config?.cancellation?.portalUrl)) return false;
         return !contactOnlyCancelPage(captures, new URL(href, p.url).href, hosted);
       } catch {
         return true;
@@ -15759,7 +15763,7 @@ function portalPath(input) {
   const c = cfg.cancellation ?? { selfServeOnline: null };
   if (c.requiresContact === true) return { kind: "stripe_portal", state: "off", detail: "the billing platform requires customers to contact you to cancel" };
   const flow = input.ctx.cancellation;
-  if (flow?.via === "stripe_portal" && flow.completed && !billingUnconfirmed(flow, input) && flow.billingStatus !== "active" && flow.billingStatus !== "paused") {
+  if (flow?.via === "stripe_portal" && flow.completed && !portalCancelTurnedOff(flow, input) && !billingUnconfirmed(flow, input) && flow.billingStatus !== "active" && flow.billingStatus !== "paused") {
     return { kind: "stripe_portal", state: "works", detail: "a test cancellation completed in the customer portal", ...c.portalUrl ? { url: c.portalUrl } : {} };
   }
   if (c.selfServeOnline === true) return { kind: "stripe_portal", state: "offered", detail: "cancellation is on in the customer portal", ...c.portalUrl ? { url: c.portalUrl } : {} };
@@ -15921,8 +15925,46 @@ function flowContradiction(flow, input) {
   }
   return null;
 }
+function portalCancelTurnedOff(flow, input) {
+  const cfg = input.ctx.config;
+  const c = cfg?.cancellation;
+  if (!flow || !cfg || !c || c.selfServeOnline !== false && c.requiresContact !== true) return null;
+  if (!flowUsedPortal(flow, c.portalUrl)) return null;
+  const read2 = Date.parse(cfg.fetchedAt ?? "");
+  const end = Math.max(Date.parse(flow.startedAt) || 0, ...(flow.steps ?? []).map((s2) => Date.parse(s2.capturedAt ?? "") || 0));
+  if (Number.isFinite(read2) && end && read2 <= end) return null;
+  return cfg.fetchedAt ? { readAt: cfg.fetchedAt } : {};
+}
+function failedPortalFlowRead(flow, input) {
+  const cfg = input.ctx.config;
+  const c = cfg?.cancellation;
+  if (!cfg || !c || flow.completed) return null;
+  if (c.selfServeOnline === false || c.requiresContact === true) return { off: true, ...cfg.fetchedAt ? { at: cfg.fetchedAt } : {} };
+  if (c.selfServeOnline !== true) return null;
+  const read2 = Date.parse(cfg.fetchedAt ?? "");
+  const end = Math.max(Date.parse(flow.startedAt) || 0, ...(flow.steps ?? []).map((s2) => Date.parse(s2.capturedAt ?? "") || 0));
+  return Number.isFinite(read2) && end && read2 > end + 6e4 ? { onSince: cfg.fetchedAt } : null;
+}
+function flowUsedPortal(flow, portalUrl) {
+  return flow.via === "stripe_portal" || (flow.steps ?? []).some((s2) => s2.source !== "snippet" && isStripePortalUrl(s2.url, portalUrl));
+}
+function portalCancelOffSentence(flow, readAt) {
+  const when = readAt ? ` (Stripe read ${readAt.slice(0, 16).replace("T", " ")} UTC)` : "";
+  return `Cancellation is off in your Stripe customer portal now${when}: the test cancellation on ${flowDate(flow)} went through that portal, and subscribers can no longer cancel there. Turn \u201CCancel subscriptions\u201D back on in the customer portal (Stripe Dashboard \u2192 Settings \u2192 Billing \u2192 Customer portal, or features[subscription_cancel][enabled]=true on the portal configuration), then call verifyTask; or link a cancel flow of your own`;
+}
 function guardStale(result, flow, input) {
   if (!flow || result.status !== "pass") return result;
+  const portalOff = portalCancelTurnedOff(flow, input);
+  if (portalOff) {
+    return {
+      ...result,
+      status: "fail",
+      message: portalCancelOffSentence(flow, portalOff.readAt),
+      evidenceRefs: [...input.data.configRef ? [input.data.configRef] : [], ...result.evidenceRefs],
+      confidence: Math.min(result.confidence, 0.85),
+      data: { ...result.data, staleEvidence: true, portalCancelOff: true, ...portalOff.readAt ? { portalReadAt: portalOff.readAt } : {} }
+    };
+  }
   const changed = flowContradiction(flow, input);
   if (changed) {
     return {
@@ -16444,6 +16486,27 @@ var init_cancellation = __esm({
           }
           if (flow.completed) {
             return makeResult(id, "needs_review", `The test cancellation completed, but also reported: ${b.contact.join("; ")}`, refs2, 0.5, data);
+          }
+          const portalRead = !b.contact.length && flowUsedPortal(flow, cfg?.portalUrl) ? failedPortalFlowRead(flow, input) : null;
+          if (portalRead?.off) {
+            return makeResult(
+              id,
+              "fail",
+              `Online cancellation does not work: the test cancellation on ${flowDate(flow)} went to the Stripe customer portal, and cancellation is off in its settings${portalRead.at ? ` (Stripe read ${portalRead.at.slice(0, 16).replace("T", " ")} UTC)` : ""}, so subscribers see no cancel option there. Turn \u201CCancel subscriptions\u201D on in the customer portal (Stripe Dashboard \u2192 Settings \u2192 Billing \u2192 Customer portal, or features[subscription_cancel][enabled]=true on the portal configuration), then run a test run again`,
+              [...configRefs, ...refs2],
+              0.85,
+              { ...data, portalCancelOff: true, ...portalRead.at ? { portalReadAt: portalRead.at } : {} }
+            );
+          }
+          if (portalRead?.onSince) {
+            return makeResult(
+              id,
+              "needs_review",
+              `Cancellation is on in the Stripe customer portal now (Stripe read ${portalRead.onSince.slice(0, 16).replace("T", " ")} UTC), after the test cancellation on ${flowDate(flow)} could not cancel there, so it is not confirmed yet. Run a test run (createTestRun) to confirm subscribers can cancel online`,
+              [...configRefs, ...refs2],
+              0.5,
+              { ...data, portalCancelOnSince: portalRead.onSince, suggestTestRun: true }
+            );
           }
           const hosted = hostedStep(flow, input.ctx.hostedCancel);
           if (hosted && !b.contact.length) {
@@ -20112,11 +20175,11 @@ function separateActSentence(rules) {
 function extrasOnlyVerdict(c) {
   if (c.status !== "fail" && c.status !== "needs_review") return false;
   if (NOT_CHECKED_BY_DEFAULT_NOTE_RE.test(c.explanation)) return true;
-  if (c.check_id === "signup.consent.affirmative") return SEPARATE_ACT_RE.test(c.explanation);
+  if (c.check_id === "signup.consent.affirmative") return SEPARATE_ACT_RE.test(c.explanation) && !BASE_CONSENT_MISSING_RE.test(c.explanation);
   if (c.check_id === "signup.disclosure.conspicuous") return VT_BOLD_RE.test(c.explanation);
   return false;
 }
-var SEPARATE_ACT_RULES, SEPARATE_ACT_REQUIREMENT_IDS, SEPARATE_ACT_RE, NOT_CHECKED_BY_DEFAULT_NOTE_RE, VT_BOLD_RE;
+var SEPARATE_ACT_RULES, SEPARATE_ACT_REQUIREMENT_IDS, SEPARATE_ACT_RE, NOT_CHECKED_BY_DEFAULT_NOTE_RE, BASE_CONSENT_MISSING_RE, VT_BOLD_RE;
 var init_separate_act = __esm({
   "packages/rules/src/separate-act.ts"() {
     "use strict";
@@ -20142,6 +20205,7 @@ var init_separate_act = __esm({
     SEPARATE_ACT_REQUIREMENT_IDS = new Set(SEPARATE_ACT_RULES.map((r) => r.requirementId));
     SEPARATE_ACT_RE = /\b(?:requires?|asks? for) a separate opt-in to the automatic renewal\b/i;
     NOT_CHECKED_BY_DEFAULT_NOTE_RE = /^Open only for rules Checkbox does not check by default\b/;
+    BASE_CONSENT_MISSING_RE = /need consent to the renewal terms themselves|nothing says that clicking it agrees/i;
     VT_BOLD_RE = /bold-face type[\s\S]*2454a\(a\)\(1\)|2454a\(a\)\(1\)[\s\S]*bold-face type/i;
   }
 });
@@ -20247,7 +20311,7 @@ function untilCancelIsAboutRenewal(text, span) {
   return RENEWAL_CONTEXT_RE.test(sentence.replace(span.text, " "));
 }
 function withUnjudgedPaymentLinks(input, r) {
-  const links = unjudgedPaymentLinksWithoutTerms(paymentLinksOf(input.ctx.config), input.ctx.captures ?? [], input.ctx.facts?.checkoutType);
+  const links = unjudgedPaymentLinksWithoutTerms(paymentLinksOf(input.ctx.config), input.ctx.captures ?? [], input.ctx.facts?.checkoutType, input.ctx.registeredCheckoutUrls ?? []);
   if (!links.length) return r;
   const one = links.length === 1;
   const note = `An active Payment Link in your Stripe account has no renewal terms: ${links.slice(0, 3).map(paymentLinkName).join(", ")}${one ? "" : ` (${links.length} links)`}. No page of your site links to ${one ? "it" : "them"}, but anyone with the URL can still subscribe without seeing the terms. Add the renewal terms to ${one ? "its" : "their"} custom text (and a consent checkbox), or deactivate ${one ? "it" : "them"} in Stripe (Payment Links \u2192 the link \u2192 Deactivate) if ${one ? "it is" : "they are"} no longer used.`;
@@ -23717,7 +23781,7 @@ function failRule(id, result, input, results) {
     const flow = input.ctx.cancellation;
     const findable = results.get("cancel.mechanism_findable");
     const noControl = flow && !flow.completed && flow.blockers.some((b) => /no\s+cancel\s+(?:link|button|option|control)/i.test(b));
-    if (noControl && findable?.status === "pass") {
+    if (noControl && findable?.status === "pass" && result.data?.portalCancelOff !== true) {
       return { status: "needs_review", reason: "a cancel option is visible on the account page, but the test cancellation could not operate it (e.g. a label in another language); a person should try it", quote: findable.message };
     }
   }
@@ -33755,6 +33819,8 @@ function fixesOf(r, onlyNeedsFix = false, nameStale = false) {
     const stale = nameStale && base0 && !base0.includes("\u201C") ? staleClause(c.explanation) : void 0;
     const base = stale ? `It ${stale}. ${base0}` : base0;
     let cards = failingCards(c.explanation);
+    const extrasCards = cards.length > 1 ? cardClauses(c.explanation).filter((x) => extrasOnlyClause(x.clause)).map((x) => x.card) : [];
+    if (extrasCards.length && extrasCards.length < cards.length) cards = cards.filter((x) => !extrasCards.includes(x));
     const plain = cards.length > 1 ? cardClauses(c.explanation).filter((x) => /look like the surrounding text/.test(x.clause)).map((x) => x.card) : [];
     if (plain.length && plain.length < cards.length && /renewal line/i.test(base)) {
       cards = cards.filter((x) => !plain.includes(x));
@@ -33767,6 +33833,10 @@ function fixesOf(r, onlyNeedsFix = false, nameStale = false) {
     if (text && !out.includes(text)) out.push(text);
   }
   return out;
+}
+function extrasOnlyClause(clause) {
+  if (VT_BOLD_RE.test(clause)) return !/no automatic-renewal statement|does not say|no cancellation|look like the surrounding text/i.test(clause);
+  return SEPARATE_ACT_RE.test(clause) && !BASE_CONSENT_MISSING_RE.test(clause);
 }
 function cardClauses(explanation) {
   if (!explanation) return [];
@@ -33853,7 +33923,11 @@ function correctedOf(type, r, partial = false, placeholders, pricingPage = false
   }
   const allPlans = (r.plan_replacements ?? []).filter((p) => p.disclosure_text);
   if (type === "page" && allPlans.length >= 2 && ciStatusOf(r) !== "pass") {
-    const named = (r.checks ?? []).filter((c) => (c.status === "fail" || c.status === "needs_review") && !(c.compliance_status && OK_STATUSES.has(c.compliance_status))).flatMap((c) => failingCards(c.explanation)).map((x) => x.split(", ")[0].trim().toLowerCase());
+    const named = (r.checks ?? []).filter((c) => (c.status === "fail" || c.status === "needs_review") && !(c.compliance_status && OK_STATUSES.has(c.compliance_status))).flatMap((c) => {
+      const cards = failingCards(c.explanation);
+      const extras = cards.length > 1 ? cardClauses(c.explanation).filter((x) => extrasOnlyClause(x.clause)).map((x) => x.card) : [];
+      return extras.length < cards.length ? cards.filter((x) => !extras.includes(x)) : cards;
+    }).map((x) => x.split(", ")[0].trim().toLowerCase());
     const failing = allPlans.filter((p) => named.some((card) => cardIsPlan(card, p.plan, allPlans.map((x) => x.plan))));
     const perPlan = failing.length ? failing : allPlans;
     const all = perPlan.every((p) => p.verified);
@@ -34016,6 +34090,24 @@ function sitePlansDifferInCi(message, from = "checkbox.json") {
   const what = from === "params" ? `these Checkout params sell (${m[1]})` : from === "as_sold" ? `the Checkout params sell (${m[1]}), which this check is judged against` : `checkbox.json says (${m[1]})`;
   return `The site's plans in Checkbox (${m[3]}) differ from what ${what}. This run checks what this code sells. Once this change is deployed, update the site's plans (updateSetupSession plans[], or \`checkbox init --plan \u2026\`) so the site's own checks and its compliance plan use them; until then the plan's tasks may quote the old terms.`;
 }
+function fixActor(fix, c) {
+  if (c.label.includes("owner decision") || /Decision for you\b/.test(fix)) return "owner";
+  if (c.type === "terms") return FACT_SYNC_RE.test(fix) ? "agent" : "owner";
+  if (c.kind === "your_call") return "owner";
+  return OWNER_FIX_RE.test(fix) ? "owner" : "agent";
+}
+function actorTag(a) {
+  return a === "agent" ? "[agent may apply]" : "[needs the owner]";
+}
+async function reverifyCorrection(job, engine, corrected) {
+  if (!corrected || typeof corrected !== "object") return false;
+  try {
+    const again = await engine.run(ENGINE_KIND[job.type], { ...job.body ?? {}, params: corrected });
+    return ciStatusOf(again) === "pass";
+  } catch {
+    return false;
+  }
+}
 async function runJob(job, engine, config, opts = {}) {
   const base = { name: job.name, type: job.type, ...job.plan ? { plan: job.plan } : {}, target: { ...job.target }, ...job.fromSource ? { fromSource: true } : {}, warnings: [...job.warnings] };
   if (job.error) return { ...base, status: "error", label: "Could not run", message: job.error, fixes: [] };
@@ -34135,6 +34227,10 @@ async function runJob(job, engine, config, opts = {}) {
     );
   }
   const finalStatus = unread ? literal.length ? "fail" : "needs_review" : declaredCoupon || unreadCoupon ? "needs_review" : status;
+  if (!unread && job.type === "stripe_checkout" && !job.partial && report.correction?.patch?.length && report.correction.verification?.passes) {
+    const again = await reverifyCorrection(job, engine, report.correction.corrected_params);
+    if (!again) report = { ...report, correction: { ...report.correction, verification: { ...report.correction.verification, passes: false } } };
+  }
   const corrected = unread ? void 0 : correctedOf(job.type, report, job.partial, job.placeholders, pricingPage || stripeConsent || consentCovered, jsxSource);
   const snippet = corrected?.format === "json" && finalStatus !== "pass" ? oneKeySnippet(report, job.placeholders) : void 0;
   if (corrected?.format === "json" && job.placeholders) {
@@ -34302,7 +34398,7 @@ async function runCi(jobs, engine, opts) {
   if (cross) checks.push(cross);
   resolvePageConsent(checks, opts.config);
   mergeSourcePatches(checks);
-  checks.splice(0, checks.length, ...applyDecisionKinds(checks, opts.acceptedRisks ?? /* @__PURE__ */ new Set()));
+  checks.splice(0, checks.length, ...applyDecisionKinds(checks, opts.acceptedRisks ?? /* @__PURE__ */ new Set()).map((c) => c.fixes.length ? { ...c, fix_by: c.fixes.map((f) => fixActor(f, c)) } : c));
   const summary = { pass: 0, fail: 0, needs_review: 0, not_applicable: 0, skipped: 0, error: 0 };
   for (const c of checks) summary[c.status]++;
   const { status, exit } = exitCodeOf(checks, opts.strict);
@@ -34322,7 +34418,7 @@ async function runCi(jobs, engine, opts) {
     result: resultOf(status, exit, opts.strict)
   };
 }
-var ENGINE_KIND, TERMS_NOT_CHECKED_LINE, STRIPE_OBJECTS_OFFLINE_NOTICE, STRIPE_ONLINE_WORKFLOW_DIFF, STRIPE_ONLINE_WORKFLOW_DIFF_REQUIRE, WORKFLOW_ALREADY_ONLINE, CI_DISCLAIMER, RANK2, PLACEHOLDER_LINE_RE, OK_STATUSES, INTERVAL_WORDS3, BOXED_HTML, GEO_TITLE, ADD_LINE_RE, BOXED_LINE, NOTICE_TO_EMAIL, EMAIL_LABEL, DEFAULT_LABEL, CONSENT_COVERED, OPEN_COUNTS, ALERT_CODES, STALE_LINK_LABEL, KEPT_LINK_LABEL, KEPT_IN_REPO_LABEL;
+var ENGINE_KIND, TERMS_NOT_CHECKED_LINE, STRIPE_OBJECTS_OFFLINE_NOTICE, STRIPE_ONLINE_WORKFLOW_DIFF, STRIPE_ONLINE_WORKFLOW_DIFF_REQUIRE, WORKFLOW_ALREADY_ONLINE, CI_DISCLAIMER, RANK2, PLACEHOLDER_LINE_RE, OK_STATUSES, INTERVAL_WORDS3, BOXED_HTML, GEO_TITLE, ADD_LINE_RE, BOXED_LINE, NOTICE_TO_EMAIL, EMAIL_LABEL, DEFAULT_LABEL, CONSENT_COVERED, OPEN_COUNTS, ALERT_CODES, OWNER_FIX_RE, FACT_SYNC_RE, ACTOR_LEGEND, STALE_LINK_LABEL, KEPT_LINK_LABEL, KEPT_IN_REPO_LABEL;
 var init_runner = __esm({
   "packages/cli/src/ci/runner.ts"() {
     "use strict";
@@ -34403,6 +34499,9 @@ var init_runner = __esm({
     CONSENT_COVERED = "Consent is collected on Stripe Checkout, not on this page: this run checks it in checkbox.json's stripe_checkout entries (consent_collection.terms_of_service and the renewal terms in custom_text). No checkbox is needed on this page.";
     OPEN_COUNTS = ["needs_fix", "not_set_up", "your_call", "not_checked"];
     ALERT_CODES = /* @__PURE__ */ new Set(["coupon_unverified", "coupon_read", "merchant_trial_ignored", "merchant_price_ignored", "price_not_in_site_plans", "price_from_setup_plan", "plan_terms_conflict", "trial_mismatch", "intro_mismatch"]);
+    OWNER_FIX_RE = /\b(?:the owner|owner(?:'s)? decision|accept(?:s|ing)? the risk|your lawyer|counsel|repository secret|signed in to (?:Checkbox|the dashboard)|in the Checkbox dashboard|Stripe Dashboard|in Stripe(?! Checkout)\b|(?:update|replace|deactivate)s? the (?:Payment )?link)/i;
+    FACT_SYNC_RE = /^(?:It )?says? “[^”]+”,? but (?:the plan|your billing platform|[^—]*has a \d+-day trial)|\bUpdate the (?:trial|renewal price|trial and the renewal price) in your Terms\b|\bupdate the Terms to the trial subscribers get\b/i;
+    ACTOR_LEGEND = "[agent may apply]: an unattended agent may make this change on its own. [needs the owner]: a decision, a Stripe or Checkbox setting, a repository secret or legal wording the owner looks at.";
     STALE_LINK_LABEL = "Stripe still sells the old terms \xB7 owner decision";
     KEPT_LINK_LABEL = "Kept on purpose \xB7 confirmed by the owner in Checkbox";
     KEPT_IN_REPO_LABEL = "Kept on purpose \xB7 recorded in the repo, not confirmed by the owner";
@@ -34447,10 +34546,10 @@ function renderHuman(run2, c, opts = {}) {
     if (x.message) lines.push(c.dim(`      ${wrap(x.message, 110, "      ")}`));
     const shown = displayFixes(x);
     const first2 = shown === x.fixes ? x.fix : shown[0];
-    if (first2) lines.push(`      fix: ${wrap(first2, 110, "           ")}${c.dim(` (${where(x)})`)}`);
+    if (first2) lines.push(`      fix: ${wrap(x.status === "error" ? first2 : tagged(first2, x), 110, "           ")}${c.dim(` (${where(x)})`)}`);
     if (x.snippet) lines.push(`      change: ${wrap(x.snippet, 110, "              ")}`);
     if (x.type === "stripe_checkout" && x.anchored?.removed?.length) lines.push(`      removed: ${wrap(removedLine(x).replace(/^This change removed /, "this change removed "), 110, "               ")}`);
-    for (const f of shown.slice(1, opts.verbose ? void 0 : 4)) lines.push(/^Plan card [^:]+: Decision for you\b/.test(f) ? `      decision: ${wrap(f.replace(/Decision for you \(not a fix\): /, ""), 110, "                ")}` : `      fix: ${wrap(f, 110, "           ")}`);
+    for (const f of shown.slice(1, opts.verbose ? void 0 : 4)) lines.push(/^Plan card [^:]+: Decision for you\b/.test(f) ? `      decision: ${wrap(tagged(f.replace(/Decision for you \(not a fix\): /, ""), x), 110, "                ")}` : `      fix: ${wrap(tagged(f, x), 110, "           ")}`);
     if (!opts.verbose && shown.length > 4) lines.push(c.dim(`      (+${shown.length - 4} more with --verbose)`));
     const alerts = x.alerts ?? [];
     for (const a of alerts) lines.push(c.yellow(`      warning: ${wrap(a, 110, "               ")}`));
@@ -34475,6 +34574,7 @@ function renderHuman(run2, c, opts = {}) {
     if (run2.stripe_not_checked.workflow_diff) lines.push(c.dim("Workflow change (.github/workflows/checkbox.yml), plus the repository secret CHECKBOX_SECRET_KEY:"), ...run2.stripe_not_checked.workflow_diff.split("\n").map((l) => c.dim(`  ${l}`)));
   } else if (run2.offline_notice) lines.push("", c.yellow(wrap(run2.offline_notice, 110, "      ")));
   if (run2.terms_not_checked) lines.push("", c.yellow(wrap(run2.terms_not_checked, 110, "")));
+  if (run2.checks.some((x) => x.status !== "error" && displayFixes(x).length)) lines.push("", c.dim(wrap(ACTOR_LEGEND, 110, "")));
   if (run2.owner_items?.length) lines.push("", c.bold("For the owner (paste into the PR body):"), ...ownerChecklist(run2.owner_items).split("\n").map((l) => wrap(l, 110, "      ")));
   const split = changeSplit(run2);
   if (split) lines.push("", split);
@@ -34515,12 +34615,35 @@ function displayFixes(x) {
   const adds = x.fixes.filter((f) => ADD_LINE_FIX.test(f));
   if (!adds.length) return [restore, ...x.fixes];
   const own = removedText(x.anchored.removed);
-  const merged = adds.map((f) => {
+  const removedEvery = own ? /\bevery (?:\d+ )?(day|week|month|year)s?\b|\/(mo|yr)\b|\b(monthly|yearly|annual(?:ly)?|weekly)\b/i.exec(own) : null;
+  const removedPeriod = removedEvery ? periodWord2(removedEvery[1] ?? removedEvery[2] ?? removedEvery[3]) : void 0;
+  const cardPeriod = (f) => {
+    const card = /^Plan card ([^:]+): /.exec(f)?.[1];
+    const m = card ? /\b(monthly|month|yearly|year|annual(?:ly)?|weekly|week|daily|day)\b/i.exec(card) : null;
+    return m ? periodWord2(m[1]) : void 0;
+  };
+  const restorable = adds.filter((f) => {
+    const p = cardPeriod(f);
+    return !(removedPeriod && p && p !== removedPeriod);
+  });
+  const cardOf = (f) => /^Plan card ([^:]+): /.exec(f)?.[1] ?? "";
+  const pick2 = restorable.length > 1 && removedPeriod ? restorable.find((f) => cardPeriod(f) === removedPeriod) ?? restorable[0] : restorable[0];
+  const toMerge = pick2 ? restorable.filter((f) => cardOf(f) === cardOf(pick2)) : [];
+  const kept = x.fixes.filter((f) => !toMerge.includes(f));
+  if (!toMerge.length) return [restore, ...x.fixes];
+  const merged = toMerge.map((f) => {
     const m = ADD_LINE_FIX.exec(f);
     const text = own ?? m[2];
     return `${m[1] ?? ""}Put the renewal line this change removed back under the price, as it was, with the styling it had (${style2}): "${text}"${/[.!?]$/.test(text) ? "" : "."} Plain text fails "stand out": Checkbox checks that the renewal terms stand out next to the button, not only that they are there.`;
   });
-  return [...merged, ...x.fixes.filter((f) => !adds.includes(f))];
+  return [...new Set(merged), ...kept];
+}
+function periodWord2(w) {
+  const t = w.toLowerCase();
+  if (t === "mo" || t.startsWith("month")) return "month";
+  if (t === "yr" || t.startsWith("year") || t.startsWith("annual")) return "year";
+  if (t.startsWith("week")) return "week";
+  return "day";
 }
 function removedText(removed) {
   const t = removed.join(" ").replace(/<[^>]*>/g, " ").replace(/\{\s*['"`]([^'"`]*)['"`]\s*\}/g, "$1").replace(/[{}]/g, " ").replace(/\s+/g, " ").trim();
@@ -34564,7 +34687,7 @@ ${cx.body}` : `${cx.title}: see the job summary.`;
     const shown = displayFixes(x);
     const first2 = shown === x.fixes ? x.fix : shown[0];
     const body = x.status === "error" ? x.fix ? `${x.message ?? ""}
-${x.fix}` : `Could not run: ${x.message ?? ""}` : [oldNote, removed, x.status === "pass" && !first2 ? "" : first2 ?? x.label, snippet, ...shown.slice(1, 4).map((f) => `\u2022 ${f}`), ...alerts.map((a) => `Warning: ${a}`), snippet && x.corrected?.format === "json" ? "" : corrected].filter(Boolean).join("\n");
+${x.fix}` : `Could not run: ${x.message ?? ""}` : [oldNote, removed, x.status === "pass" && !first2 ? "" : first2 ? tagged(first2, x) : x.label, snippet, ...shown.slice(1, 4).map((f) => `\u2022 ${tagged(f, x)}`), ...alerts.map((a) => `Warning: ${a}`), snippet && x.corrected?.format === "json" ? "" : corrected].filter(Boolean).join("\n");
     const key = `${level}|${x.target.file}|${x.target.line ?? ""}|${x.label}|${body}`;
     const prev = same.get(key);
     if (prev) {
@@ -34603,7 +34726,7 @@ function stepSummary(run2) {
   const row = (x) => {
     const shown = displayFixes(x);
     const first2 = shown === x.fixes ? x.fix : shown[0];
-    const fix0 = x.status === "error" || x.status === "skipped" ? [x.message, x.fix].filter(Boolean).join(" ") : first2 ? `${first2}${shown.length > 1 ? ` (+${shown.length - 1} more)` : ""}` : x.status === "needs_review" && x.message ? x.message : "";
+    const fix0 = x.status === "error" || x.status === "skipped" ? [x.message, x.fix].filter(Boolean).join(" ") : first2 ? `${tagged(first2, x)}${shown.length > 1 ? ` (+${shown.length - 1} more)` : ""}` : x.status === "needs_review" && x.message ? x.message : "";
     const fix = [fix0, x.snippet ? `Change: \`${x.snippet}\`` : "", ...(x.alerts ?? []).map((a) => `\u26A0\uFE0F ${a}`), ...(x.stripe ?? []).map((st) => `Stripe: ${st}`)].filter(Boolean).join("\n");
     return `| ${STATUS_MD[x.status]} ${cell(x.name)}<br><sub>${TYPE_LABEL[x.type]}</sub> | ${cell(x.label)} | ${cell(fix)} | \`${cell(where(x))}\` |`;
   };
@@ -34621,13 +34744,14 @@ function stepSummary(run2) {
     const shown = displayFixes(x);
     const cx = displayCorrected(x);
     lines.push("", `<details><summary><b>${escapeHtml(x.name)}</b>: ${escapeHtml(cx ? cx.title.charAt(0).toLowerCase() + cx.title.slice(1) : `${shown.length} fixes`)}</summary>`, "");
-    if (shown.length) lines.push(...shown.map((f) => `- ${f}`), "");
+    if (shown.length) lines.push(...shown.map((f) => `- ${tagged(f, x)}`), "");
     if (x.corrected) {
       const fence = x.corrected.body.includes("```") ? "````" : "```";
       lines.push(`${fence}${fenceLang(x)}`, x.corrected.body, fence, "");
     }
     lines.push("</details>");
   }
+  if (run2.checks.some((x) => x.status !== "error" && x.status !== "skipped" && displayFixes(x).length)) lines.push("", `<sub>${ACTOR_LEGEND}</sub>`);
   if (run2.owner_items?.length) lines.push("", "### For the owner", "", "What only the owner can do (copy into the pull request description):", "", ownerChecklist(run2.owner_items));
   lines.push("", `<sub>${run2.disclaimer} Docs: https://checkbox.site/docs/guides/ci</sub>`, "");
   return lines.join("\n");
@@ -34645,7 +34769,7 @@ function fenceLang(x) {
 function escapeHtml(s2) {
   return s2.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
-var TYPE_LABEL, OPEN3, alreadyOpen, where, PRICE_UNREAD, ADD_LINE_FIX, escData, escProp, cell, STATUS_MD;
+var TYPE_LABEL, OPEN3, alreadyOpen, tagged, where, PRICE_UNREAD, ADD_LINE_FIX, escData, escProp, cell, STATUS_MD;
 var init_report = __esm({
   "packages/cli/src/ci/report.ts"() {
     "use strict";
@@ -34661,6 +34785,7 @@ var init_report = __esm({
     };
     OPEN3 = /* @__PURE__ */ new Set(["fail", "needs_review", "error"]);
     alreadyOpen = (x) => x.introduced === false && OPEN3.has(x.status);
+    tagged = (f, x) => `${f} ${actorTag(fixActor(f, x))}`;
     where = (c) => `${c.target.file}${c.target.line && c.target.line > 1 ? `:${c.target.line}` : ""}`;
     PRICE_UNREAD = /^line_items use (\S+), which Checkbox could not read\b/;
     ADD_LINE_FIX = /^(Plan card [^:]+: )?(?:Add one line under the price|Add your own renewal line next to the (?:pay|plan's) button)[^"]*"([^"]+)"/;
@@ -37295,7 +37420,11 @@ var init_verify2 = __esm({
             }
           }
           const sp = str(flags, "stripe-params");
-          if (sp) body.stripe_checkout_session = readJson2(ctx, sp, "Stripe params");
+          if (sp) {
+            const read2 = readJson2(ctx, sp, "Stripe params");
+            if (Array.isArray(read2)) body.stripe_checkout_sessions = read2;
+            else body.stripe_checkout_session = read2;
+          }
           const ef = str(flags, "email-file");
           if (ef) body.email = readJson2(ctx, ef, "Email");
           v = await client.sdk.tasks.verify(id, { ...body, ...wait ? { wait: 30 } : {} }, { timeout: 9e4 });

@@ -1,6 +1,6 @@
 {
   "name": "@checkbox-site/node",
-  "version": "0.4.5",
+  "version": "0.4.6",
   "description": "Checkbox Node.js SDK: auto-renewal law and subscription compliance checks (FTC ROSCA, California ARL, New York and other state laws) for Stripe Checkout compliance (Checkout Sessions, Payment Links) and other subscription checkouts, online cancellation flows and renewal reminder emails. Zero dependencies. Published to npm as @checkbox-site/node.",
   "keywords": [
     "subscription",
@@ -25,14 +25,15 @@
     "ftc",
     "negative-option",
     "payment-links",
+    "mcp",
+    "auto-renewal-law-checker",
     "subscription compliance",
     "auto renewal",
     "autorenewal",
     "california-arl",
     "subscription-cancellation",
     "stripe-subscriptions",
-    "checkout",
-    "mcp"
+    "checkout"
   ],
   "license": "MIT",
   "author": "Checkbox <support@checkbox.site>",

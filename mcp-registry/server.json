@@ -2,9 +2,9 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "site.checkbox/checkbox",
   "title": "Checkbox: subscription auto-renewal law checks",
-  "description": "Auto-renewal law checks for Stripe Checkout: ROSCA, state laws (FTC click-to-cancel rule vacated)",
+  "description": "Auto-renewal law checks for Stripe Checkout: ROSCA, state laws (FTC click to cancel rule vacated)",
   "websiteUrl": "https://checkbox.site/docs/mcp",
-  "version": "1.0.9",
+  "version": "1.0.10",
   "remotes": [
     {
       "type": "streamable-http",
@@ -56,7 +56,7 @@
     {
       "registryType": "npm",
       "identifier": "@checkbox-site/mcp",
-      "version": "0.4.5",
+      "version": "0.4.6",
       "transport": {
         "type": "stdio"
       },

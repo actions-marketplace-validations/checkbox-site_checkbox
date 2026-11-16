@@ -742,10 +742,10 @@ const setupCheckbox: ToolDef = {
   name: 'setup_checkbox',
   title: 'Set up Checkbox for this project',
   description: [
-    'Start here when the user says "add Checkbox", "make my subscriptions compliant", or the project is not connected to Checkbox yet. Checkbox checks a subscription business against automatic-renewal laws (federal law, 27 states, DC and New York City).',
+    'Start here when the user says "add Checkbox", "make my subscriptions compliant", or the project is not connected yet. Checkbox checks a subscription business against auto-renewal laws (federal law, 27 states, DC and NYC).',
     '',
     'Connected through the Checkbox connector (OAuth): the human already approved in the browser; there is NO key to ask for, paste or save. Call it with site_url (and what else you know): it registers the site and runs the first checks in the same call.',
-    'Pass everything you already know from the codebase: site_url, checkout_url, terms/privacy/refund/cancellation URLs, billing_platform, plans, project.layout_file. Checkbox fetches and checks the Terms itself.',
+    'Pass what you know from the codebase: site_url, checkout_url, terms/privacy/refund/cancellation URLs, billing_platform, plans, framework, project.layout_file. Checkbox fetches and checks the Terms itself.',
     '',
     'Without OAuth or a key: it returns a link for the HUMAN to open and click Approve (free, no card). Show it in one line, then call again with the returned device_code (waits ~50 s; again while pending). The stdio server then saves the key to the git-ignored .env.local; the remote one returns it once: save it there, never commit it or ask for a pasted key.',
     '',
@@ -2989,6 +2989,15 @@ export function normalizeSetupArgs(raw: Record<string, unknown>, known: Readonly
   for (const [k, v] of Object.entries(raw)) if (known.has(k)) args[k] = v;
   for (const [k, v] of Object.entries(raw)) {
     if (known.has(k)) continue;
+    // Round 46 (pilot 45 core-new-app, dev-approver: llms.txt has agents send `framework`, as on POST
+    // /v1/device/authorize, and setup_checkbox ignored it, so the first fixes came as static HTML): a top-level framework
+    // is project.framework (project.framework wins when both are given).
+    if (k === 'framework' && known.has('project') && typeof v === 'string' && v.trim()) {
+      const project = args.project && typeof args.project === 'object' ? (args.project as Record<string, unknown>) : {};
+      if (typeof project.framework !== 'string' || !project.framework) args.project = { ...project, framework: v.trim().slice(0, 60) };
+      aliased.push('framework (read as project.framework)');
+      continue;
+    }
     const to = SETUP_FIELD_ALIASES[k];
     const ok = typeof v === 'string' && !!v.trim() && (to !== 'billing_platform' || BILLING_PLATFORMS.has(v.trim().toLowerCase()));
     if (to && known.has(to) && ok && args[to] === undefined) {
