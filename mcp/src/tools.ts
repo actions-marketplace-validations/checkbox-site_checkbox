@@ -7,7 +7,7 @@ import type { ToolAnnotations } from '@modelcontextprotocol/sdk/types.js';
 import { planTodo, todoLine, type TodoTaskLike } from './todo.ts';
 import { CheckboxApiError, type CheckboxApi, type NextAction } from './api.ts';
 import { OPERATION_TOOLS, ciHint, nextActionOf, untrusted, type ToolOutput } from './format.ts';
-import { compactCheckResult, compactPlanResult, compactSetupResult, compactTestRunResult, compactVerificationResult } from './compact.ts';
+import { compactCheckResult, compactPlanResult, compactSetupResult, compactTestRunResult, compactVerificationResult, countsWords, verificationCheckCounts } from './compact.ts';
 import { keyAllows, type KeyContext, type ToolScope } from './permissions.ts';
 import { OPERATIONS } from '@checkbox-site/node';
 
@@ -1288,11 +1288,13 @@ export function checksSummary(v: { status: string; precheck?: PrecheckLite | nul
   const uncounted = new Set(list.filter((c) => c.blocking === false && !ok.has(c.observed)).map((c) => c.check_id));
   const bad = new Map<string, string>();
   for (const c of [...planOpen, ...list]) if (!ok.has(c.observed) && !bad.has(c.check_id) && !uncounted.has(c.check_id)) bad.set(c.check_id, c.observed);
-  const passing = list.filter((c) => ok.has(c.observed) && !bad.has(c.check_id)).length;
+  // Round 47 (pilot 46 core-new-app): the counts are the compact JSON's own (verificationCheckCounts), by status.
+  const { counts } = verificationCheckCounts(v as unknown as Record<string, unknown>);
+  const passingWords = countsWords(counts, ok) || '0 pass';
   const label = pre ? 'Pre-check' : 'Checks';
   const notPassing = [...bad].map(([id, st]) => `${id} (${st})`);
   const waiting = uncounted.size ? `${uncounted.size} waiting or optional (not counted in the plan); ` : '';
-  return [`${label}: ${notPassing.length ? `not passing: ${notPassing.join(', ')} (details in diff); ` : ''}${waiting}${passing} passing.`];
+  return [`${label}: ${notPassing.length ? `not passing: ${notPassing.join(', ')} (details in diff); ` : ''}${waiting}${passingWords}.`];
 }
 
 const verifyTask: ToolDef = {
@@ -1475,16 +1477,23 @@ const storeStripeTestKey: ToolDef = {
     'Stores the site\'s ONE Stripe key in TEST mode: a restricted key (rk_test_…) from the project\'s env. Checked with Stripe; on a test-mode site not connected with “Connect with Stripe” it also connects Stripe (checks, fixes after the human approves, test runs); if connected, it only runs test runs. The human can revoke it on the dashboard. Live and sk_test_ keys are refused (the error says what to do). Never ask the human to paste a key into the chat.',
   input: {
     site: siteId.optional(),
-    secret_key: z.string().min(10).max(255).describe('rk_test_… key. Stored encrypted; never returned.'),
+    // Round 47 (pilot 46 core-codex and one more tester: agents sent `key`): `key` is read as secret_key, as setup reads
+    // `framework` (passthrough: the listed arguments stay the published ones; any other unknown argument is refused in
+    // run). One of the two is required (checked in run, with the right name in the error).
+    secret_key: z.string().min(10).max(255).optional().describe('rk_test_… key (required). Stored encrypted; never returned.'),
     confirm_account_mismatch: z.boolean().optional().describe('Human said yes'),
     type: z.enum(['stripe_test', 'stripe']).optional().describe('Optional: "stripe_test" (the REST body\'s type; "stripe" is accepted too). Always stored as a Stripe TEST key.'),
   },
   scopes: ['test_runs:write'],
   annotations: { ...write(true, true), title: 'Store Stripe test key' },
+  passthrough: true,
   async run(args, { api }) {
+    const unknown = Object.keys(args).filter((k) => !['site', 'secret_key', 'key', 'confirm_account_mismatch', 'type', 'verbose'].includes(k));
+    if (unknown.length) throw new ToolError(unknownArgumentsMessage('store_stripe_test_key', unknown, ['site', 'secret_key', 'confirm_account_mismatch', 'type']));
+    const secret = storeKeySecret(args);
     const site = await resolveSite(api, args.site);
     const cred = await api.request<{ id: string; key_hint: string; verified: boolean; next_action?: NextAction }>('POST', `/v1/sites/${enc(site)}/test_credentials`, {
-      body: { type: 'stripe_test', secret_key: String(args.secret_key ?? ''), ...(args.confirm_account_mismatch === true ? { confirm_account_mismatch: true } : {}) },
+      body: { type: 'stripe_test', secret_key: secret, ...(args.confirm_account_mismatch === true ? { confirm_account_mismatch: true } : {}) },
     });
     return {
       headline: `Stripe test key ${cred.key_hint} stored for ${site} (checked with Stripe). The human sees it on the dashboard and can revoke it.`,
@@ -1493,6 +1502,16 @@ const storeStripeTestKey: ToolDef = {
     };
   },
 };
+
+/** Round 47: the key store_stripe_test_key stores: secret_key, or `key` (an alias agents guess). Throws when neither. */
+export function storeKeySecret(args: Record<string, unknown>): string {
+  const a = typeof args.secret_key === 'string' ? args.secret_key.trim() : '';
+  const b = typeof args.key === 'string' ? args.key.trim() : '';
+  if (a && b && a !== b) throw new ToolError('Pass the key once: secret_key and key differ. Nothing was stored.', { type: 'fix_request', message: 'Call store_stripe_test_key again with secret_key only.' });
+  const secret = a || b;
+  if (!secret) throw new ToolError('secret_key is required: the Stripe TEST restricted key (rk_test_…) from the project\'s env. Nothing was stored.', { type: 'fix_request', message: 'Call store_stripe_test_key with secret_key: "rk_test_…". Never ask the human to paste a key into the chat.' });
+  return secret;
+}
 
 const startTestRun: ToolDef = {
   name: 'start_test_run',
@@ -1562,12 +1581,17 @@ const startTestRun: ToolDef = {
   },
 };
 
-/** "Steps: 9 passed, 1 warning, 2 skipped." */
-export function stepCounts(steps: ReadonlyArray<{ status?: string }> | undefined): string[] {
+/**
+ * "Steps: 9 passed, 1 info (not counted). Checks: 10 passed, 1 needs review." Round 47 (pilot 46 core-new-app: "9
+ * passed, 1 info" read as the run's checks while result.summary said passed 10 / needs_review 1): steps and checks are
+ * named apart, and the check counts are result.summary's own.
+ */
+export function stepCounts(steps: ReadonlyArray<{ status?: string }> | undefined, summary?: { passed?: number; failed?: number; needs_review?: number } | null): string[] {
   if (!steps?.length) return [];
   const n = new Map<string, number>();
   for (const s of steps) n.set(s.status ?? '?', (n.get(s.status ?? '?') ?? 0) + 1);
-  return [`Steps: ${[...n].map(([k, v]) => `${v} ${k}`).join(', ')}.`];
+  const checks = summary ? [summary.passed ? `${summary.passed} passed` : '', summary.failed ? `${summary.failed} failed` : '', summary.needs_review ? `${summary.needs_review} need${summary.needs_review === 1 ? 's' : ''} review` : ''].filter(Boolean).join(', ') : '';
+  return [`Steps: ${[...n].map(([k, v]) => `${v} ${k}${k === 'info' ? ' (informational, not counted)' : ''}`).join(', ')}.${checks ? ` Checks (result.summary): ${checks}.` : ''}`];
 }
 
 const TEST_RUN_MAX_WAIT = 55;
@@ -1601,7 +1625,7 @@ const getTestRun: ToolDef = {
       if (!list.data.length) throw new ToolError(`Site ${site} has no test run yet.`, { type: 'start_test_run', message: 'Call start_test_run.', operation_id: 'createTestRun' });
       id = list.data[0]!.id;
     }
-    type RunLite = { id: string; status: string; status_label?: string; plan_status_label?: string | null; plan_tested?: { summary?: string } | null; phase?: string; next_action?: NextAction | null; waiting_for?: { what: string; until: number | null; step?: number | null; steps_total?: number | null; minutes_left?: number | null } | null; steps?: Array<{ key?: string; title?: string; status?: string; code?: string }> };
+    type RunLite = { id: string; status: string; status_label?: string; plan_status_label?: string | null; plan_tested?: { summary?: string } | null; phase?: string; next_action?: NextAction | null; waiting_for?: { what: string; until: number | null; step?: number | null; steps_total?: number | null; minutes_left?: number | null } | null; steps?: Array<{ key?: string; title?: string; status?: string; code?: string }>; result?: { summary?: { passed?: number; failed?: number; needs_review?: number } } | null };
     const wait = typeof args.wait === 'number' && args.wait > 0 ? Math.min(TEST_RUN_MAX_WAIT, Math.floor(args.wait)) : 0;
     const deadline = Date.now() + wait * 1000;
     // The API long-polls up to 30 s per call and answers on every step; keep asking until the run finishes or time is up.
@@ -1617,7 +1641,7 @@ const getTestRun: ToolDef = {
     return {
       headline: `Test run ${run.id}: ${run.status_label ?? statusLine(run.status)}${run.phase && run.status !== 'succeeded' && run.status !== 'failed' ? ` (phase ${run.phase})` : ''}.${run.plan_tested?.summary ? ` Plan tested: ${run.plan_tested.summary}.` : ''}${run.plan_status_label ? ` Plan after this run: ${run.plan_status_label}.` : ''}`,
       // Round 39: each step is in the JSON (title, status, and for a step that did not pass its summary and fix); the text counts them.
-      notes: [...(waiting ? [waiting] : []), ...stepCounts(run.steps)],
+      notes: [...(waiting ? [waiting] : []), ...stepCounts(run.steps, run.result?.summary)],
       data: run,
       compact: compactTestRunResult(run as unknown as Record<string, unknown>, OPERATION_TOOLS),
       ...(next ? { next } : {}),

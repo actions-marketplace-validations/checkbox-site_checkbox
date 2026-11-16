@@ -3769,7 +3769,7 @@ var SDK_VERSION;
 var init_version = __esm({
   "packages/sdk-node/src/version.ts"() {
     "use strict";
-    SDK_VERSION = "0.4.6";
+    SDK_VERSION = "0.4.7";
   }
 });
 
@@ -10310,7 +10310,7 @@ var init_states = __esm({
 });
 
 // packages/rules/src/catalog/terms.ts
-var ROSCA_URL2, ROSCA_EFFECTIVE2, FTC_ACT_URL, URL_176022, ORIGINAL_CA, AB3902, DERIVED, TERMS_REQUIREMENTS;
+var ROSCA_URL2, ROSCA_EFFECTIVE2, FTC_ACT_URL, URL_176022, ORIGINAL_CA, AB3902, AB28632, DERIVED, TERMS_REQUIREMENTS;
 var init_terms = __esm({
   "packages/rules/src/catalog/terms.ts"() {
     "use strict";
@@ -10321,6 +10321,7 @@ var init_terms = __esm({
     URL_176022 = "https://leginfo.legislature.ca.gov/faces/codes_displaySection.xhtml?lawCode=BPC&sectionNum=17602.";
     ORIGINAL_CA = "2010-12-01";
     AB3902 = "2022-07-01";
+    AB28632 = "2025-07-01";
     DERIVED = "Checkbox applies this duty to the merchant's written Terms of service and policies (fetched from the registered URLs). The statute does not mention terms of service by name; a contradictory clause is evidence that the required disclosure or mechanism is not actually what the consumer agrees to.";
     TERMS_REQUIREMENTS = [
       draft({
@@ -10381,6 +10382,22 @@ var init_terms = __esm({
         notes: notes(
           DERIVED,
           "Best-practice reading: \xA7 17602(a)(1) is satisfied at checkout (signup.* checks); this requirement flags Terms that are silent about the renewal they bind the consumer to. Low severity: it never blocks insurability on its own."
+        )
+      }),
+      draft({
+        id: "US-CA.17602.g.2.terms",
+        jurisdiction: "US-CA",
+        citation: "Cal. Bus. & Prof. Code \xA7 17602(g)(2)",
+        sourceUrl: URL_176022,
+        effectiveDate: AB28632,
+        stage: "config",
+        title: "Terms must not take back the advance notice of a price change",
+        summary: 'For any change in the fee charged under an existing automatic renewal, the business must give a clear and conspicuous notice of the change, with how to cancel, 7 to 30 days before it takes effect. A Terms clause that reserves the right to change prices "at any time" without promising that notice tells subscribers the opposite.',
+        checkIds: ["terms.renewal_terms_present"],
+        severity: "low",
+        notes: notes(
+          DERIVED,
+          "Round 47 (pilot 46 core-new-app). The notice itself is checked by reminder.price_change (the price-change notice task); this requirement only flags Terms that contradict it. The fix is one sentence promising the notice."
         )
       })
     ];
@@ -20883,7 +20900,8 @@ function clickwrapAgreement(texts, ctaText) {
   }
   return void 0;
 }
-function clickwrapFix(ctaText) {
+function clickwrapFix(ctaText, hosted = false) {
+  if (hosted) return `end the renewal terms in custom_text.submit.message with one sentence: \u201C${STRIPE_CLICKWRAP_SENTENCE}\u201D (Stripe's Subscribe button keeps its label)`;
   return `add one sentence to the renewal terms next to the button: \u201CBy clicking \u201C${ctaText}\u201D, you agree to these renewal terms.\u201D (your button keeps its label)`;
 }
 function ctaAffirmsRenewal(text) {
@@ -20943,7 +20961,7 @@ function boxNearCta(box, cta) {
   const gap2 = box.y >= cta.y + cta.height ? box.y - (cta.y + cta.height) : cta.y >= box.y + box.height ? cta.y - (box.y + box.height) : 0;
   return gap2 <= 200;
 }
-var NO_CHECKOUT_CAPTURE_MESSAGE, NO_PURCHASE_BUTTON, OTHER_PLAN_CARD_NOTE, UNCERTAIN_CARD_NOTE, heuristicCache, PROCESSOR_LINE_NOTE, RENEWAL_CONTEXT_RE, autorenewLanguage, autorenewOverViews, FOOTNOTE_RE, NON_CHARGE_AMOUNT_RE, INTRO_PRICE_RE, RENEWAL_PRICE_RE, PRODUCT_TITLE_RE, CHARGED_NOW_RE, LATER_CHARGE_RE, HOSTED_SET_OFF_NOTE, capitalize, price, priceOverViews, frequency, CANCEL_LINK_RE, cancellationPolicy, TRIAL_DAYS_SLACK, trialTerms2, termLength, PLACEMENT_RANK, proximity, VT_BOLD_REQUIREMENT, VT_BOLD_CITE, conspicuous, RENEWAL_CONSENT_RE, CONSENT_CHECKBOX_RE, TOS_RE, SUBSCRIPTION_CTA_RE, MARKETING_RE, RENEWAL_TERMS_RE, NOTIFICATION_OPT_IN_RE, AGREEMENT_RE, CARD_FIELDS_RE, STRIPE_TOS_BOX_RE, SEPARATE_CONSENT_JURISDICTIONS, DC_GEO_STRIPE_SENTENCE, CLICKWRAP_RE, CLICKWRAP_THESE_TERMS_RE, CLICKWRAP_EXPLICIT_RENEWAL_RE, CLICKWRAP_OTHER_OBJECT_RE, CLICKWRAP_STRONG_OBJECT_RE, wordsOf, CLICK_FILLER_RE, CA_SEPARATE_CONSENT, consentAffirmative, consentOverViews, notPrechecked, SIGNUP_CHECKS;
+var NO_CHECKOUT_CAPTURE_MESSAGE, NO_PURCHASE_BUTTON, OTHER_PLAN_CARD_NOTE, UNCERTAIN_CARD_NOTE, heuristicCache, PROCESSOR_LINE_NOTE, RENEWAL_CONTEXT_RE, autorenewLanguage, autorenewOverViews, FOOTNOTE_RE, NON_CHARGE_AMOUNT_RE, INTRO_PRICE_RE, RENEWAL_PRICE_RE, PRODUCT_TITLE_RE, CHARGED_NOW_RE, LATER_CHARGE_RE, HOSTED_SET_OFF_NOTE, capitalize, price, priceOverViews, frequency, CANCEL_LINK_RE, cancellationPolicy, TRIAL_DAYS_SLACK, trialTerms2, termLength, PLACEMENT_RANK, proximity, VT_BOLD_REQUIREMENT, VT_BOLD_CITE, conspicuous, RENEWAL_CONSENT_RE, CONSENT_CHECKBOX_RE, TOS_RE, SUBSCRIPTION_CTA_RE, MARKETING_RE, RENEWAL_TERMS_RE, NOTIFICATION_OPT_IN_RE, AGREEMENT_RE, CARD_FIELDS_RE, STRIPE_TOS_BOX_RE, SEPARATE_CONSENT_JURISDICTIONS, DC_GEO_STRIPE_SENTENCE, CLICKWRAP_RE, CLICKWRAP_THESE_TERMS_RE, CLICKWRAP_EXPLICIT_RENEWAL_RE, CLICKWRAP_OTHER_OBJECT_RE, CLICKWRAP_STRONG_OBJECT_RE, wordsOf, CLICK_FILLER_RE, STRIPE_CLICKWRAP_SENTENCE, CA_SEPARATE_CONSENT, consentAffirmative, consentOverViews, notPrechecked, SIGNUP_CHECKS;
 var init_signup = __esm({
   "packages/rules/src/checks/signup.ts"() {
     "use strict";
@@ -21885,6 +21903,7 @@ ${view.pageText}`;
     CLICKWRAP_STRONG_OBJECT_RE = /\b(?:renewal\s+terms|automatic[-\s]renewal)\b/i;
     wordsOf = (s2) => normalizeText(s2).toLowerCase().replace(/[^a-z0-9 ]+/g, " ").replace(/\s+/g, " ").trim();
     CLICK_FILLER_RE = /^(?:on\s+)?(?:(?:the|this|that)\s+)?(.*?)\s*(?:\b(?:button|link)\b)?\s*(?:\b(?:below|above|here)\b)?$/i;
+    STRIPE_CLICKWRAP_SENTENCE = "By subscribing, you agree to these renewal terms.";
     CA_SEPARATE_CONSENT = "federal law (ROSCA, 15 U.S.C. \xA7 8403(2): express informed consent) and California (\xA7 17602(a)(4), since July 1, 2025: express affirmative consent to the automatic-renewal terms) need consent to the renewal terms themselves, not only to general terms";
     consentAffirmative = {
       id: "signup.consent.affirmative",
@@ -22104,7 +22123,7 @@ ${view.pageText}`;
           const label = quote(labelOf(tosBoxes[0]));
           return renewalNear ? unit(
             "needs_review",
-            `the only consent checkbox (\u201C${label}\u201D) covers general terms, not the automatic-renewal terms shown next to it; ${CA_SEPARATE_CONSENT} \u2014 make the checkbox about the renewal terms, or ${separateAct.length ? "add one for them" : clickwrapFix(quote(view.primaryCta?.text) ?? "Subscribe")}`,
+            `the only consent checkbox (\u201C${label}\u201D) covers general terms, not the automatic-renewal terms shown next to it; ${CA_SEPARATE_CONSENT} \u2014 make the checkbox about the renewal terms, or ${separateAct.length ? "add one for them" : clickwrapFix(quote(view.primaryCta?.text) ?? "Subscribe", !!view.hosted)}`,
             0.6,
             { meta: { mechanism: "tos_checkbox_only" } }
           ) : unit(
@@ -22135,7 +22154,7 @@ ${view.pageText}`;
         if (cta && SUBSCRIPTION_CTA_RE.test(normalizeText(cta.text))) {
           return renewalNear ? unit(
             noCheckbox ? "fail" : "needs_review",
-            `${noCheckbox ? "there is no consent checkbox: " : ""}consent is implied by clicking \u201C${ctaText}\u201D next to the renewal terms, but nothing says that clicking it agrees to them; ${CA_SEPARATE_CONSENT} \u2014 ${separateAct.length ? separateActText : clickwrapFix(ctaText)}`,
+            `${noCheckbox ? "there is no consent checkbox: " : ""}consent is implied by clicking \u201C${ctaText}\u201D next to the renewal terms, but nothing says that clicking it agrees to them; ${CA_SEPARATE_CONSENT} \u2014 ${separateAct.length ? separateActText : clickwrapFix(ctaText, !!view.hosted)}`,
             noCheckbox ? 0.7 : 0.55,
             { meta: { mechanism: "implied_click" } }
           ) : unit("fail", `the \u201C${ctaText}\u201D button does not reference the renewal and no renewal terms are shown next to it`, 0.78, {
@@ -22145,7 +22164,7 @@ ${view.pageText}`;
         if (renewalNear) {
           return unit(
             noCheckbox && cta ? "fail" : "needs_review",
-            `${noCheckbox ? "there is no consent checkbox and " : ""}the \u201C${ctaText}\u201D button does not reference the subscription and nothing says that clicking it agrees to the renewal terms, so consent to the renewal terms is not obtained; ${CA_SEPARATE_CONSENT} \u2014 ${separateAct.length ? separateActText : clickwrapFix(ctaText)}`,
+            `${noCheckbox ? "there is no consent checkbox and " : ""}the \u201C${ctaText}\u201D button does not reference the subscription and nothing says that clicking it agrees to the renewal terms, so consent to the renewal terms is not obtained; ${CA_SEPARATE_CONSENT} \u2014 ${separateAct.length ? separateActText : clickwrapFix(ctaText, !!view.hosted)}`,
             noCheckbox && cta ? 0.68 : 0.5,
             { meta: { mechanism: "generic_click" } }
           );
@@ -22235,9 +22254,25 @@ function sentenceAt2(text, index) {
   const q2 = (s2?.text ?? text.slice(Math.max(0, index - 60), index + 100)).replace(/\s+/g, " ").trim();
   return q2.length > 200 ? `${q2.slice(0, 197)}\u2026` : q2;
 }
-function termsPlanMismatches(text, plans) {
+function termsPlanMismatches(text, plans, opts = {}) {
   if (!plans.length) return [];
   const a = analyzeTerms(text);
+  const out = [];
+  if (!opts.skipTrial) out.push(...trialMismatch(a, plans));
+  out.push(...priceMismatch(a, plans));
+  return out;
+}
+function termsTrialUncertain(plans, facts) {
+  if (facts?.hasFreeTrial === false) return false;
+  return plans.some((p) => !p.trialKnown);
+}
+function termsTrialUnconfirmed(text, plans) {
+  const m = trialMismatch(analyzeTerms(text), plans)[0];
+  if (!m) return void 0;
+  const said = /say “([^”]*)”/.exec(m)?.[1] ?? "";
+  return `Your Terms of service say \u201C${said}\u201D, but Checkbox does not know that trial on any plan yet (Stripe does not return the trial your Checkout code sets) \u2014 finish the Stripe Checkout params task first (register the params your code sends with createStripeCheckoutConfig, or call verifyTask with them), then Checkbox compares the Terms with each plan's trial`;
+}
+function trialMismatch(a, plans) {
   const out = [];
   const trials = plans.map((p) => p.trialDays ?? 0);
   const close = (d, t) => d >= 28 && d <= 31 ? t >= 28 && t <= 31 : d === t;
@@ -22249,6 +22284,10 @@ function termsPlanMismatches(text, plans) {
     out.push(`Your Terms of service say \u201C${sentenceAt2(a.text, t.index)}\u201D but ${truth} \u2014 update the Terms to the trial subscribers get`);
     break;
   }
+  return out;
+}
+function priceMismatch(a, plans) {
+  const out = [];
   for (const r of a.recurringPrices) {
     const amount = r.money.amount;
     const unit2 = r.frequency.unit;
@@ -22268,23 +22307,62 @@ function termsPlanMismatches(text, plans) {
   }
   return out;
 }
+function termsMissingPlans(text, sold) {
+  if (!sold.length) return [];
+  const a = analyzeTerms(text);
+  const stated = a.recurringPrices.filter((r) => r.money.amount !== null && r.money.amount > 0 && !!r.frequency.unit);
+  if (!stated.length) return [];
+  const span = (p) => DAYS_PER[p.interval] * (p.intervalCount || 1);
+  const covers = (p) => stated.some((r) => {
+    const days = DAYS_PER[r.frequency.unit] * (r.frequency.count || 1);
+    const minor = Math.round(r.money.amount * 100);
+    if (Math.abs(span(p) - days) <= (days >= 365 ? 1 : 3)) return p.amount === minor || p.introAmount === minor;
+    const said = sentenceAt2(a.text, r.index);
+    const names = p.interval === "year" ? /\b(?:year|yearly|annual(?:ly)?|12 months)\b/i : p.interval === "month" ? /\b(?:\d+ months|quarter(?:ly)?|semi-?annual(?:ly)?|month(?:ly)?)\b/i : /\b(?:weeks?|week(?:ly)?)\b/i;
+    return span(p) > days && names.test(said) && Math.abs(p.amount * days / span(p) - minor) <= Math.max(2, span(p) / days * 1.5);
+  });
+  const seen = /* @__PURE__ */ new Set();
+  const missing = sold.filter((p) => {
+    const k = `${p.amount}|${p.currency}|${p.interval}|${p.intervalCount}|${p.trialDays ?? 0}`;
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return !covers(p);
+  });
+  if (!missing.length) return [];
+  const label = (p) => `${planLabel2(p)} (${money3(p.amount, p.currency)} every ${p.intervalCount > 1 ? `${p.intervalCount} ${p.interval}s` : p.interval}${p.trialDays ? `, after a ${p.trialDays}-day free trial` : ""})`;
+  return [`Your Terms of service state the renewal price as \u201C${sentenceAt2(a.text, stated[0].index)}\u201D but do not state ${missing.slice(0, 3).map(label).join(", ")}, which you also sell \u2014 update the Terms to list every plan you sell`];
+}
 function termsPlanFix(mismatches) {
+  if (mismatches.length === 1 && /list every plan you sell$/.test(mismatches[0])) return "Add each plan you sell to the renewal section of your Terms (its price, billing interval and any free trial), or state the renewal terms without a specific price.";
   if (mismatches.length > 1) return "Update the trial and the renewal price in your Terms to what subscribers get.";
   return /trial subscribers get$/.test(mismatches[0] ?? "") ? "Update the trial in your Terms to the trial subscribers get." : "Update the renewal price in your Terms to the price subscribers are charged.";
 }
 function currentTermsPlans(ctx) {
   const billing = ctx.config && ctx.config.platform !== "custom" ? (ctx.config.plans ?? []).filter((p) => p.amount > 0 && p.interval) : [];
   const base = billing.length ? [...withIntroOfferTerms(billing, ctx.facts?.introOffers), ...(ctx.referencePlans ?? []).filter((p) => p.source !== "declared" && p.amount > 0 && p.interval)] : referencePlans(ctx);
+  return withSessionTrials(base, ctx);
+}
+function soldTermsPlans(ctx) {
+  return withSessionTrials(referencePlans(ctx), ctx);
+}
+function withSessionTrials(base, ctx) {
   if (!base.length) return [];
   const sessionTrials = /* @__PURE__ */ new Map();
+  const knownBy = /* @__PURE__ */ new Set();
   for (const c of ctx.checkoutConfigs ?? []) {
+    if (c.planId && typeof c.trialDays === "number") knownBy.add(c.planId);
     if (!c.planId || !(typeof c.trialDays === "number" && c.trialDays > 0)) continue;
     sessionTrials.set(c.planId, [...sessionTrials.get(c.planId) ?? [], c.trialDays]);
   }
+  const declared = (ctx.referencePlans ?? []).filter((p) => p.source === "declared");
   const out = [];
   for (const p of base) {
     const plan2 = { amount: p.amount, currency: p.currency || "usd", interval: p.interval, intervalCount: p.intervalCount || 1, ...p.name ? { planName: p.name } : {}, ...p.introAmount !== void 0 ? { introAmount: p.introAmount } : {} };
-    const trials = [...p.trialDays ? [p.trialDays] : [], ...sessionTrials.get(p.id) ?? []];
+    const own = declared.filter((d) => d.id === p.id);
+    const declaredTrials = own.map((d) => d.trialDays ?? 0).filter((t) => t > 0);
+    const known = (p.trialDays ?? 0) > 0 || knownBy.has(p.id) || own.some((d) => typeof d.trialDays === "number");
+    if (known) plan2.trialKnown = true;
+    const trials = [...p.trialDays ? [p.trialDays] : [], ...sessionTrials.get(p.id) ?? [], ...declaredTrials];
     if (!trials.length) out.push(plan2);
     for (const t of new Set(trials)) out.push({ ...plan2, trialDays: t });
   }
@@ -22379,6 +22457,22 @@ function unreadable(d) {
 function q(c) {
   return `\u201C${c.quote}\u201D`;
 }
+function priceClauseOf(units) {
+  const failing = units.filter((u) => u.status === "fail");
+  if (!failing.length || !failing.every((u) => typeof u.meta?.priceChangeClause === "string")) return void 0;
+  return failing[0].meta.priceChangeClause;
+}
+function unilateralPriceChange(text) {
+  const list2 = sentences(normalizeText(text));
+  for (let i = 0; i < list2.length; i++) {
+    const s2 = list2[i].text;
+    if (!PRICE_CHANGE_RE.test(s2)) continue;
+    if (PRICE_NOTICE_RE.test(s2) || PRICE_NOTICE_RE.test(list2[i + 1]?.text ?? "")) continue;
+    const t = s2.replace(/\s+/g, " ").trim();
+    return t.length > 200 ? `${t.slice(0, 197)}\u2026` : t;
+  }
+  return void 0;
+}
 function marketingClaims(captures) {
   const out = [];
   const seen = /* @__PURE__ */ new Set();
@@ -22394,12 +22488,13 @@ function marketingClaims(captures) {
   }
   return out;
 }
-var KIND_LABEL, TERMS_PATH, cancellationPolicyConsistent, renewalTermsPresent, refundPolicyConsistent, TERMS_CHECKS;
+var KIND_LABEL, TERMS_PATH, cancellationPolicyConsistent, renewalTermsPresent, PRICE_CHANGE_RE, PRICE_NOTICE_RE, refundPolicyConsistent, TERMS_CHECKS;
 var init_terms_of_service = __esm({
   "packages/rules/src/checks/terms-of-service.ts"() {
     "use strict";
     init_policy_docs();
     init_result();
+    init_text();
     init_terms_plans();
     KIND_LABEL = {
       terms: "Terms of service",
@@ -22518,12 +22613,16 @@ var init_terms_of_service = __esm({
         if (!terms2.length) return noDocuments(id, "Terms of service", input, ["terms"]);
         const cancelDocs = docsOf(input, ["cancellation"]).filter((d) => d.readable);
         const plans = currentTermsPlans(input.ctx);
+        const sold = soldTermsPlans(input.ctx);
+        const noticeLaw = input.requirements.some((r) => r.id === "US-CA.17602.g.2.terms") ? "California law (Cal. Bus. & Prof. Code \xA7 17602(g)(2))" : void 0;
         const allMismatches = [];
         const units = terms2.map((d) => {
           if (!d.readable) return unreadable(d);
           const refs2 = captureRefs(d.capture);
           const meta = { url: policySourceUrl(d.capture.url), kind: d.kind };
-          const mismatches = termsPlanMismatches(d.capture.text ?? "", plans);
+          const trialUnsure = termsTrialUncertain(plans, input.ctx.facts);
+          const stale = termsPlanMismatches(d.capture.text ?? "", plans, { skipTrial: trialUnsure });
+          const mismatches = stale.length ? stale : termsMissingPlans(d.capture.text ?? "", sold);
           if (mismatches.length) {
             allMismatches.push(...mismatches);
             return { label: d.label, status: "fail", detail: mismatches.join(". "), confidence: 0.8, refs: refs2, meta: { ...meta, planMismatches: mismatches } };
@@ -22551,6 +22650,22 @@ var init_terms_of_service = __esm({
               meta: { ...meta, missing: ["how_to_cancel"] }
             };
           }
+          const priceClause = noticeLaw ? unilateralPriceChange(d.capture.text ?? "") : void 0;
+          if (priceClause) {
+            return {
+              label: d.label,
+              status: "fail",
+              detail: `says \u201C${priceClause}\u201D without promising advance notice, but ${noticeLaw} requires a notice of a price change, with how to cancel, 7 to 30 days before it takes effect for existing subscribers (the price-change notice task sends it) \u2014 add the notice promise to that clause`,
+              confidence: 0.7,
+              refs: refs2,
+              quote: priceClause,
+              meta: { ...meta, priceChangeClause: priceClause }
+            };
+          }
+          const unconfirmed = trialUnsure ? termsTrialUnconfirmed(d.capture.text ?? "", plans) : void 0;
+          if (unconfirmed) {
+            return { label: d.label, status: "needs_review", detail: unconfirmed, confidence: 0.6, refs: refs2, meta: { ...meta, trialUnconfirmed: true } };
+          }
           return {
             label: d.label,
             status: "pass",
@@ -22563,11 +22678,13 @@ var init_terms_of_service = __esm({
         });
         return aggregate(id, units, {
           pass: "Your Terms state the automatic-renewal terms and how to cancel",
-          fail: allMismatches.length ? "Your Terms state a price or trial that none of your current plans has" : "Your Terms do not state the automatic-renewal terms",
+          fail: allMismatches.length ? allMismatches.every((m) => /list every plan you sell$/.test(m)) ? "Your Terms do not state every plan you sell" : "Your Terms state a price or trial that none of your current plans has" : units.every((u) => u.status !== "fail" || typeof u.meta?.priceChangeClause === "string") ? "Your Terms reserve price changes without the advance notice the law requires" : "Your Terms do not state the automatic-renewal terms",
           needs_review: "Your Terms are incomplete about the automatic renewal"
-        }, { noun: "policy document", ...allMismatches.length ? { data: { planMismatches: allMismatches, planMismatchFix: termsPlanFix(allMismatches) } } : {} });
+        }, { noun: "policy document", ...allMismatches.length ? { data: { planMismatches: allMismatches, planMismatchFix: termsPlanFix(allMismatches) } } : priceClauseOf(units) ? { data: { priceChangeClause: priceClauseOf(units) } } : {} });
       }
     };
+    PRICE_CHANGE_RE = /\b(?:we|company|the company|[A-Z][\w&.-]+)\s+(?:may|can|reserves? the right to|has the right to)\s+(?:change|modify|adjust|increase|raise|revise|update)\s+(?:our\s+|the\s+|its\s+|these\s+|any\s+)?(?:subscription\s+|membership\s+|service\s+)?(?:prices?|pricing|fees?|rates?|charges?)\b|\b(?:prices?|pricing|fees?)\s+(?:are|is)\s+subject to change\b/i;
+    PRICE_NOTICE_RE = /\bnotice\b|\bnotif(?:y|ied|ication)\b|\b(?:email|tell|inform|let)\s+you\b|\bin advance\b|\badvance\b|\bbefore (?:the|any|a|such) (?:change|increase)\b|\bprior to\b/i;
     refundPolicyConsistent = {
       id: "terms.refund_policy_consistent",
       usesText: false,
@@ -24191,6 +24308,9 @@ function classifyRaw(input) {
         const quoted = String(input.data.planMismatches[0]).replace(/ — update the Terms.*$/, "");
         return finish({ status: "needs_fix", fix: `${typeof input.data.planMismatchFix === "string" ? input.data.planMismatchFix : "Update your Terms to what subscribers are charged."} ${quoted}.` }, "contradicts_billing", checkId, "required");
       }
+      if (checkId === "terms.renewal_terms_present" && typeof input.data?.priceChangeClause === "string") {
+        return finish({ status: "needs_fix", fix: `In your Terms, after \u201C${String(input.data.priceChangeClause).slice(0, 160)}\u201D, add: "We will email you at least 7 days (and no more than 30 days) before a price change takes effect, with how to cancel."` }, "price_change_without_notice", checkId);
+      }
       if (checkId === "cancel.online_available" && input.data?.ownCancelFailed) return finish({ status: "needs_fix", fix: ownCancelFixLine(input.data.ownCancelFailed) }, "own_cancel_control_failed", checkId);
       if (checkId.startsWith("cancel.") && input.data?.billingContradicts === true) return finish({ status: "needs_fix", fix: BILLING_CONTRADICTS_FIX }, "cancel_not_in_stripe", checkId);
       if (checkId === "cancel.online_available" && input.data?.offlineOnly === true && typeof input.data?.quote === "string") {
@@ -24265,9 +24385,14 @@ function staleFix(stale) {
   const step = first2?.clears === "scan" ? "Checkbox looks at the page again by itself within a few minutes; to do it now once the change is deployed, run verifySite." : first2?.clears === "test_run" ? "Start a new test run (createTestRun) so Checkbox cancels through the page as it is now." : first2?.clears === "email" ? "Nothing to do if the newest copy is right: Checkbox judges it on its next check (verifyTask re-checks it now)." : "Nothing to do: Checkbox re-checks it on its own within a few minutes (get the plan again, or verifyTask to re-check now).";
   return `${why}. ${step}`;
 }
+function stripeConsentFix(c) {
+  if (String(c.checkId) !== "signup.consent.affirmative") return null;
+  if (!(/custom_text\.submit/.test(c.text) || c.kind === "stripe_checkout_session" || c.kind === "stripe_payment_link")) return null;
+  return `End custom_text.submit.message (the renewal terms Stripe shows next to its Subscribe button) with one sentence: "By subscribing, you agree to these renewal terms." Stripe's button keeps its label; no checkbox needed.`;
+}
 function fixFromFail(c) {
   if (String(c.checkId).startsWith("cancel.") && c.data?.needsNewTestRun === true) return `${typeof c.data?.changedAfterRun === "string" ? c.data.changedAfterRun : "The page the test cancellation went through"} no longer shows a working cancel option. Put the online cancel option back on that page and deploy: the next scan re-checks it (or start a new test run that cancels through it).`;
-  return withPlanTerms(contentFixLine(String(c.checkId), c.data) ?? contentFixFromText(String(c.checkId), c.detail) ?? introFixFromText(c) ?? trialLengthFixFromText(c) ?? planFrequencyFix(c) ?? FAIL_FIX[String(c.checkId)] ?? "Apply the change in the task for this check.", c.data);
+  return withPlanTerms(contentFixLine(String(c.checkId), c.data) ?? contentFixFromText(String(c.checkId), c.detail) ?? introFixFromText(c) ?? trialLengthFixFromText(c) ?? planFrequencyFix(c) ?? stripeConsentFix(c) ?? FAIL_FIX[String(c.checkId)] ?? "Apply the change in the task for this check.", c.data);
 }
 function withPlanTerms(fix, data) {
   if (!/<(?:price|interval)>/.test(fix)) return fix;
@@ -24391,7 +24516,7 @@ function classifyFindings(findings) {
     info: classify({ checkId: f.checkId, status: f.status, detail: f.detail, missing: f.evidence?.missing, data: f.data, origin: "evaluation", siblings })
   }));
 }
-var STATUS_LABELS, CHECK_TIERS, LIVE_CHECKS, has, extrasOnlyFinding, notCheckedByDefaultUnits, isStripeInput, HOSTED_BEFORE_LINE_NOTE, HOSTED_SMALLER_NEAR_BUTTON_NOTE, HOSTED_CHECKOUT_NOTE, family, isEmailCheck, ask, NOT_CHECKED_BY_DEFAULT_REASON, NOT_CHECKED_BY_DEFAULT_NOTE, notCheckedByDefault, PLAN_FACTS_FIX, STRIPE_CANCEL_UNREAD_FIX, BILLING_CONTRADICTS_FIX, VERIFIED_FROM_STRIPE_NOTE, VERIFIED_FROM_HOSTED_NOTE, HOSTED_UNLINKED_FIX, NOT_CHECKED_CANCEL_FIX, CANCEL_STEPS_FIX, EMAIL_EXISTS, RULES, NOT_CHECKED_BY_DEFAULT_RULES, STATUS_RULES, NY_EMAIL_ONLY_LABEL, NY_EMAIL_ONLY_NOTE, RECOMMENDED_FIX_LABEL, STRIPE_HOSTED_UNITS, PLATFORM_NAMES3, PORTAL_REQUIRED_FIX, PORTAL_IN_APP_BROKEN_FIX, PORTAL_OFFLINE_FIX, PAYMENT_LINK_PORTAL_FIX, PAYMENT_LINK_OFFLINE_FIX, RENEWAL_LINE_EXAMPLE, FAIL_FIX, CHECKS_PASS_UNREAD_LABEL, STATUS_RANK;
+var STATUS_LABELS, CHECK_TIERS, LIVE_CHECKS, has, extrasOnlyFinding, notCheckedByDefaultUnits, isStripeInput, HOSTED_BEFORE_LINE_NOTE, HOSTED_SMALLER_NEAR_BUTTON_NOTE, HOSTED_CHECKOUT_NOTE, family, isEmailCheck, ask, NOT_CHECKED_BY_DEFAULT_REASON, NOT_CHECKED_BY_DEFAULT_NOTE, notCheckedByDefault, PLAN_FACTS_FIX, STRIPE_CANCEL_UNREAD_FIX, BILLING_CONTRADICTS_FIX, VERIFIED_FROM_STRIPE_NOTE, VERIFIED_FROM_HOSTED_NOTE, HOSTED_UNLINKED_FIX, NOT_CHECKED_CANCEL_FIX, CANCEL_STEPS_FIX, EMAIL_EXISTS, RULES, NOT_CHECKED_BY_DEFAULT_RULES, STATUS_RULES, NY_EMAIL_ONLY_LABEL, NY_EMAIL_ONLY_NOTE, RECOMMENDED_FIX_LABEL, STRIPE_HOSTED_UNITS, PLATFORM_NAMES3, PORTAL_REQUIRED_FIX, PORTAL_IN_APP_BROKEN_FIX, PORTAL_OFFLINE_FIX, PAYMENT_LINK_PORTAL_FIX, PAYMENT_LINK_OFFLINE_FIX, RENEWAL_LINE_EXAMPLE, OWN_PAGE_CONSENT_FIX, FAIL_FIX, CHECKS_PASS_UNREAD_LABEL, STATUS_RANK;
 var init_status = __esm({
   "packages/rules/src/status.ts"() {
     "use strict";
@@ -24656,6 +24781,9 @@ var init_status = __esm({
       // Pilot round 11 (change-guard): an intro / discounted price the Stripe session does not apply.
       // Pilot round 12: an intro price with no intro terms to compare it with (never a pass), a stated intro price that is
       // not the real one, and terms that sit on another page than the payment page.
+      // Round 47 (pilot 46 core-ai-builder): a Terms trial Checkbox cannot tie to any plan yet (the trial is set in Checkout
+      // code, which Stripe never returns): not a fail on the Terms; the Checkout params task tells each plan's trial.
+      { code: "terms_trial_unconfirmed", category: "missing_evidence", when: has(/finish the stripe checkout params task first/), build: () => ({ status: "not_checked", fix: "Finish the Stripe Checkout params task first: register the params your code sends (createStripeCheckoutConfig, or verifyTask with them), so Checkbox knows each plan's trial; then it compares your Terms with it." }) },
       { code: "intro_terms_missing", category: "missing_evidence", when: has(/no intro terms were given/), build: () => ({ status: "not_checked", fix: "Declare the intro price or coupon in Site settings \u2192 Your offer \u2192 Introductory price or coupon (an agent passes it in updateSetupSession plans[]: intro_amount, intro_percent_off or intro_amount_off, with intro_periods), so Checkbox can compare the promo. On Stripe Checkout, applying the coupon in the Checkout Session params works too." }) },
       { code: "intro_price_mismatch", category: "content", when: has(/intro price is .{1,40} — state the intro price subscribers will actually pay/), build: () => ({ status: "needs_fix", fix: 'State the real intro price, then the regular price ("$8.00 for your first month, then $10.00 every month until you cancel").' }) },
       { code: "terms_on_other_page", category: "content", when: has(/shown on another page than the payment page/), build: () => ({ status: "needs_fix", fix: "Show the disclosure on the payment page, directly above the purchase button." }) },
@@ -24688,7 +24816,8 @@ var init_status = __esm({
         build: (c) => ({
           status: "needs_fix",
           // Round 45 (founder): the default fix is the sentence for everyone; nothing Vermont / D.C.-specific.
-          fix: `Add one sentence to the renewal terms next to the button: "By clicking \u201CSubscribe\u201D, you agree to these renewal terms." (use your button's own text). Your button keeps its label; no checkbox needed.`
+          // Round 47 (pilot 46 site-indie-dev): on Stripe Checkout / a Payment Link, the sentence the corrected params write.
+          fix: stripeConsentFix(c) ?? OWN_PAGE_CONSENT_FIX
         })
       },
       {
@@ -25185,6 +25314,7 @@ var init_status = __esm({
     PAYMENT_LINK_PORTAL_FIX = `Turn on "Cancel subscriptions" in the Stripe customer portal (Stripe Dashboard \u2192 Settings \u2192 Billing \u2192 Customer portal), copy its billing.stripe.com login link and add it to your site's footer as a "Cancel subscription" link.`;
     PAYMENT_LINK_OFFLINE_FIX = `${PAYMENT_LINK_PORTAL_FIX} Then replace the "email / call us to cancel" line with "Cancel anytime online" and that link.`;
     RENEWAL_LINE_EXAMPLE = "Renews automatically every <interval> at <price> (plus applicable taxes) until you cancel.";
+    OWN_PAGE_CONSENT_FIX = 'End the renewal terms next to your button with one sentence: "By subscribing, you agree to these renewal terms." (or name your button: "By clicking \u201C<button text>\u201D, you agree to these renewal terms."). Your button keeps its label; no checkbox needed.';
     FAIL_FIX = {
       "signup.disclosure.autorenew_language": `Add one line under the price, before the card and email fields: "${RENEWAL_LINE_EXAMPLE}"`,
       "signup.disclosure.price": "State the recurring price in the renewal line (the amount actually charged each time).",
@@ -25196,7 +25326,8 @@ var init_status = __esm({
       "signup.disclosure.conspicuous": "Show the renewal line at body size, semibold, in your normal text colour.",
       // Round 42 (founder: the lowest-friction fix that meets the cited law): one sentence, never a checkbox or a relabelled
       // button, except where Vermont's separate opt-in applies (fixFromFail says so from the finding).
-      "signup.consent.affirmative": `End the renewal terms next to your button with one sentence: "By clicking \u201CSubscribe\u201D, you agree to these renewal terms." (use your button's own text). Your button keeps its label; no checkbox needed.`,
+      // Round 47 (pilot 46 site-indie-dev): the same sentence as Checkbox's own renewal line and the Stripe custom_text fix.
+      "signup.consent.affirmative": OWN_PAGE_CONSENT_FIX,
       "signup.consent.not_prechecked": "Leave the consent checkbox unchecked by default.",
       "confirmation.email.sent": "Send an acknowledgment email right after sign-up (Checkbox has a template).",
       "confirmation.email.terms": "Restate the renewal terms (price, frequency, until cancelled) in the acknowledgment.",
@@ -29296,7 +29427,15 @@ function linkName(link) {
   return product && product.trim() || link.id;
 }
 function signupStripeObjects(input) {
-  const declared = declaredPlansFrom(reconcileDeclaredPlans(input.declaredPlans ?? [], input.plans).plans);
+  const declaredRaw = declaredPlansFrom(reconcileDeclaredPlans(input.declaredPlans ?? [], input.plans).plans);
+  const sessionsForSite = checkoutSessionsForSite(input.checkoutSessions ?? [], input.captures ?? [], input.checkoutType);
+  const repriced = repricedPlans({ plans: input.plans, declared: declaredRaw, configs: input.checkoutConfigs ?? [], sessions: sessionsForSite });
+  const declared = declaredRaw.map((d) => {
+    const r = repriced.get(d.id);
+    if (!r) return d;
+    const { introAmount: _i, introPeriods: _p, ...rest } = d;
+    return { ...rest, id: r.price.id, amount: r.price.amount, currency: r.price.currency, ...r.price.productId ? { productId: r.price.productId } : {}, ...d.trialDays === void 0 && r.price.trialDays ? { trialDays: r.price.trialDays } : {} };
+  });
   const referencePlans2 = [...declared];
   const checkoutConfigs = [];
   const seen = /* @__PURE__ */ new Set();
@@ -29307,7 +29446,8 @@ function signupStripeObjects(input) {
     seen.add(name);
     modelled.push({ row, m: modelCheckoutConfig(row.params, { id: row.id, ...row.name ? { name: row.name } : {}, asOf: input.asOf, plans: input.plans }) });
   }
-  const replaced = replacedCheckoutConfigs(modelled.map((x) => x.row), { plans: input.plans, declared });
+  const replaced = replacedCheckoutConfigs(modelled.map((x) => x.row), { plans: input.plans, declared: declaredRaw });
+  for (const { row } of modelled) if (lineItemPriceIds(row.params).some((id) => repriced.has(id))) replaced.add(row.id);
   const current = modelled.filter((x) => !replaced.has(x.row.id));
   for (const { row, m } of current) {
     if (m.capture) {
@@ -29326,8 +29466,20 @@ function signupStripeObjects(input) {
     if (m.plan) referencePlans2.push({ ...m.plan, source: "checkout_config", ...row.name ? { label: row.name } : {} });
     if (checkoutConfigs.length >= MAX_MONITORED_CHECKOUT_CONFIGS) break;
   }
+  const sessionEvidence = [...new Map([...repriced.values()].filter((r) => r.via === "session" && r.session).map((r) => [r.session.id, r.session])).values()];
+  if (checkoutConfigs.length) {
+    for (const session of sessionEvidence) {
+      const ids = (session.lineItems ?? []).map((li) => li.price).filter((x) => !!x);
+      if (current.some((x) => lineItemPriceIds(x.row.params).some((id) => ids.includes(id)))) continue;
+      const product = session.lineItems?.find((li) => li.productName)?.productName?.trim();
+      const name = `latest Checkout Session${product ? ` \xB7 ${product}` : ""}`;
+      const m = modelCheckoutConfig(paymentLinkParams(session, { knownPrices: input.plans, trialFromPrice: true }), { id: session.id, name, asOf: input.asOf, plans: input.plans });
+      if (m.capture) checkoutConfigs.push({ id: session.id, name, capture: { ...m.capture, siteId: input.siteId }, consentRequired: m.consentRequired, kind: "checkout_config", ...m.plan ? { planId: m.plan.id } : {} });
+      if (m.plan) referencePlans2.push({ ...m.plan, source: "checkout_config", label: name });
+    }
+  }
   if (!checkoutConfigs.length) {
-    const sessions = checkoutSessionsForSite(input.checkoutSessions ?? [], input.captures ?? [], input.checkoutType);
+    const sessions = sessionsForSite;
     for (const session of sessions) {
       const product = session.lineItems?.find((li) => li.productName)?.productName?.trim();
       const base = `latest Checkout Session${product ? ` \xB7 ${product}` : ""}`;
@@ -29372,9 +29524,15 @@ function replacedCheckoutConfigs(rows, opts) {
     return { row, ids, plan: resolvePriceIds(row.params, account).resolved, key: withoutPrices(row.params) };
   });
   const out = /* @__PURE__ */ new Set();
+  const isDeclared = (ids) => ids.some((id) => declared.some((d) => d.id === id));
   items.forEach((x, i) => {
-    if (!x.ids.length || x.ids.some((id) => declared.some((d) => d.id === id))) return;
+    if (!x.ids.length) return;
     const newer = items.slice(0, i).filter((y) => !out.has(y.row.id) && y.plan && !y.ids.some((id) => x.ids.includes(id)));
+    if (isDeclared(x.ids)) {
+      const slot2 = x.plan ? planSlot(x.plan, account) : void 0;
+      if (slot2 && !items.slice(0, i).some((y) => y.plan?.id === x.plan.id) && newer.some((y) => y.key === x.key && !isDeclared(y.ids) && planSlot(y.plan, account) === slot2 && !!replacedBy(x.plan, [y.plan], account))) out.add(x.row.id);
+      return;
+    }
     if (!x.plan) {
       if (account.length && newer.some((y) => y.key === x.key)) out.add(x.row.id);
       return;
@@ -29390,6 +29548,64 @@ function replacedCheckoutConfigs(rows, opts) {
     const named = declared.filter((d) => planSlot(d, account) === slot);
     if (replacedBy(x.plan, named, account) && same.length > 0 && same.every((y) => named.some((d) => d.id === y.plan.id))) out.add(x.row.id);
   });
+  return out;
+}
+function sessionPrice(s2, account) {
+  const ids = [...new Set((s2.lineItems ?? []).filter((li) => li && (li.interval || li.price)).map((li) => li.price).filter((x) => !!x))];
+  if (ids.length !== 1) return void 0;
+  return account.find((p) => p.id === ids[0]);
+}
+function repricedPlans(input) {
+  const account = input.plans;
+  const out = /* @__PURE__ */ new Map();
+  if (!account.length) return out;
+  const items = input.configs.map((row) => ({ row, ids: lineItemPriceIds(row.params), plan: resolvePriceIds(row.params, account).resolved, key: withoutPrices(row.params), at: Date.parse(row.registeredAt ?? "") || 0 }));
+  const code2 = newestFirst(input.sessions.filter((s2) => !s2.paymentLink && !s2.checkboxTestRun && typeof s2.created === "number"));
+  const termsKey2 = (x) => `${x.amount}|${(x.currency || "usd").toLowerCase()}|${x.interval}|${x.intervalCount || 1}`;
+  const declaredPrice = /* @__PURE__ */ new Map();
+  for (const d of input.declared) {
+    const byId = account.find((a) => a.id === d.id);
+    const same = account.filter((a) => termsKey2(a) === termsKey2(d));
+    const p = byId ?? (same.length === 1 ? same[0] : void 0);
+    if (p) declaredPrice.set(d.id, p);
+  }
+  const declaredIds = /* @__PURE__ */ new Set([...input.declared.map((d) => d.id), ...[...declaredPrice.values()].map((p) => p.id)]);
+  const candidates = /* @__PURE__ */ new Map();
+  for (const p of declaredPrice.values()) candidates.set(p.id, p);
+  for (const x of items) if (x.plan) candidates.set(x.plan.id, x.plan);
+  for (const p of candidates.values()) {
+    const slot = planSlot(p, account);
+    if (!slot) continue;
+    const newQ = (q3) => !!q3 && q3.id !== p.id && q3.amount !== p.amount && !declaredIds.has(q3.id) && planSlot(q3, account) === slot;
+    const pIdx = items.findIndex((x) => x.plan?.id === p.id);
+    if (pIdx >= 0) {
+      const byConfig = items.slice(0, pIdx).find((y) => newQ(y.plan) && y.key === items[pIdx].key);
+      if (byConfig) {
+        const pAfter = code2.some((s2) => sessionPrice(s2, account)?.id === p.id && byConfig.at > 0 && s2.created * 1e3 > byConfig.at);
+        if (!pAfter) {
+          out.set(p.id, { price: byConfig.plan, via: "config" });
+          continue;
+        }
+      }
+    }
+    const newest = code2.find((s2) => {
+      const q3 = sessionPrice(s2, account);
+      return !!q3 && planSlot(q3, account) === slot;
+    });
+    const q2 = newest ? sessionPrice(newest, account) : void 0;
+    if (!newest || !newQ(q2)) continue;
+    const qIdx = items.findIndex((y) => y.plan?.id === q2.id);
+    if (qIdx >= 0 && pIdx >= 0 && qIdx > pIdx) continue;
+    if (pIdx >= 0) {
+      const registered = Math.max(...items.filter((x) => x.plan?.id === p.id).map((x) => x.at));
+      if (!registered || newest.created * 1e3 <= registered) continue;
+    } else {
+      if (!declaredIds.has(p.id)) continue;
+      if (!code2.some((s2) => s2 !== newest && sessionPrice(s2, account)?.id === p.id && s2.created < newest.created)) continue;
+    }
+    out.set(p.id, qIdx >= 0 ? { price: q2, via: "config" } : { price: q2, via: "session", session: newest });
+  }
+  for (const [id, p] of declaredPrice) if (id !== p.id && out.has(p.id)) out.set(id, out.get(p.id));
   return out;
 }
 var MAX_MONITORED_CHECKOUT_CONFIGS;
@@ -33782,13 +33998,13 @@ function pricingPageFixesRaw(fixes) {
   }
   return out;
 }
-function stripeConsentFix(text, params) {
+function stripeConsentFix2(text, params) {
   const cc = params?.consent_collection;
   const separate = /^(.*?) asks? for a separate opt-in to the renewal/.exec(text);
   if (separate) {
     return cc?.terms_of_service === "required" ? text : `${separate[1]} ${/ and /.test(separate[1]) ? "ask" : "asks"} for a separate opt-in to the renewal: set consent_collection: { terms_of_service: "required" } in the params, with the renewal terms in custom_text.terms_of_service_acceptance.message.`;
   }
-  if (/^End the renewal terms next to your button with one sentence/.test(text)) {
+  if (/^End the renewal terms next to your button with one sentence|^End custom_text\.submit\.message \(the renewal terms Stripe shows/.test(text)) {
     return `End custom_text.submit.message with "By subscribing, you agree to these renewal terms.": next to Stripe's own Subscribe button that is the consent to the renewal terms. No consent checkbox needed${cc?.terms_of_service === "required" ? "" : ` (if you had Stripe's checkbox, consent_collection: { terms_of_service: "required" }, keeping it works too)`}.`;
   }
   if (!/^(Ask for a separate yes to the renewal|Add one unchecked checkbox)/.test(text)) return text;
@@ -34072,6 +34288,13 @@ function checkoutConsentPasses(x) {
   if (!c) return void 0;
   return c.status === "pass" || !!c.compliance_status && OK_STATUSES.has(c.compliance_status);
 }
+function consentByOf(params) {
+  if (!params || typeof params !== "object") return void 0;
+  const p = params;
+  if (p.consent_collection?.terms_of_service === "required") return "consent_collection";
+  const submit = p.custom_text?.submit?.message;
+  return typeof submit === "string" && /\bBy (?:subscribing|clicking|starting)\b[^.]*\byou agree\b/i.test(submit) ? "submit_sentence" : void 0;
+}
 function resolvePageConsent(checks, config) {
   const checkouts = checks.filter((x) => x.type === "stripe_checkout" && x.report);
   for (const page of checks.filter((x) => x.consent_on_stripe)) {
@@ -34080,9 +34303,20 @@ function resolvePageConsent(checks, config) {
     const passing = paired.filter((x) => checkoutConsentPasses(x) === true);
     const failing = paired.filter((x) => checkoutConsentPasses(x) === false);
     const names = (list2) => list2.map((x) => `"${x.name}"`).join(", ");
-    const note = failing.length ? `Consent is collected on Stripe Checkout, not on this page: fix consent_collection in ${names(failing)} (that entry fails this run). No checkbox is needed on this page.` : passing.length ? `Consent is collected on Stripe Checkout and passes there: ${names(passing)} set${passing.length === 1 ? "s" : ""} consent_collection.terms_of_service = "required" (checked in this run). No checkbox is needed on this page.` : `Consent is collected on Stripe Checkout, not on this page. checkbox.json has no stripe_checkout entry for ${plans.length === 1 ? `plan "${plans[0]}"` : "these plans"}, so this run did not check it: add one (checkbox ci init finds the checkout.sessions.create call). No checkbox is needed on this page.`;
+    const note = failing.length ? `Consent is collected on Stripe Checkout, not on this page: fix consent_collection in ${names(failing)} (that entry fails this run). No checkbox is needed on this page.` : passing.length ? `Consent is collected on Stripe Checkout and passes there: ${consentHow(passing, names)} (checked in this run). No checkbox is needed on this page.` : `Consent is collected on Stripe Checkout, not on this page. checkbox.json has no stripe_checkout entry for ${plans.length === 1 ? `plan "${plans[0]}"` : "these plans"}, so this run did not check it: add one (checkbox ci init finds the checkout.sessions.create call). No checkbox is needed on this page.`;
     page.warnings = [note, ...page.warnings.filter((w) => w !== note)];
   }
+}
+function consentHow(passing, names) {
+  const box = passing.filter((x) => x.consent_by === "consent_collection");
+  const sentence = passing.filter((x) => x.consent_by === "submit_sentence");
+  const other = passing.filter((x) => !x.consent_by);
+  const verb = (l) => l.length === 1 ? "s" : "";
+  const parts = [];
+  if (box.length) parts.push(`${names(box)} set${verb(box)} consent_collection.terms_of_service = "required"`);
+  if (sentence.length) parts.push(`${names(sentence)} end${verb(sentence)} custom_text.submit with the consent sentence next to Stripe's Subscribe button (no consent_collection)`);
+  if (other.length) parts.push(`${names(other)} pass${other.length === 1 ? "es" : ""} the consent check`);
+  return parts.join("; ");
 }
 function sitePlansDifferInCi(message, from = "checkbox.json") {
   const m = /\(you sent (.+?); (site_\w+) has (.+?)\)(?:, then check again|\. This result is judged)/.exec(message);
@@ -34109,7 +34343,8 @@ async function reverifyCorrection(job, engine, corrected) {
   }
 }
 async function runJob(job, engine, config, opts = {}) {
-  const base = { name: job.name, type: job.type, ...job.plan ? { plan: job.plan } : {}, target: { ...job.target }, ...job.fromSource ? { fromSource: true } : {}, warnings: [...job.warnings] };
+  const consentBy = job.type === "stripe_checkout" ? consentByOf(job.body?.params) : void 0;
+  const base = { name: job.name, type: job.type, ...job.plan ? { plan: job.plan } : {}, target: { ...job.target }, ...job.fromSource ? { fromSource: true } : {}, ...consentBy ? { consent_by: consentBy } : {}, warnings: [...job.warnings] };
   if (job.error) return { ...base, status: "error", label: "Could not run", message: job.error, fixes: [] };
   if (job.skip || !job.body) return { ...base, status: "skipped", label: "Skipped", message: job.skip ?? "nothing to check", fixes: [] };
   if (job.notChecked) return { ...base, status: "needs_review", label: "Not checked: trial unknown", message: job.notChecked, fixes: [] };
@@ -34168,7 +34403,7 @@ async function runJob(job, engine, config, opts = {}) {
   if (consentCovered) report = consentOnStripeCovered(report);
   const status = ciStatusOf(report);
   const params = job.type === "stripe_checkout" ? job.body?.params ?? void 0 : void 0;
-  let fixes = (status === "pass" || status === "not_applicable" ? [] : fixesOf(report, false, job.type === "stripe_checkout" || job.type === "page" || job.type === "disclosure")).map((f) => ciVocabulary(job.type === "stripe_checkout" ? stripeConsentFix(f, params) : f));
+  let fixes = (status === "pass" || status === "not_applicable" ? [] : fixesOf(report, false, job.type === "stripe_checkout" || job.type === "page" || job.type === "disclosure")).map((f) => ciVocabulary(job.type === "stripe_checkout" ? stripeConsentFix2(f, params) : f));
   const tagsLeft = job.type === "email" && status !== "pass" ? (report.warnings ?? []).find((w) => w.code === "unresolved_placeholders") : void 0;
   if (tagsLeft) {
     const tags = [...new Set(tagsLeft.message.match(/\{\{\{?\s*[\w.-]+\s*\}?\}\}|\*\|[\w.-]+\|\*/g) ?? [])];
@@ -34194,7 +34429,7 @@ async function runJob(job, engine, config, opts = {}) {
   if (unread) {
     const consentRead = !(job.unresolved ?? []).some((p) => /^(?:consent_collection|\.\.\.)/.test(p));
     const consentFails = (report.checks ?? []).some((c) => c.check_id === "signup.consent.affirmative" && (c.status === "fail" || c.compliance_status === "needs_fix"));
-    if (consentRead && consentFails && params?.consent_collection?.terms_of_service !== "required") literal.push(stripeConsentFix("Add one unchecked checkbox", params));
+    if (consentRead && consentFails && params?.consent_collection?.terms_of_service !== "required") literal.push(stripeConsentFix2("Add one unchecked checkbox", params));
     fixes.unshift(...literal);
   }
   const offer = !unread && status === "needs_review" && job.type === "stripe_checkout" ? unverifiedOffer(report) : void 0;
@@ -34605,9 +34840,17 @@ function restoreStylingLine(x) {
 }
 function displayFixes(x) {
   if (x.type === "stripe_checkout" && x.anchored?.removed?.length && (x.status === "fail" || x.status === "needs_review")) {
-    const lines = x.anchored.removed.map((l) => l.trim()).filter(Boolean);
+    const lines = [...new Set(x.anchored.removed.map((l) => l.trim()).filter(Boolean))];
     const quoted = lines.slice(0, 3).map((l) => `"${l}"`).join(", ");
-    return [`Restore the ${lines.length === 1 ? "line" : "lines"} this change removed from these params: ${quoted}${lines.length > 3 ? ", \u2026" : ""} (or use the corrected params).`, ...x.fixes];
+    const restore2 = `Restore the ${lines.length === 1 ? "line" : "lines"} this change removed from these params: ${quoted}${lines.length > 3 ? ", \u2026" : ""}`;
+    const alt = alternativeFixIndex(x, lines);
+    if (alt < 0) return [`${restore2} (or use the corrected params).`, ...x.fixes];
+    const others = x.fixes.filter((_, i) => i !== alt);
+    return [
+      `Option A: ${restore2}.${others.length ? " The other fixes below still apply." : ""} Pick Option A or Option B, not both.`,
+      `Option B${x.corrected ? " (the corrected params implement this one)" : ""}: ${x.fixes[alt]}`,
+      ...others
+    ];
   }
   const restore = restoreStylingLine(x);
   if (!restore) return x.fixes;
@@ -34638,6 +34881,11 @@ function displayFixes(x) {
   });
   return [...new Set(merged), ...kept];
 }
+function alternativeFixIndex(x, removed) {
+  const consent = removed.some((l) => /^['"]?consent_collection['"]?\s*:/.test(l));
+  if (!consent) return -1;
+  return x.fixes.findIndex((f) => /custom_text\.submit[\s\S]*\byou agree\b|consent sentence/i.test(f));
+}
 function periodWord2(w) {
   const t = w.toLowerCase();
   if (t === "mo" || t.startsWith("month")) return "month";
@@ -34651,6 +34899,9 @@ function removedText(removed) {
 }
 function displayCorrected(x) {
   if (!x.corrected) return void 0;
+  if (x.type === "stripe_checkout" && displayFixes(x).some((f) => /^Option B \(the corrected params implement this one\)/.test(f))) {
+    return { ...x.corrected, title: `${x.corrected.title} (Option B; with Option A, keep your params and restore the removed lines instead)` };
+  }
   const restoring = (x.type === "page" || x.type === "disclosure") && !!x.anchored?.removed?.length && !!restoreStylingLine(x) && x.corrected.format === "text";
   if (!restoring) return x.corrected;
   return { ...x.corrected, title: `Or, instead of putting the removed line back: ${x.corrected.title.charAt(0).toLowerCase()}${x.corrected.title.slice(1)}` };
@@ -35419,9 +35670,24 @@ function baseDiff(cwd, base, args) {
   const cut = args.includes("--") ? args.indexOf("--") : args.length;
   const opts = args.slice(0, cut);
   const paths = args.slice(cut);
-  for (const range of [[`${base}...HEAD`], [base, "HEAD"]]) {
+  const git = (a) => execFileSync3("git", a, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], maxBuffer: 20 * 1024 * 1024 });
+  let ref;
+  try {
+    ref = git(["merge-base", base, "HEAD"]).trim() || void 0;
+  } catch {
+  }
+  for (const r of [...ref ? [ref] : [], base]) {
     try {
-      return { out: execFileSync3("git", ["diff", ...opts, ...range, ...paths], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], maxBuffer: 20 * 1024 * 1024 }) };
+      let out = git(["diff", ...opts, r, ...paths]);
+      if (opts.includes("--name-only")) {
+        try {
+          const untracked = git(["ls-files", "--others", "--exclude-standard", "--full-name", ...paths.length ? paths : ["--", ":/"]]).trim();
+          if (untracked) out = `${out.replace(/\n?$/, "\n")}${untracked}
+`;
+        } catch {
+        }
+      }
+      return { out };
     } catch (err) {
       first2 ||= String(err.stderr || err.message).trim().split("\n")[0] ?? "git failed";
     }
@@ -35477,6 +35743,7 @@ function anchorToChanges(checks, cwd, workspace, base) {
       const said = `${x.label} ${x.fix ?? ""} ${x.snippet ?? ""}`;
       const keys = STRIPE_KEYS.filter((k) => new RegExp(`\\b${k}\\b`).test(said));
       keyRemoved = keys.length ? hunks.filter((h2) => Math.abs(h2.start - line2) <= 60).flatMap((h2) => h2.removed).filter((l) => keys.some((k) => new RegExp(`^\\s*['"]?${k}['"]?\\s*:`).test(l))) : [];
+      keyRemoved = [...new Map(keyRemoved.map((l) => [l.trim(), l])).values()];
     }
     if (hunks.some((h2) => h2.count > 0 && line2 >= h2.start && line2 < h2.start + h2.count)) {
       if (keyRemoved.length) x.anchored = { from: line2, removed: keyRemoved };
@@ -35857,7 +36124,9 @@ var init_ci = __esm({
       "  --changed-only      Skip when no file the config reads changed (git diff against --base, or",
       "                      origin/$GITHUB_BASE_REF in a pull request). Never skips while a page or file it reads",
       '                      is gitignored / untracked (built HTML): give pages a "source" file to diff instead',
-      "  --base <ref>        Base for --changed-only (e.g. origin/main)",
+      '  --base <ref>        Base for --changed-only (e.g. origin/main). "This change" is the working tree (commits plus',
+      "                      uncommitted and untracked files) against the merge base, so a run before committing counts",
+      "                      the uncommitted edits as this change",
       "  --introduced-only   In a pull request, the exit code counts only the open items in files this change touches",
       "                      (and checkbox.json entries or plans it changed); items already open on the base are listed",
       '                      as "already open" but do not fail the run. Stripe NOT checked still fails under --require-stripe',
@@ -36251,8 +36520,8 @@ var init_patch2 = __esm({
 });
 
 // packages/cli/src/commands/plan/fix.ts
-import { existsSync as existsSync11, readFileSync as readFileSync15, writeFileSync as writeFileSync4 } from "node:fs";
-import { relative as relative7, resolve as resolve9 } from "node:path";
+import { existsSync as existsSync11, readdirSync as readdirSync4, readFileSync as readFileSync15, writeFileSync as writeFileSync4 } from "node:fs";
+import { join as join14, relative as relative7, resolve as resolve9 } from "node:path";
 function declaredPlans(cwd) {
   const path = findConfig(cwd);
   if (!path) return [];
@@ -36274,6 +36543,28 @@ function staleAgainstDeclared(content, plans) {
     if (same.length && !same.some((p) => (p.trial_days ?? 0) === trial)) said.push(`it says \u201C${m[0]}\u201D, but checkbox.json declares ${same.map((p) => `"${p.name}" with ${p.trial_days ? `a ${p.trial_days}-day trial` : "no trial"}`).join(", ")}`);
   }
   return said.length ? said.join("; ") : void 0;
+}
+function resolveFileHint(cwd, hint) {
+  if (existsSync11(resolve9(cwd, hint))) return hint;
+  const m = /^((?:src\/)?app)\/(?!\()(.+)$/.exec(hint);
+  if (!m) return void 0;
+  const found = [];
+  const walk4 = (dir, depth) => {
+    if (depth > 3) return;
+    let entries = [];
+    try {
+      entries = readdirSync4(resolve9(cwd, dir));
+    } catch {
+      return;
+    }
+    for (const e of entries.filter((x) => /^\([^)]+\)$/.test(x))) {
+      const sub = join14(dir, e);
+      if (existsSync11(resolve9(cwd, sub, m[2]))) found.push(join14(sub, m[2]).split("\\").join("/"));
+      walk4(sub, depth + 1);
+    }
+  };
+  walk4(m[1], 1);
+  return found.length === 1 ? found[0] : void 0;
 }
 function fixForTask(task, cwd, file, plans = declaredPlans(cwd)) {
   const base = {
@@ -36307,7 +36598,7 @@ ${task.change.edits.map((e) => e.content ?? "").join("\n")}`, plans);
       }
     };
   }
-  const candidate = file ?? (task.where.file_hint && existsSync11(resolve9(cwd, task.where.file_hint)) ? task.where.file_hint : void 0);
+  const candidate = file ?? (task.where.file_hint ? resolveFileHint(cwd, task.where.file_hint) : void 0);
   if (task.change.type === "patch" && task.change.edits.length && candidate) {
     const path = resolve9(cwd, candidate);
     let src;
@@ -36336,6 +36627,9 @@ ${task.change.edits.map((e) => e.content ?? "").join("\n")}`, plans);
   const own = task.next_action;
   if (task.change.type === "manual" && own && own.type !== "answer_question" && own.type !== "none" && own.description) {
     return { ...base, file: null, diff: null, applied: [], unmatched: [], next_action: { type: own.type, description: own.description, command: own.command ?? null } };
+  }
+  if (task.change.type === "stripe_params" && /^Nothing to change in the params\b/.test(task.change.content)) {
+    return { ...base, file: null, diff: null, applied: [], unmatched: [], next_action: { type: "create_checkout_session", description: `Nothing to merge: the params already pass. ${task.change.content.replace(/^Nothing to change in the params \([^)]*\)\.\s*/, "").replace(/call verifyTask on (task_\w+)/, "run `checkbox verify $1 --wait`")}`, command: verifyCmd } };
   }
   const how = {
     patch: `Apply change.content in ${task.where.file_hint ?? "the file that renders the page"} (pass --file <path> for an exact diff), then verify.`,
@@ -36470,7 +36764,7 @@ __export(init_exports, {
   withEvaluatedAt: () => withEvaluatedAt
 });
 import { existsSync as existsSync12 } from "node:fs";
-import { join as join14 } from "node:path";
+import { join as join15 } from "node:path";
 import { createInterface as createInterface2 } from "node:readline";
 async function findSetupSession(client, siteUrl) {
   const r = await client.sdk.setupSessions.list({ limit: 20 });
@@ -36599,7 +36893,7 @@ async function syncCheckoutConfigs(client, site, sessions, root) {
     const from = configFileOf(c.name);
     if (!from) continue;
     const sameFile = perFile.has(from.file);
-    const gone = !sameFile && !existsSync12(join14(root, from.file));
+    const gone = !sameFile && !existsSync12(join15(root, from.file));
     const current = sameFile && from.call !== void 0 && from.call <= perFile.get(from.file) && c.name === configNameOf(from.file, from.call);
     if (!sameFile && !gone || current) continue;
     if (await client.sdk.stripeCheckoutConfigs.del(c.id).then(() => true, () => false)) {

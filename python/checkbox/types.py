@@ -3235,6 +3235,20 @@ Exposure = TypedDict(
 )
 
 
+CompliancePlanNeedsALookItem = TypedDict(
+    "CompliancePlanNeedsALookItem",
+    {
+        #: The check id.
+        "check_id": str,
+        #: What a person looks at, in plain words (as in status_label).
+        "name": str,
+        #: Why it is not counted as open.
+        "why": str,
+    },
+    total=False,
+)
+
+
 #: Tasks per status.
 CompliancePlanCounts = TypedDict(
     "CompliancePlanCounts",
@@ -3546,6 +3560,8 @@ CompliancePlan = TypedDict(
         "checks_status": Literal["action_required", "verifying", "checks_pass", "blocked", "risk_accepted"],
         #: The plan status in words to show a person, from the same counts as the summary ("1 fix needed · 2 to set up", "1 decision for you"; else action_required "Fixes needed", blocked "Your call"), "Checks still running (N)" while checks are still running (verifying), compliant "Checks pass"; while an agent works the site and everything left waits for a deploy or the owner (next_action done_for_now): "Waiting on deploy and you" or "Waiting on deploy". Show this, never the machine value (`compliant` is a status name, not a legal conclusion). (optional)
         "status_label": str,
+        #: Round 47: with "Checks pass", the critical checks Checkbox left at needs_review as a grey area and counts as passing with a note (no open task owns them), named in status_label and the done next_action in plain words. Not failures and not counted. Rules not checked by default are never listed. Absent when none. (optional)
+        "needs_a_look": List["CompliancePlanNeedsALookItem"],
         #: The evaluation the plan was built from (null before the first check).
         "evaluation": Optional[str],
         #: When that evaluation ran. Unix timestamp in seconds.
@@ -4078,7 +4094,7 @@ Verification = TypedDict(
         "task": Optional[str],
         #: One task or the whole site.
         "scope": Literal["task", "site"],
-        #: pending (waiting for the confirming scan / re-evaluation), passed (Checkbox observed the expected result: every check passes or does not apply), passed_with_gaps (nothing observed fails, but some checks could not be observed: observed missing_data — not verified), passed_with_notes (nothing observed fails and the task counts as passing, but a check is still needs_review on a part that is not yours to change, such as Stripe's own page layout: see checks), not_checked (a task whose checks could only not be observed yet: nothing to change in the code; next_action says what evidence to provide), pending_live_check (an email whose content passes but that Checkbox has not seen sent for a real event yet: nothing to change; it completes on the first real send or a proof run), needs_review (nothing observed fails, but a check is still undecided, e.g. a cancellation not tried yet or a styling estimate: not done; next_action says what decides it), incomplete (every check observed passes, but something the task covers was not given to Checkbox yet, e.g. one plan's Stripe Checkout config is not registered: not done; next_action says what to register), failed (a check was observed failing: see diff), superseded (this verification did not pass, but newer evidence, such as a test run or a later evaluation, settled the task since: see superseded and follow next_action; nothing to change for it).
+        #: pending (waiting for the confirming scan / re-evaluation), passed (Checkbox observed the expected result: every check passes or does not apply), passed_with_gaps (nothing observed fails, but some checks could not be observed: observed missing_data — not verified), passed_with_notes (nothing observed fails and the task counts as passing, but a check is still needs_review on a part that is not yours to change, such as Stripe's own page layout: see checks), not_checked (a task whose checks could only not be observed yet: nothing to change in the code; next_action says what evidence to provide), pending_live_check (an email whose content passes but that Checkbox has not seen sent for a real event yet: nothing to change; it completes on the first real send or a proof run), needs_review (nothing observed fails, but a check is still undecided, e.g. a cancellation not tried yet or a styling estimate: not done; next_action says what decides it), incomplete (every check observed passes, but something the task covers was not given to Checkbox yet, e.g. one plan's Stripe Checkout config is not registered: not done; next_action says what to register), failed (a check was observed failing: see diff), superseded (this verification did not pass, or was still waiting, but newer evidence, such as a test run or a later evaluation, settled the task since: see superseded and follow next_action; nothing to change for it).
         "status": Literal["pending", "passed", "passed_with_gaps", "passed_with_notes", "not_checked", "pending_live_check", "needs_review", "incomplete", "failed", "superseded"],
         #: Set when newer evidence settled the task after this verification finished (status superseded). (optional)
         "superseded": Optional["VerificationSuperseded"],

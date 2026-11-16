@@ -329,6 +329,27 @@ export function compactSetupResult(doc: Obj, opTools: Record<string, string> = {
 const PASSING = new Set(['pass', 'informational', 'not_applicable']);
 
 /**
+ * Round 47 (pilot 46 core-new-app: the text said "Pre-check: 10 passing" while the JSON said pass 7 + informational 3):
+ * a verification's checks counted once, by status: the compact JSON's `checks` and the text summary both read this.
+ */
+export function verificationCheckCounts(v: Obj): { from_precheck: boolean; counts: Record<string, number> } {
+  const finals = (Array.isArray(v.checks) ? v.checks : []).filter(isObj);
+  const pre = isObj(v.precheck) ? v.precheck : null;
+  const preChecks = (pre && Array.isArray(pre.checks) ? pre.checks : []).filter(isObj);
+  const usePre = v.status === 'pending' || !finals.length;
+  const counts: Record<string, number> = {};
+  for (const c of usePre ? preChecks.map((x) => x.status) : finals.map((x) => x.observed)) counts[String(c)] = (counts[String(c)] ?? 0) + 1;
+  return { from_precheck: usePre, counts };
+}
+
+/** Round 47: "7 pass, 3 informational (Stripe's own layout: nothing to change)" — the counts above, in words. */
+export function countsWords(counts: Record<string, number>, only?: ReadonlySet<string>): string {
+  const order = ['pass', 'informational', 'not_applicable', 'needs_review', 'missing_data', 'fail'];
+  const keys = [...order.filter((k) => counts[k]), ...Object.keys(counts).filter((k) => !order.includes(k))].filter((k) => !only || only.has(k));
+  return keys.map((k) => `${counts[k]} ${k === 'informational' ? "informational (Stripe's own layout: nothing to change)" : k.replace(/_/g, ' ')}`).join(', ');
+}
+
+/**
  * The default verification: status, plan status, what was checked, the checks that are not passing as `diff` (with what
  * was expected and seen, the API's word), counts for the rest, and the one next_action.
  */
@@ -348,8 +369,7 @@ export function compactVerificationResult(v: Obj, opTools: Record<string, string
     if (!id || PASSING.has(String(c.observed)) || failing.has(id) || uncounted.has(id)) continue;
     failing.set(id, prune({ check_id: id, observed: c.observed, ...(c.expected && c.expected !== 'pass' ? { expected: c.expected } : {}), detail: clip(c.detail, 200), fix: clip(c.fix, 300), ...(c.source === 'plan' ? { source: 'plan' } : {}) }));
   }
-  const counts: Record<string, number> = {};
-  for (const c of list) counts[String(c.observed)] = (counts[String(c.observed)] ?? 0) + 1;
+  const { counts } = verificationCheckCounts(v);
   return prune({
     id: v.id,
     object: v.object,
