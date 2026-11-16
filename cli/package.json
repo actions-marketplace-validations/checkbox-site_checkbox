@@ -1,0 +1,70 @@
+{
+  "name": "@checkbox-site/cli",
+  "version": "0.4.20",
+  "description": "The checkbox CLI: auto-renewal law and subscription compliance checks (FTC ROSCA, California ARL, New York and other states) for Stripe Checkout compliance (Checkout Session params, Payment Links), pages, disclosures, online cancellation flows and renewal reminder emails, from a terminal, CI or an AI coding agent. Runs offline.",
+  "keywords": [
+    "checkbox",
+    "subscription",
+    "subscription-compliance",
+    "auto-renewal",
+    "automatic-renewal",
+    "auto-renewal-law",
+    "compliance",
+    "rosca",
+    "california-arl",
+    "click-to-cancel",
+    "stripe",
+    "stripe-checkout",
+    "ci",
+    "github-actions",
+    "cli",
+    "mcp",
+    "model-context-protocol",
+    "ai-agent",
+    "cancellation",
+    "subscription-cancellation",
+    "renewal-reminder",
+    "renewal-reminder-emails",
+    "stripe-checkout-compliance",
+    "stripe-compliance",
+    "checkout-compliance",
+    "auto-renewal-compliance",
+    "subscription-law",
+    "automatic-renewal-law",
+    "ftc",
+    "negative-option",
+    "payment-links",
+    "auto-renewal-law-checker",
+    "subscription compliance",
+    "auto renewal",
+    "autorenewal",
+    "stripe-subscriptions"
+  ],
+  "license": "MIT",
+  "author": "Checkbox <support@checkbox.site>",
+  "homepage": "https://checkbox.site/docs/cli",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/checkbox-site/checkbox.git",
+    "directory": "cli"
+  },
+  "bugs": {
+    "url": "https://github.com/checkbox-site/checkbox/issues",
+    "email": "support@checkbox.site"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "checkbox": "dist/checkbox.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
+}

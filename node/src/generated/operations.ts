@@ -584,6 +584,23 @@ export const OPERATIONS = {
     paginated: false,
     summary: "Claim, decline or reopen a task",
   },
+  proposeRiskAcceptance: {
+    operationId: "proposeRiskAcceptance",
+    namespace: "riskAcceptances",
+    method: "propose",
+    httpMethod: "POST",
+    path: "/v1/tasks/{task}/risk_acceptance",
+    pathParams: ["task"],
+    queryParams: [],
+    body: true,
+    idempotent: true,
+    auth: true,
+    scope: "compliance_plans:write",
+    response: "json",
+    list: false,
+    paginated: false,
+    summary: "Propose accepting the risk of a Your-call task (the owner confirms)",
+  },
   answerTask: {
     operationId: "answerTask",
     namespace: "tasks",
@@ -668,6 +685,40 @@ export const OPERATIONS = {
     list: true,
     paginated: true,
     summary: "List verifications of a site",
+  },
+  retrieveSiteExposure: {
+    operationId: "retrieveSiteExposure",
+    namespace: "siteExposures",
+    method: "retrieve",
+    httpMethod: "GET",
+    path: "/v1/sites/{site}/exposure",
+    pathParams: ["site"],
+    queryParams: [],
+    body: false,
+    idempotent: false,
+    auth: true,
+    scope: "sites:read",
+    response: "json",
+    list: false,
+    paginated: false,
+    summary: "Get a site's exposure",
+  },
+  updateSiteExposure: {
+    operationId: "updateSiteExposure",
+    namespace: "siteExposures",
+    method: "update",
+    httpMethod: "POST",
+    path: "/v1/sites/{site}/exposure",
+    pathParams: ["site"],
+    queryParams: [],
+    body: true,
+    idempotent: true,
+    auth: true,
+    scope: "sites:write",
+    response: "json",
+    list: false,
+    paginated: false,
+    summary: "Record the owner's exposure estimate",
   },
   retrieveFindingFix: {
     operationId: "retrieveFindingFix",
@@ -1144,6 +1195,40 @@ export const OPERATIONS = {
     list: false,
     paginated: false,
     summary: "Get the dates each required notice must be sent",
+  },
+  getVisitorRegion: {
+    operationId: "getVisitorRegion",
+    namespace: "visitorRegions",
+    method: "retrieve",
+    httpMethod: "GET",
+    path: "/v1/visitor-region",
+    pathParams: [],
+    queryParams: [],
+    body: false,
+    idempotent: false,
+    auth: false,
+    scope: "none",
+    response: "json",
+    list: false,
+    paginated: false,
+    summary: "Get the calling browser's region from its IP address",
+  },
+  checkRegion: {
+    operationId: "checkRegion",
+    namespace: "regions",
+    method: "check",
+    httpMethod: "POST",
+    path: "/v1/checks/region",
+    pathParams: [],
+    queryParams: [],
+    body: true,
+    idempotent: false,
+    auth: true,
+    scope: "checks:read",
+    response: "json",
+    list: false,
+    paginated: false,
+    summary: "Check whether a visitor needs a separate opt-in or bold terms",
   },
   listSiteSuggestions: {
     operationId: "listSiteSuggestions",
@@ -1934,11 +2019,14 @@ export interface OperationTypes {
   retrieveCompliancePlan: { args: { site: string }; response: T.CompliancePlan };
   retrieveTask: { args: { task: string }; response: T.Task };
   updateTask: { args: { task: string } & T.UpdateTaskParams; response: T.Task };
+  proposeRiskAcceptance: { args: { task: string } & T.ProposeRiskAcceptanceParams; response: T.RiskAcceptanceProposal };
   answerTask: { args: { task: string } & T.AnswerTaskParams; response: T.AnsweredTask | T.AnsweredOwnerQuestion };
   verifyTask: { args: { task: string } & T.VerifyTaskRequestParams; response: T.Verification };
   verifySite: { args: { site: string } & T.VerifySiteParams; response: T.Verification };
   retrieveVerification: { args: { verification: string } & T.RetrieveVerificationParams; response: T.Verification };
   listVerifications: { args: { site: string } & T.ListVerificationsParams; response: T.VerificationList };
+  retrieveSiteExposure: { args: { site: string }; response: T.Exposure };
+  updateSiteExposure: { args: { site: string } & T.UpdateExposureParams; response: T.Exposure };
   retrieveFindingFix: { args: { finding: string } & T.RetrieveFindingFixParams; response: T.Fix };
   listSiteFixes: { args: { site: string } & T.ListSiteFixesParams; response: T.FixList };
   publishShopifyTerms: { args: { site: string } & T.PublishShopifyTermsParams; response: T.ShopifyTermsPublication };
@@ -1967,6 +2055,8 @@ export interface OperationTypes {
   checkEmail: { args: T.EmailCheckParams; response: T.EmailCheckResult };
   checkPage: { args: T.PageCheckParams; response: T.PageCheckResult };
   checkNoticeSchedule: { args: T.NoticeScheduleParams; response: T.NoticeScheduleResult };
+  getVisitorRegion: { args: Record<string, never>; response: T.VisitorRegion };
+  checkRegion: { args: T.RegionCheckParams; response: T.RegionCheckResult };
   listSiteSuggestions: { args: { site: string } & T.ListSiteSuggestionsParams; response: T.SuggestionReport };
   suggestImprovements: { args: T.SuggestionsParams; response: T.SuggestionReport };
   getElementsBundle: { args: Record<string, never>; response: string };
@@ -2414,7 +2504,7 @@ export class FindingsResource extends Resource {
   /**
    * Triage a finding.
    *
-   * Sets the triage state (open, acknowledged, accepted_risk, resolved) and an optional note. Triage does not change the check result; fixing the issue and re-scanning does.
+   * Sets the triage state (open, acknowledged, resolved) and an optional note. Triage does not change the check result; fixing the issue and re-scanning does. accepted_risk is refused for API keys (409): only the owner accepts a risk, in the dashboard; agents propose it with proposeRiskAcceptance.
    *
    * @param finding Unique identifier of the finding (fnd_…).
    * @see POST /v1/findings/{finding} (operation `updateFinding`, scope `findings:write`)
@@ -2458,7 +2548,7 @@ export class TasksResource extends Resource {
   /**
    * Claim, decline or reopen a task.
    *
-   * status in_progress claims the task (shown to other agents and the dashboard); wont_fix declines it with a reason (the merchant's decision, recorded; a declined critical or high task keeps the plan blocked); open clears the decision. Applying a change does not need this call: call verifyTask.
+   * status in_progress claims the task (shown to other agents and the dashboard); open clears the claim. Round 43: wont_fix / not_applicable (with a reason) on a Your-call task (kind your_call) records a PROPOSAL for the owner, like proposeRiskAcceptance: next_action carries the confirmation link, and nothing closes until the owner confirms it signed in. On a Do-this task (kind do_this) they are refused with 409 do_this_not_acceptable: fix it. Applying a change does not need this call: call verifyTask.
    *
    * @param task Unique identifier of the task (task_…).
    * @see POST /v1/tasks/{task} (operation `updateTask`, scope `compliance_plans:write`)
@@ -2472,7 +2562,7 @@ export class TasksResource extends Resource {
    *
    * For tasks with status manual, and for every question the plan's owner_questions lists (by its id): record the human's answer (ask them; never answer on their behalf). An owner question that is not one task's own (owner_questions[].key email_sender, stripe_terms_url, …) returns an AnsweredOwnerQuestion: recorded says whether it was saved (a Stripe Dashboard step closes on the answer; a notice setting is applied to the Notices settings at once, and emails that wait for Stripe or another answer turn on by themselves later), and a saved question is never asked again. site is needed only when the account has several sites. An answer to a task whose question closed since the plan was read records nothing (recorded: false) and says why. Answers that assert a legal fact (yes, confirmed) are stored as a proposal and return next_action.type "ask_human_to_confirm" with a link the human opens while signed in to Checkbox; only their confirmation writes the attestation, sets the site fact and re-evaluates. no / needs_change turn the task into a change for the agent; done (after a dashboard-only step) re-checks at once. Every answer is stored in the evidence vault.
    *
-   * @param task The task id (task_…), or an owner_questions id that is not a task's (email_sender, notices_support_email, notices_cancel_timing, stripe_portal_login, replace_payment_link, stripe_terms_url).
+   * @param task The task id (task_…), or an owner_questions id that is not a task's (email_sender, notices_support_email, notices_cancel_timing, stripe_portal_login, replace_payment_link, stripe_terms_url, connect_stripe).
    * @see POST /v1/tasks/{task}/answer (operation `answerTask`, scope `compliance_plans:write`)
    */
   answer(task: string, params: T.AnswerTaskParams, options?: RequestOptions): Promise<T.AnsweredTask | T.AnsweredOwnerQuestion> {
@@ -2489,6 +2579,22 @@ export class TasksResource extends Resource {
    */
   verify(task: string, params?: T.VerifyTaskRequestParams, options?: RequestOptions): Promise<T.Verification> {
     return this._request(OPERATIONS.verifyTask, [task], params, options) as Promise<T.Verification>;
+  }
+
+}
+
+/** `checkbox.riskAcceptances` */
+export class RiskAcceptancesResource extends Resource {
+  /**
+   * Propose accepting the risk of a Your-call task (the owner confirms).
+   *
+   * Round 43: for a task with kind your_call that is not met, records a PROPOSAL to accept its risk, with your reason, and returns confirmation_url: the owner opens it while signed in to Checkbox and accepts (with their own reason) or fixes it instead. Nothing is accepted until the owner confirms: the task stays open, and you must not tell anyone it is accepted. A do_this task (renewal terms next to the purchase button with consent, online cancellation, the required reminder and acknowledgment emails) can never be accepted: 409 resource_conflict with why. Prefer fixing: a Your-call item's risk_if_skipped and conversion_impact are on the task; the plan's owner_decisions batches them into one message.
+   *
+   * @param task Unique identifier of the task (task_…).
+   * @see POST /v1/tasks/{task}/risk_acceptance (operation `proposeRiskAcceptance`, scope `compliance_plans:write`)
+   */
+  propose(task: string, params: T.ProposeRiskAcceptanceParams, options?: RequestOptions): Promise<T.RiskAcceptanceProposal> {
+    return this._request(OPERATIONS.proposeRiskAcceptance, [task], params, options) as Promise<T.RiskAcceptanceProposal>;
   }
 
 }
@@ -2517,6 +2623,34 @@ export class VerificationsResource extends Resource {
    */
   list(site: string, params?: T.ListVerificationsParams, options?: RequestOptions): ApiListPromise<T.Verification> {
     return this._list(OPERATIONS.listVerifications, [site], params, options);
+  }
+
+}
+
+/** `checkbox.siteExposures` */
+export class SiteExposuresResource extends Resource {
+  /**
+   * Get a site's exposure.
+   *
+   * Aggregate subscriber counts read from live Stripe through the read-only connection (active and trialing subscriptions, the share billed yearly, counts per billing state or country, the 90-day dispute rate), refreshed daily and when Stripe is connected; else the owner's estimate; else unknown with one optional question. Counts only: no names, emails or addresses are stored. summary.line is the sentence to show people. Not legal advice.
+   *
+   * @param site Unique identifier of the site (site_…).
+   * @see GET /v1/sites/{site}/exposure (operation `retrieveSiteExposure`, scope `sites:read`)
+   */
+  retrieve(site: string, options?: RequestOptions): Promise<T.Exposure> {
+    return this._request(OPERATIONS.retrieveSiteExposure, [site], undefined, options) as Promise<T.Exposure>;
+  }
+
+  /**
+   * Record the owner's exposure estimate.
+   *
+   * The owner's answer to the one optional question "About how many subscribers do you have, and how many are in California?": subscribers (lt100, 100to1k, 1kto10k, gt10k) and california_share (low, medium, high), or declined: true. Used only while live Stripe figures are not available; live figures win once read. Never blocks the plan. Round 43 review: an estimate sent with an API key is shown as "estimate entered by your agent" (estimate_by agent) and never lowers a risk level below what no estimate gives; ask the owner, never guess.
+   *
+   * @param site Unique identifier of the site (site_…).
+   * @see POST /v1/sites/{site}/exposure (operation `updateSiteExposure`, scope `sites:write`)
+   */
+  update(site: string, params?: T.UpdateExposureParams, options?: RequestOptions): Promise<T.Exposure> {
+    return this._request(OPERATIONS.updateSiteExposure, [site], params, options) as Promise<T.Exposure>;
   }
 
 }
@@ -2823,7 +2957,7 @@ export class ChecksResource extends Resource {
   /**
    * Check Stripe Checkout Session params.
    *
-   * Body: `{ params, merchant }` (or `{ params, site }`). `params` is exactly the object your code gives stripe.checkout.sessions.create; `merchant` adds merchant_name, cancel_url, and price/interval when line_items use a Price id. Checkbox models the Stripe-hosted page those params render and returns findings plus `correction`: a JSON Patch (RFC 6902) and the full corrected params (custom_text.submit with the renewal terms, consent_collection.terms_of_service = "required", custom_text.terms_of_service_acceptance as the consent label), verified by the engine. Stripe's own small grey styling keeps "clear and conspicuous" at needs_review on any Stripe-hosted page; also show the terms on your page before redirecting. Stateless and deterministic: nothing is stored, the same input on the same as_of date gives the same verdicts. Every verdict comes from the Checkbox rules engine over the legal catalog (federal ROSCA / EFTA plus the state automatic-renewal laws); the response carries rules_version, catalog_version and a disclaimer (not legal advice). Read `verdict`, then `next_action`: it tells you exactly what to change and to call the check again until verdict is pass.
+   * Body: `{ params, merchant }` (or `{ params, site }`). `params` is exactly the object your code gives stripe.checkout.sessions.create; `merchant` adds merchant_name, cancel_url, and price/interval when line_items use a Price id. Checkbox models the Stripe-hosted page those params render and returns findings plus `correction`: a JSON Patch (RFC 6902) and the full corrected params, verified by the engine: by default only custom_text.submit with the renewal terms, ending with the sentence that makes the click consent (no checkbox); consent_collection only where a cited law asks for a separate opt-in. Stripe's own small grey styling keeps "clear and conspicuous" at needs_review on any Stripe-hosted page; also show the terms on your page before redirecting. Stateless and deterministic: nothing is stored, the same input on the same as_of date gives the same verdicts. Every verdict comes from the Checkbox rules engine over the legal catalog (federal ROSCA / EFTA plus the state automatic-renewal laws); the response carries rules_version, catalog_version and a disclaimer (not legal advice). Read `verdict`, then `next_action`: it tells you exactly what to change and to call the check again until verdict is pass.
    *
    * @see POST /v1/checks/stripe_checkout_session (operation `checkStripeCheckoutSession`, scope `checks:read`)
    */
@@ -2873,6 +3007,36 @@ export class ChecksResource extends Resource {
    */
   noticeSchedule(params?: T.NoticeScheduleParams, options?: RequestOptions): Promise<T.NoticeScheduleResult> {
     return this._request(OPERATIONS.checkNoticeSchedule, [], params, options) as Promise<T.NoticeScheduleResult>;
+  }
+
+}
+
+/** `checkbox.visitorRegions` */
+export class VisitorRegionsResource extends Resource {
+  /**
+   * Get the calling browser's region from its IP address.
+   *
+   * Used by <checkbox-disclosure> (Elements 1.6.0 by default; 1.6.1 and later only with extras="vt-dc"; Vermont / D.C. are not checked by default): in Vermont it shows the renewal terms of a plan of a year or more in bold and adds the separate consent checkbox; in the District of Columbia it adds the separate consent checkbox for a free trial. No key; CORS *; not cached. The IP address is looked up in memory and not stored.
+   *
+   * @see GET /v1/visitor-region (operation `getVisitorRegion`, scope `none`)
+   */
+  retrieve(options?: RequestOptions): Promise<T.VisitorRegion> {
+    return this._request(OPERATIONS.getVisitorRegion, [], undefined, options) as Promise<T.VisitorRegion>;
+  }
+
+}
+
+/** `checkbox.regions` */
+export class RegionsResource extends Resource {
+  /**
+   * Check whether a visitor needs a separate opt-in or bold terms.
+   *
+   * For your server when it creates a Stripe Checkout Session (or renders its own checkout): pass the visitor's IP address (or region) and the plan. Returns whether a separate opt-in to the renewal applies to this visitor (add consent_collection: { terms_of_service: "required" } to the session when it is not null) and whether the renewal terms must be bold. Stateless; the IP address is not stored. Checkbox cannot see this per-visitor branch from one Checkout Session, so a session without consent_collection, where the Vermont or D.C. opt-in applies, stays for you to confirm in the checks. A Payment Link serves every visitor the same: keep consent_collection on it.
+   *
+   * @see POST /v1/checks/region (operation `checkRegion`, scope `checks:read`)
+   */
+  check(params: T.RegionCheckParams, options?: RequestOptions): Promise<T.RegionCheckResult> {
+    return this._request(OPERATIONS.checkRegion, [], params, options) as Promise<T.RegionCheckResult>;
   }
 
 }
@@ -2974,7 +3138,7 @@ export class ConsentsResource extends Resource {
   /**
    * Record a consent.
    *
-   * Records that a subscriber ticked the consent checkbox for the exact disclosure shown: stored with the text, its hashes, the terms, the page, a hash of the user agent and your customer reference, written to the site's hash-chained evidence vault, and fed to the compliance evaluation as corroborating evidence. <checkbox-disclosure> calls this with the publishable key (Origin-checked); servers may call it with a secret key and site. Next: attach the returned cons_… id to the subscription (metadata.checkbox_consent) or call updateConsent.
+   * Records that a subscriber consented to the exact disclosure shown (ticked the consent checkbox, or with mechanism clickwrap clicked the pay button next to the renewal line): stored with the text, its hashes, the terms, the page, a hash of the user agent and your customer reference, written to the site's hash-chained evidence vault, and fed to the compliance evaluation as corroborating evidence. <checkbox-disclosure> calls this with the publishable key (Origin-checked); servers may call it with a secret key and site. Next: attach the returned cons_… id to the subscription (metadata.checkbox_consent) or call updateConsent.
    *
    * @see POST /v1/consents (operation `createConsent`, scope `publishable`)
    */
@@ -3468,7 +3632,9 @@ export const RESOURCES = {
   findings: FindingsResource,
   plans: PlansResource,
   tasks: TasksResource,
+  riskAcceptances: RiskAcceptancesResource,
   verifications: VerificationsResource,
+  siteExposures: SiteExposuresResource,
   fixes: FixesResource,
   evidence: EvidenceResource,
   certificates: CertificatesResource,
@@ -3477,6 +3643,8 @@ export const RESOURCES = {
   notices: NoticesResource,
   lawUpdates: LawUpdatesResource,
   checks: ChecksResource,
+  visitorRegions: VisitorRegionsResource,
+  regions: RegionsResource,
   suggestions: SuggestionsResource,
   elements: ElementsResource,
   disclosures: DisclosuresResource,

@@ -121,11 +121,14 @@ export function compactOwnerQuestions(oq: unknown): Obj | undefined {
   // Round 41: answers waiting for the owner's confirmation are never asked again: listed once, with the link.
   const waiting = (Array.isArray(oq.awaiting_confirmation) ? (oq.awaiting_confirmation as unknown[]) : []).filter(isObj).map((a) => prune({ id: a.id, answer: a.answer, confirmation_url: a.confirmation_url }));
   if (!oq.questions.length) return waiting.length ? { how: 'Do not ask these again: the owner confirms each answer at its link (their To-do page lists them all).', awaiting_confirmation: waiting } : undefined;
-  const questions = (oq.questions as unknown[]).filter(isObj).map((q) => prune({ id: q.id, text: q.text, options: q.options }));
+  // Round 44: a question the owner answers themselves (the legal one) keeps its owner_link.
+  const questions = (oq.questions as unknown[]).filter(isObj).map((q) => prune({ id: q.id, text: q.text, options: q.options, owner_link: q.owner_link }));
   // The ask's link to the owner's to-do page, when it names one.
-  const link = /https?:\/\/\S+?\/todo\b\S*/.exec(String(oq.description ?? ''))?.[0]?.replace(/[.,:;]+$/, '');
+  // Round 44: a legal question carries its own owner_link (the same To-do page).
+  const ownerLink = (oq.questions as unknown[]).filter(isObj).map((q) => q.owner_link).find((u): u is string => typeof u === 'string');
+  const link = ownerLink ?? /https?:\/\/\S+?\/todo\b\S*/.exec(String(oq.description ?? ''))?.[0]?.replace(/[.,:;]+$/, '');
   return prune({
-    how: `Ask the human these once, in one message${link ? ` (the legal one at ${link}: send the link)` : ''}; then answer_task { task: <id>, answer } for each: it saves the answer and the question is never asked again. Keep fixing meanwhile.`,
+    how: `Ask the human these once, in one message${link ? ` (those with owner_link the owner answers themselves at ${link}: send the link)` : ''}; then answer_task { task: <id>, answer } for each other one: it saves the answer and the question is never asked again. Keep fixing meanwhile.`,
     questions,
     ...(waiting.length ? { awaiting_confirmation: waiting } : {}),
   });
@@ -158,8 +161,17 @@ function taskLine(t: Obj): Obj {
     ...(t.compliance_status && t.compliance_status !== t.status ? { compliance_status: t.compliance_status } : {}),
     ...(impliedNext(t) ? {} : { next: nextType(t.next_action) }),
     ...(Array.isArray(t.blocked_by) && t.blocked_by.length ? { blocked_by: t.blocked_by } : {}),
+    // Round 42 (founder): a change that costs conversions says so in the list ("none" is the default, left out).
+    ...(isObj(t.conversion_impact) && t.conversion_impact.level !== 'none' ? { conversion_impact: `${String(t.conversion_impact.level)}: ${String(t.conversion_impact.reason ?? '')}` } : {}),
+    // Round 43: a Your-call item says its risk if skipped, and why it reopened when it did.
+    ...(t.kind === 'your_call' && isObj(t.risk_if_skipped) ? { risk: `${String(t.risk_if_skipped.level).replace('_', ' ')}: ${String(t.risk_if_skipped.reason ?? '')}` } : {}),
+    ...(t.kind === 'your_call' && isObj(t.risk_decision) && isObj(t.risk_decision.reopened) ? { reopened: String(t.risk_decision.reopened.reason ?? '') } : {}),
+    ...(t.kind === 'your_call' && isObj(t.risk_decision) && isObj(t.risk_decision.proposal) ? { proposal: 'awaiting the owner' } : {}),
   });
 }
+
+/** Round 43: a task the owner accepted the risk of ("Risk accepted", never passing), with their reason. */
+const acceptedLine = (t: Obj): Obj => prune({ id: t.id, title: t.title, reason: isObj(t.risk_decision) ? t.risk_decision.reason : undefined });
 
 /**
  * The default plan: status, the one next_action, owner questions once, open tasks as id + title (+ status, change type,
@@ -172,20 +184,64 @@ export function compactPlanResult(plan: Obj, opTools: Record<string, string> = {
   // recommended / extra) are one line with their ids, never listed among the before-launch tasks.
   const good = openAll.filter((t) => typeof t.tier === 'string' && t.tier !== 'required');
   const open = openAll.filter((t) => !good.includes(t));
-  const closed = tasks.filter((t) => CLOSED.has(String(t.status)));
+  const accepted = tasks.filter((t) => t.closed_reason === 'risk_accepted');
+  const closed = tasks.filter((t) => CLOSED.has(String(t.status)) && !accepted.includes(t));
+  // Round 43 (founder): Do this first (never acceptable as a risk), then Your call (fix or accept the risk: owner only).
+  // Round 44 (pilot 43 core-codex: a done plan listed the Checkbox-sent emails waiting for their first due date under
+  // your_call, "or the owner accepts the risk"): only a Your-call item the owner can still decide (not met: risk_decision
+  // can_accept) is listed there; one that is met and waits for a live observation is an ordinary task line.
+  const yourCall = open.filter((t) => t.kind === 'your_call' && !(isObj(t.risk_decision) && t.risk_decision.can_accept === false));
+  const doThis = open.filter((t) => !yourCall.includes(t));
+  const exposure = isObj(plan.exposure_summary) ? plan.exposure_summary.line : undefined;
+  const od = isObj(plan.owner_decisions) ? plan.owner_decisions : null;
   const g = isObj(plan.go_live) ? plan.go_live : null;
   const launch = isObj(plan.launch) ? plan.launch : null;
   return prune({
     object: plan.object,
     site: plan.site,
-    status: plan.status,
+    // Round 42 (pilot 41 core-discovery: status "compliant" next to "never say compliant"): the plan's checks_status
+    // ("checks_pass"); the API keeps status "compliant" only for published SDKs.
+    status: typeof plan.checks_status === 'string' ? plan.checks_status : plan.status === 'compliant' ? 'checks_pass' : plan.status,
     launch: launch?.label,
+    exposure,
     next_action: slimNext(plan.next_action, plan, opTools),
     owner_questions: compactOwnerQuestions(plan.owner_questions),
-    tasks: open.map(taskLine),
+    // Do this first, then Your call (each Your-call line says so, with its risk); one list, so an agent works them all.
+    tasks: [...doThis.map(taskLine), ...yourCall.map((t) => ({ ...taskLine(t), kind: 'your_call' }))],
+    your_call: yourCall.length ? { how: `Fix them, or the owner accepts the risk${od?.accept_url ? ` (${String(od.accept_url)})` : ''}: call_api proposeRiskAcceptance sends them a link; never accept for them.`, tasks: yourCall.map((t) => t.id) } : undefined,
+    risk_accepted: accepted.length ? accepted.map(acceptedLine) : undefined,
     good_practice: good.length ? { line: `${good.length} good-practice ${good.length === 1 ? 'suggestion' : 'suggestions'} (optional; never ${good.length === 1 ? 'blocks' : 'block'} launch)`, tasks: good.map((t) => t.id) } : undefined,
     closed: closed.length || undefined,
     go_live: g && Array.isArray(g.steps) && g.steps.length ? { steps_left: g.steps.length } : undefined,
+  });
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Preflight checks
+// ---------------------------------------------------------------------------------------------------------------------
+
+/**
+ * Round 44 (pilot 43 core-new-app: check_stripe_checkout_session returned many KB in compact mode): a preflight check
+ * as compact JSON: the verdict, the corrected params ready to paste, the checks still open (id, status, one-line fix)
+ * and the next step. Per-check evidence, citations and requirement lists: verbose=true. Pure.
+ */
+export function compactCheckResult(r: Obj, opTools: Record<string, string> = {}): Obj {
+  const correction = isObj(r.correction) ? r.correction : null;
+  const checks = (Array.isArray(r.checks) ? r.checks : []).filter(isObj).filter((c) => c.status === 'fail' || c.status === 'needs_review' || c.compliance_status === 'pending_live_check');
+  const compliance = isObj(r.compliance) ? r.compliance : null;
+  return prune({
+    verdict: r.verdict,
+    livemode: r.livemode,
+    label: compliance?.label,
+    summary: r.summary,
+    corrected_params: correction && Array.isArray(correction.patch) && correction.patch.length ? correction.corrected_params : undefined,
+    changes: correction && Array.isArray(correction.patch) && correction.patch.length ? correction.patch.length : undefined,
+    corrected_passes: correction && isObj(correction.verification) ? correction.verification.passes : undefined,
+    note: correction && isObj(correction.verification) && typeof correction.verification.note === 'string' && !(Array.isArray(correction.patch) && correction.patch.length) ? correction.verification.note : undefined,
+    checks: checks.length ? checks.map((c) => prune({ check_id: c.check_id, status: c.status, fix: clip(c.fix ?? c.explanation, 240) })) : undefined,
+    warnings: Array.isArray(r.warnings) && r.warnings.length ? (r.warnings as unknown[]).filter(isObj).map((w) => w.code) : undefined,
+    next_action: slimNext(r.next_action, r, opTools),
+    more: 'verbose=true: every check with its evidence and citations, and the JSON patch',
   });
 }
 
@@ -281,12 +337,15 @@ export function compactVerificationResult(v: Obj, opTools: Record<string, string
   const pre = isObj(v.precheck) ? v.precheck : null;
   const preChecks = (pre && Array.isArray(pre.checks) ? pre.checks : []).filter(isObj);
   const usePre = v.status === 'pending' || !finals.length;
-  const list = usePre ? preChecks.map((c) => ({ check_id: c.check_id, observed: c.status, detail: c.reason, fix: c.fix })) : finals.map((c) => ({ check_id: c.check_id, observed: c.observed, expected: c.expected, detail: c.detail, source: c.source }));
+  const list = usePre ? preChecks.map((c) => ({ check_id: c.check_id, observed: c.status, detail: c.reason, fix: c.fix })) : finals.map((c) => ({ check_id: c.check_id, observed: c.observed, expected: c.expected, detail: c.detail, source: c.source, blocking: c.blocking }));
   const diff = (Array.isArray(v.diff) ? v.diff : []).filter(isObj);
+  // Round 42 (pilot 41 core-codex: 8 "not passing" next to the plan's 1 fix): checks the plan does not count (blocking
+  // false, whole-site verifications) are listed by id apart, never as failing.
+  const uncounted = new Set((list as Obj[]).filter((c) => c.blocking === false && !PASSING.has(String(c.observed))).map((c) => String(c.check_id)));
   const failing = new Map<string, Obj>();
   for (const c of [...diff, ...list] as Obj[]) {
     const id = String(c.check_id ?? '');
-    if (!id || PASSING.has(String(c.observed)) || failing.has(id)) continue;
+    if (!id || PASSING.has(String(c.observed)) || failing.has(id) || uncounted.has(id)) continue;
     failing.set(id, prune({ check_id: id, observed: c.observed, ...(c.expected && c.expected !== 'pass' ? { expected: c.expected } : {}), detail: clip(c.detail, 200), fix: clip(c.fix, 300), ...(c.source === 'plan' ? { source: 'plan' } : {}) }));
   }
   const counts: Record<string, number> = {};
@@ -302,6 +361,7 @@ export function compactVerificationResult(v: Obj, opTools: Record<string, string
     checked: v.checked,
     checks: Object.keys(counts).length ? { ...(usePre ? { from: 'precheck' } : {}), ...counts } : undefined,
     diff: [...failing.values()],
+    not_counted: uncounted.size ? { checks: [...uncounted], note: 'Waiting or optional: the plan counts nothing to do for these.' } : undefined,
     next_action: slimNext(v.next_action, v, opTools),
   });
 }

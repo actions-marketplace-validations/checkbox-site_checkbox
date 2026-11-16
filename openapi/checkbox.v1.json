@@ -47,6 +47,10 @@
       "description": "The agent-to-agent fix loop: an ordered, machine-readable plan of changes (requirement + citation, where, the exact patch / copy / Stripe params, how to verify), verification of each change, and questions for the human where a machine cannot decide."
     },
     {
+      "name": "Exposure",
+      "description": "How exposed a business is to automatic-renewal claims: aggregate subscriber counts from live Stripe (never personal data) or the owner's estimate. The plan's risk estimates use it."
+    },
+    {
       "name": "Fixes",
       "description": "Engine-verified, platform-specific fixes for failing findings: Stripe Checkout code, Payment Link updates, Shopify blocks, snippet disclosures and the hosted cancellation page."
     },
@@ -71,12 +75,16 @@
       "description": "Preflight compliance checks (“check before you ship”) of disclosure text, Stripe params, lifecycle emails and checkout HTML — stateless, for AI coding agents and CI."
     },
     {
+      "name": "Region",
+      "description": "The visitor's region from the IP address, for the two places where the cited laws differ by place and Checkbox varies the disclosure: Vermont (bold-face renewal terms, plans of a year or more) and the District of Columbia (a separate opt-in for free trials). Looked up in memory on Checkbox's servers; IP addresses are never stored."
+    },
+    {
       "name": "Suggestions",
       "description": "Conversion suggestions: optional ways to make the checkout, emails and cancellation flow perform better without breaking automatic-renewal laws."
     },
     {
       "name": "Elements",
-      "description": "Checkbox Elements: the drop-in <checkbox-disclosure> web component (and React wrapper) that shows the locked automatic-renewal disclosure above the pay button with an unchecked consent checkbox, and the consent records it creates."
+      "description": "Checkbox Elements: the drop-in <checkbox-disclosure> web component (and React wrapper) that shows the locked automatic-renewal disclosure above the pay button (since 1.6.0 ending with a clickwrap sentence, no checkbox; an unchecked consent checkbox on request; since 1.6.1 Vermont / D.C. bold terms and opt-in, not checked by default, only with extras=\"vt-dc\"), and the consent records it creates."
     },
     {
       "name": "Receipts",
@@ -1869,6 +1877,45 @@
                     "Open https://dashboard.stripe.com/test/apikeys (Stripe in Test mode) and click “Create restricted key”."
                   ]
                 }
+              },
+              "connect": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "properties": {
+                  "method": {
+                    "type": "string",
+                    "enum": [
+                      "stripe_app"
+                    ],
+                    "description": "How Checkbox connects: the read-only Checkbox Stripe App.",
+                    "example": "stripe_app"
+                  },
+                  "url": {
+                    "type": "string",
+                    "description": "The one link the owner opens: a Checkbox page that names the site and sends them to Stripe to install the Checkbox app. Give it to the owner as it is.",
+                    "example": "https://app.checkbox.site/connect/stripe?site=11111111-1111-4111-8111-111111111111&mode=test"
+                  },
+                  "install_url": {
+                    "type": "string",
+                    "description": "Stripe's install link the page sends them to (the owner opens url, not this).",
+                    "example": "https://marketplace.stripe.com/apps/install/link/site.checkbox.compliance"
+                  },
+                  "connected": {
+                    "type": "boolean",
+                    "description": "Whether the site is connected with Stripe this way.",
+                    "example": false
+                  }
+                },
+                "required": [
+                  "method",
+                  "url",
+                  "install_url",
+                  "connected"
+                ],
+                "description": "\"Connect with Stripe\" (read-only): the owner's one step to connect Stripe when this server offers it; Checkbox then reads billing settings, prices, Checkout and Payment Link settings, the portal and subscription events through it, and restricted_key is only for test runs (asked for when the plan wants one). null: this server does not offer it, and restricted_key is the one key for everything.",
+                "example": null
               }
             },
             "required": [
@@ -1876,9 +1923,10 @@
               "test_key_hint",
               "test_credential_stored",
               "checkout_configs",
-              "restricted_key"
+              "restricted_key",
+              "connect"
             ],
-            "description": "Stripe test mode for lifecycle test runs.",
+            "description": "Stripe connection and the test-mode key for lifecycle test runs.",
             "example": {
               "test_key_consent": true,
               "test_key_hint": "rk_test_…a1b2",
@@ -1898,7 +1946,8 @@
                 "steps": [
                   "Open https://dashboard.stripe.com/test/apikeys (Stripe in Test mode) and click “Create restricted key”."
                 ]
-              }
+              },
+              "connect": null
             }
           },
           "test_run": {
@@ -1968,12 +2017,12 @@
                   "properties": {
                     "id": {
                       "type": "string",
-                      "description": "The id answerTask takes: the id of the task whose question it is (task_…), or the question's name for those that are not one task's: \"email_sender\", \"notices_support_email\", \"notices_cancel_timing\", \"stripe_terms_url\", \"stripe_portal_login\", \"replace_payment_link\" (send site with the answer when the account has several sites). Every listed question is answered with answerTask and this id.",
+                      "description": "The id answerTask takes: the id of the task whose question it is (task_…), or the question's name for those that are not one task's: \"email_sender\", \"notices_support_email\", \"notices_cancel_timing\", \"stripe_terms_url\", \"stripe_portal_login\", \"replace_payment_link\", \"connect_stripe\" (send site with the answer when the account has several sites). Every listed question is answered with answerTask and this id.",
                       "example": "email_sender"
                     },
                     "key": {
                       "type": "string",
-                      "description": "What the question is: \"email_sender\" (who sends the required emails), \"notices_support_email\" / \"notices_cancel_timing\" (what Checkbox Notices needs before it sends), \"stripe_terms_url\" (the Terms of Service URL Stripe needs before it collects consent, in test mode too), \"stripe_portal_login\" / \"replace_payment_link\" (Stripe Dashboard steps of a Payment Link site), or the key of the task whose question it is.",
+                      "description": "What the question is: \"email_sender\" (who sends the required emails), \"notices_support_email\" / \"notices_cancel_timing\" (what Checkbox Notices needs before it sends), \"stripe_terms_url\" (the Terms of Service URL Stripe needs before it collects consent, in test mode too), \"stripe_portal_login\" / \"replace_payment_link\" (Stripe Dashboard steps of a Payment Link site), \"connect_stripe\" (the owner's one \"Connect with Stripe\" link, read-only; closes when Checkbox sees the connection), or the key of the task whose question it is.",
                       "example": "email_sender"
                     },
                     "added_later": {
@@ -1985,6 +2034,11 @@
                       "type": "boolean",
                       "description": "true when the question closed earlier (see closed) and is asked again because what it is about changed back. Absent otherwise.",
                       "example": true
+                    },
+                    "owner_link": {
+                      "type": "string",
+                      "description": "Round 44: a legal question the owner answers themselves at this link (their To-do page, signed in). Send it in the same message as the other questions: their answer there counts at once, with no second confirmation. Absent for other questions.",
+                      "example": "https://app.checkbox.site/todo"
                     },
                     "text": {
                       "type": "string",
@@ -2039,6 +2093,7 @@
                     "key": "email_sender",
                     "added_later": true,
                     "reopened": true,
+                    "owner_link": "https://app.checkbox.site/todo",
                     "text": "Who sends the required emails (renewal reminder, charge notice): you (your code), or Checkbox Notices?",
                     "options": [
                       "me",
@@ -2165,6 +2220,7 @@
                   "key": "email_sender",
                   "added_later": true,
                   "reopened": true,
+                  "owner_link": "https://app.checkbox.site/todo",
                   "text": "Who sends the required emails (renewal reminder, charge notice): you (your code), or Checkbox Notices?",
                   "options": [
                     "me",
@@ -2981,7 +3037,8 @@
                     "steps": [
                       "Open https://dashboard.stripe.com/test/apikeys (Stripe in Test mode) and click “Create restricted key”."
                     ]
-                  }
+                  },
+                  "connect": null
                 },
                 "test_run": {
                   "id": "run_3f9a1c2e7b4d4e0f9a8b7c6d5e4f3a2b",
@@ -2998,6 +3055,7 @@
                       "key": "email_sender",
                       "added_later": true,
                       "reopened": true,
+                      "owner_link": "https://app.checkbox.site/todo",
                       "text": "Who sends the required emails (renewal reminder, charge notice): you (your code), or Checkbox Notices?",
                       "options": [
                         "me",
@@ -4335,9 +4393,10 @@
               "your_call",
               "incomplete",
               "compliant",
-              "not_checked"
+              "not_checked",
+              "risk_accepted"
             ],
-            "description": "needs_fix (a required check needs a fix or something is not set up yet), your_call (a decision is needed), incomplete (only \"not checked yet\" items are left, e.g. the cancel flow was never tried), compliant (every required check passes; pending live checks count as passing), not_checked (never evaluated).",
+            "description": "needs_fix (a required check needs a fix or something is not set up yet), your_call (a decision is needed), incomplete (only \"not checked yet\" items are left, e.g. the cancel flow was never tried), compliant (every required check passes; pending live checks count as passing), not_checked (never evaluated), risk_accepted (nothing is left but items whose risk the owner accepted: their checks do not pass, so never \"Checks pass\").",
             "example": "compliant"
           },
           "label": {
@@ -4387,6 +4446,11 @@
                 "type": "integer",
                 "description": "Not checked yet (Checkbox has not tried it).",
                 "example": 0
+              },
+              "risk_accepted": {
+                "type": "integer",
+                "description": "Round 43: Your-call items whose risk the owner accepted (not passing, not open). Absent when none.",
+                "example": 0
               }
             },
             "required": [
@@ -4408,7 +4472,8 @@
               "compliant": 9,
               "not_applicable": 6,
               "not_set_up": 0,
-              "not_checked": 0
+              "not_checked": 0,
+              "risk_accepted": 0
             }
           },
           "pending_live_checks": {
@@ -4510,7 +4575,8 @@
               "your_call",
               "incomplete",
               "compliant",
-              "not_checked"
+              "not_checked",
+              "risk_accepted"
             ],
             "description": "User-facing roll-up of the required checks: needs_fix > your_call > compliant (every required check passes; pending live checks count as passing).",
             "example": "compliant"
@@ -4668,7 +4734,8 @@
               "your_call",
               "incomplete",
               "compliant",
-              "not_checked"
+              "not_checked",
+              "risk_accepted"
             ],
             "description": "Roll-up status of that evaluation: needs_fix, your_call, incomplete, compliant or not_checked.",
             "example": "needs_fix"
@@ -5765,7 +5832,8 @@
                       "compliant": 9,
                       "not_applicable": 6,
                       "not_set_up": 0,
-                      "not_checked": 0
+                      "not_checked": 0,
+                      "risk_accepted": 0
                     },
                     "pending_live_checks": [
                       {
@@ -7451,7 +7519,8 @@
                     "compliant": 9,
                     "not_applicable": 6,
                     "not_set_up": 0,
-                    "not_checked": 0
+                    "not_checked": 0,
+                    "risk_accepted": 0
                   },
                   "pending_live_checks": [
                     {
@@ -8436,6 +8505,229 @@
         ],
         "description": "A page of findings, most urgent first."
       },
+      "RiskIfSkipped": {
+        "type": "object",
+        "properties": {
+          "level": {
+            "type": "string",
+            "enum": [
+              "very_low",
+              "low",
+              "medium",
+              "high"
+            ],
+            "description": "very_low, low, medium or high.",
+            "example": "low"
+          },
+          "reason": {
+            "type": "string",
+            "description": "One plain line: why, for this business (its exposure).",
+            "example": "Few subscribers in Vermont; the law has no private right of action."
+          },
+          "basis": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "What the level rests on (sources, exposure facts). Empty when Checkbox has no estimate yet.",
+            "example": []
+          },
+          "affected": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Subscribers this requirement reaches, when known.",
+            "example": null
+          },
+          "affected_lower_bound": {
+            "type": "boolean",
+            "description": "Round 43 review: affected is a lower bound (\"at least\"): some subscribers could not be placed by state, or the Stripe read was capped. The very-low rules for few or no affected subscribers do not apply then.",
+            "example": true
+          }
+        },
+        "required": [
+          "level",
+          "reason",
+          "basis"
+        ],
+        "description": "Round 43: the risk of skipping this task for this business (likelihood x consequence from sourced research and the exposure). An estimate, not legal advice."
+      },
+      "RiskDecision": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "open",
+              "fixed",
+              "accepted",
+              "not_applicable"
+            ],
+            "description": "open (not met, no decision), fixed (meets the requirement), accepted (the owner accepted the risk: \"Risk accepted\", never passing), not_applicable (recorded on the plan as not applying to this business; nothing was observed passing, never \"Fixed\").",
+            "example": "open"
+          },
+          "label": {
+            "type": "string",
+            "description": "The words to show.",
+            "example": "Your call: fix or accept the risk"
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "accepted: the owner's reason.",
+            "example": null
+          },
+          "reason_source": {
+            "type": "string",
+            "enum": [
+              "owner",
+              "agent_proposal"
+            ],
+            "description": "accepted: whose words the reason is: owner (the owner's own), or agent_proposal (the owner confirmed the agent's proposed reason unchanged).",
+            "example": "owner"
+          },
+          "by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "accepted: the owner's user id.",
+            "example": null
+          },
+          "at": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "accepted: when. Unix timestamp in seconds.",
+            "example": 1793318400
+          },
+          "revisit_triggers": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string",
+                  "description": "affected_growth, size_band, law_changed, dispute_rate, twelve_months, scope_changed (the item came to cover a requirement or a state the owner did not accept), exposure_known (the exposure was unknown or estimated when accepted and is now read from live Stripe).",
+                  "example": "twelve_months"
+                },
+                "text": {
+                  "type": "string",
+                  "description": "What reopens it.",
+                  "example": "12 months pass (2027-11-14)"
+                }
+              },
+              "required": [
+                "code",
+                "text"
+              ]
+            },
+            "description": "accepted: what reopens the decision (Checkbox checks them at every plan read and in the background).",
+            "example": []
+          },
+          "can_accept": {
+            "type": "boolean",
+            "description": "A Your-call task that is not met: the owner may accept its risk (agents: proposeRiskAcceptance; only the owner confirms).",
+            "example": false
+          },
+          "not_acceptable_reason": {
+            "type": "string",
+            "description": "Do-this tasks: why this cannot be accepted as a risk.",
+            "example": "This is one of the three things Checkbox always asks for…"
+          },
+          "reopened": {
+            "type": "object",
+            "properties": {
+              "at": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "description": "When. Unix timestamp in seconds.",
+                "example": 1793318400
+              },
+              "reason": {
+                "type": "string",
+                "description": "Why it reopened.",
+                "example": "It has been 12 months since you accepted this risk (2026-11-14)."
+              },
+              "code": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The trigger.",
+                "example": "twelve_months"
+              }
+            },
+            "required": [
+              "at",
+              "reason",
+              "code"
+            ],
+            "description": "An earlier acceptance a revisit trigger reopened: decide again.",
+            "example": {
+              "at": 1793318400,
+              "reason": "It has been 12 months since you accepted this risk (2026-11-14).",
+              "code": "twelve_months"
+            }
+          },
+          "proposal": {
+            "type": "object",
+            "properties": {
+              "at": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "description": "When it was proposed. Unix timestamp in seconds.",
+                "example": 1793318400
+              },
+              "reason": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The proposing agent's reason.",
+                "example": null
+              },
+              "expires": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "description": "When the confirmation link expires. Unix timestamp in seconds.",
+                "example": 1793318400
+              }
+            },
+            "required": [
+              "at",
+              "reason",
+              "expires"
+            ],
+            "description": "An agent proposed accepting the risk; it waits for the owner's confirmation (never accepted until then).",
+            "example": {
+              "at": 1793318400,
+              "reason": null,
+              "expires": 1793318400
+            }
+          }
+        },
+        "required": [
+          "status",
+          "label",
+          "reason",
+          "by",
+          "at",
+          "revisit_triggers",
+          "can_accept"
+        ],
+        "description": "Round 43: the owner's decision on this task (fix it or accept the risk). The field `decision` is the separate updateTask claim / decline record."
+      },
       "PlanCitation": {
         "type": "object",
         "properties": {
@@ -8553,7 +8845,7 @@
         "properties": {
           "type": {
             "type": "string",
-            "description": "Stable action type: apply_task, provide_facts, verify_task, answer_question, ask_human_to_confirm, connect_billing_in_dashboard, store_stripe_test_key, wait_for_verification, run_first_check, review_wont_fix, done_for_now (nothing left an agent can do in code now: the rest waits for a deploy / real send, and maybe the owner; the description lists both; finish the change), done.",
+            "description": "Stable action type: apply_task, provide_facts, verify_task, answer_question, ask_human_to_confirm, connect_billing_in_dashboard, connect_stripe (give the owner the one “Connect with Stripe” link in the description; read-only, no key), store_stripe_test_key, wait_for_verification, run_first_check, review_wont_fix, done_for_now (nothing left an agent can do in code now: the rest waits for a deploy / real send, and maybe the owner; the description lists both; finish the change), done.",
             "example": "apply_task"
           },
           "description": {
@@ -8697,7 +8989,7 @@
           "title": {
             "type": "string",
             "description": "Short imperative title.",
-            "example": "Show the renewal terms and an unchecked consent box above the Subscribe button"
+            "example": "Show the renewal terms right above the purchase button"
           },
           "status": {
             "type": "string",
@@ -8742,6 +9034,50 @@
             ],
             "description": "before_launch (tier required: an open one concerns a requirement at checkout, cancellation or a required notice; only these keep the site from being ready to launch) or good_practice (tier recommended or extra: optional suggestions, never blocking). Always present on API responses.",
             "example": "before_launch"
+          },
+          "conversion_impact": {
+            "type": "object",
+            "properties": {
+              "level": {
+                "type": "string",
+                "enum": [
+                  "none",
+                  "small",
+                  "noticeable"
+                ],
+                "description": "What the change costs at checkout: none (text only, or not on the checkout), small (one extra click: a required checkbox, only where a cited law asks for a separate opt-in), noticeable (a change to the purchase button's own label; never a default fix).",
+                "example": "none"
+              },
+              "reason": {
+                "type": "string",
+                "description": "One plain line: why.",
+                "example": "Text next to your purchase button; the button and its label stay as they are."
+              }
+            },
+            "required": [
+              "level",
+              "reason"
+            ],
+            "description": "Round 42: the conversion cost of this task's change. Checkbox's default fix is the lowest-friction change that meets the cited law. Always present on API responses.",
+            "example": {
+              "level": "none",
+              "reason": "Text next to your purchase button; the button and its label stay as they are."
+            }
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "do_this",
+              "your_call"
+            ],
+            "description": "Round 43: do_this (one of the three things Checkbox always asks for: renewal terms next to the purchase button with consent, easy online cancellation, the required reminder and acknowledgment emails; never acceptable as a risk) or your_call (the owner fixes it or accepts the risk). Always present on API responses.",
+            "example": "do_this"
+          },
+          "risk_if_skipped": {
+            "$ref": "#/components/schemas/RiskIfSkipped"
+          },
+          "risk_decision": {
+            "$ref": "#/components/schemas/RiskDecision"
           },
           "compliance_status": {
             "type": "string",
@@ -9093,7 +9429,8 @@
               "no_longer_applicable",
               "superseded",
               "declined",
-              "decided"
+              "decided",
+              "risk_accepted"
             ],
             "description": "Done / declined tasks: verified (its checks pass), no_longer_applicable (its checks no longer apply, e.g. the data source changed), superseded, declined, decided (the owner confirmed a decision, e.g. New York notices by email only: closed, but its checks are not verified).",
             "example": null
@@ -9272,10 +9609,14 @@
                 "enum": [
                   "pending",
                   "passed",
+                  "passed_with_gaps",
+                  "not_checked",
+                  "pending_live_check",
+                  "needs_review",
                   "incomplete",
                   "failed"
                 ],
-                "description": "Result. incomplete: every check observed passes, but something the task covers was not given to Checkbox yet (e.g. a plan's Checkout config is not registered); not done.",
+                "description": "Result, the same word retrieveVerification gives for this verification (see Verification.status; superseded and passed_with_notes are only said there, with the plan). incomplete: every check observed passes, but something the task covers was not given to Checkbox yet (e.g. a plan's Checkout config is not registered); not done.",
                 "example": "failed"
               },
               "created": {
@@ -9443,6 +9784,366 @@
         ],
         "description": "One ordered compliance task: the requirement, where to change, the exact change and how to verify it."
       },
+      "ExposureQuestion": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "enum": [
+              "exposure_estimate"
+            ],
+            "description": "Always \"exposure_estimate\".",
+            "example": "exposure_estimate"
+          },
+          "text": {
+            "type": "string",
+            "description": "The question for the owner, in plain words.",
+            "example": "About how many subscribers do you have, and how many are in California? (Optional: it only makes the risk estimates more accurate.)"
+          },
+          "optional": {
+            "type": "boolean",
+            "enum": [
+              true
+            ],
+            "description": "Always true: never blocks anything. Ask it once; skip it if the owner prefers not to say.",
+            "example": true
+          },
+          "options": {
+            "type": "object",
+            "properties": {
+              "subscribers": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "lt100",
+                    "100to1k",
+                    "1kto10k",
+                    "gt10k"
+                  ]
+                },
+                "description": "lt100 (fewer than 100), 100to1k, 1kto10k, gt10k (more than 10,000).",
+                "example": [
+                  "lt100",
+                  "100to1k",
+                  "1kto10k",
+                  "gt10k"
+                ]
+              },
+              "california_share": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "low",
+                    "medium",
+                    "high"
+                  ]
+                },
+                "description": "low (under about 8%), medium (8-20%), high (over 20%).",
+                "example": [
+                  "low",
+                  "medium",
+                  "high"
+                ]
+              }
+            },
+            "required": [
+              "subscribers",
+              "california_share"
+            ],
+            "description": "The answers.",
+            "example": {
+              "subscribers": [
+                "lt100",
+                "100to1k",
+                "1kto10k",
+                "gt10k"
+              ],
+              "california_share": [
+                "low",
+                "medium",
+                "high"
+              ]
+            }
+          },
+          "how_to_answer": {
+            "type": "string",
+            "description": "The call that records the answer.",
+            "example": "updateSiteExposure { subscribers: \"100to1k\", california_share: \"low\" } (MCP: call_api with operation_id updateSiteExposure); { declined: true } if the owner prefers not to say."
+          }
+        },
+        "required": [
+          "id",
+          "text",
+          "optional",
+          "options",
+          "how_to_answer"
+        ],
+        "description": "The optional owner question while nothing is known (null otherwise, or once answered or declined)."
+      },
+      "Exposure": {
+        "type": "object",
+        "properties": {
+          "object": {
+            "type": "string",
+            "enum": [
+              "exposure"
+            ],
+            "description": "String representing the object's type. Always \"exposure\".",
+            "example": "exposure"
+          },
+          "site": {
+            "type": "string",
+            "description": "The site.",
+            "example": "site_3f9a1c2e7b4d4e0f9a8b7c6d5e4f3a2b"
+          },
+          "livemode": {
+            "type": "boolean",
+            "description": "true for live-mode objects, false for test mode (ck_test_ keys act on an isolated sandbox).",
+            "example": false
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "stripe_live",
+              "owner_estimate",
+              "unknown"
+            ],
+            "description": "stripe_live: aggregate counts read from live Stripe (read-only connection); owner_estimate: the owner's answer to the one question; unknown: neither yet (levels are general estimates). Test-mode Stripe data is never used.",
+            "example": "stripe_live"
+          },
+          "estimate_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "owner",
+              "agent"
+            ],
+            "description": "Round 43 review: owner_estimate only: who entered it. agent (an API key, never confirmed by the owner): shown as \"estimate entered by your agent\", and it never lowers a risk level below what no estimate gives.",
+            "example": null
+          },
+          "as_of": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "When the figures were read or answered. Unix timestamp in seconds.",
+            "example": 1793318400
+          },
+          "active_subscriptions": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Active + trialing subscriptions in live Stripe (null when unknown).",
+            "example": 1240
+          },
+          "trialing": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Of which in a trial.",
+            "example": 85
+          },
+          "annual_share": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "Share (0-1) billed yearly or longer.",
+            "example": 0.3
+          },
+          "by_jurisdiction": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "Subscriptions per billing location: \"US-CA\" (a U.S. state), \"US\" (state unknown), another country's code, or \"unknown\". Empty when locations could not be read (see gaps). Counts only.",
+            "example": {
+              "US-CA": 210,
+              "US-NY": 95,
+              "US": 40
+            }
+          },
+          "dispute_rate_90d": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "Disputes / successful charges over the last 90 days (0-1).",
+            "example": 0.003
+          },
+          "band": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "lt100",
+              "100to1k",
+              "1kto10k",
+              "gt10k"
+            ],
+            "description": "Subscriber band (owner estimate, or from the live count).",
+            "example": "1kto10k"
+          },
+          "ca_share": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "low",
+              "medium",
+              "high"
+            ],
+            "description": "Share in California (owner estimate, or from live locations).",
+            "example": "medium"
+          },
+          "gaps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "field": {
+                  "type": "string",
+                  "description": "The field Checkbox could not read.",
+                  "example": "disputeRate90d"
+                },
+                "reason": {
+                  "type": "string",
+                  "description": "Why, in plain words.",
+                  "example": "Stripe did not allow reading disputes and charges (needs dispute_read and charge_read)."
+                }
+              },
+              "required": [
+                "field",
+                "reason"
+              ]
+            },
+            "description": "Fields that could not be read and why (for example a permission the installed Stripe App does not have yet).",
+            "example": []
+          },
+          "truncated": {
+            "type": "boolean",
+            "description": "A read stopped at its cap: counts are lower bounds.",
+            "example": false
+          },
+          "summary": {
+            "type": "object",
+            "properties": {
+              "level": {
+                "type": "string",
+                "enum": [
+                  "very_low",
+                  "low",
+                  "medium",
+                  "high"
+                ],
+                "description": "very_low, low, medium or high: Checkbox's estimate, not legal advice.",
+                "example": "low"
+              },
+              "line": {
+                "type": "string",
+                "description": "One line for people: counts, California share, dispute rate and the overall level.",
+                "example": "1,240 active subscriptions in live Stripe on 2026-11-14, 17% in California, dispute rate 0.3% over 90 days. Overall exposure: medium."
+              },
+              "reasons": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "What raised or lowered the level.",
+                "example": []
+              },
+              "known": {
+                "type": "boolean",
+                "description": "false when nothing is known and levels are general estimates.",
+                "example": true
+              }
+            },
+            "required": [
+              "level",
+              "line",
+              "reasons",
+              "known"
+            ],
+            "description": "The overall exposure line.",
+            "example": {
+              "level": "low",
+              "line": "1,240 active subscriptions in live Stripe on 2026-11-14, 17% in California, dispute rate 0.3% over 90 days. Overall exposure: medium.",
+              "reasons": [],
+              "known": true
+            }
+          },
+          "question": {
+            "$ref": "#/components/schemas/ExposureQuestion"
+          },
+          "stripe": {
+            "type": "object",
+            "properties": {
+              "last_read": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "description": "When live Stripe was last read successfully. Unix timestamp in seconds.",
+                "example": 1793318400
+              },
+              "last_error": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The last read failure, if the newest read failed (the previous figures are kept).",
+                "example": null
+              }
+            },
+            "required": [
+              "last_read",
+              "last_error"
+            ],
+            "description": "The live Stripe read (refreshed daily and when Stripe is connected).",
+            "example": {
+              "last_read": 1793318400,
+              "last_error": null
+            }
+          },
+          "disclaimer": {
+            "type": "string",
+            "description": "Estimates from public enforcement records and these counts; not legal advice.",
+            "example": "Checkbox's estimate from public enforcement records; not legal advice."
+          }
+        },
+        "required": [
+          "object",
+          "site",
+          "livemode",
+          "source",
+          "as_of",
+          "active_subscriptions",
+          "trialing",
+          "annual_share",
+          "by_jurisdiction",
+          "dispute_rate_90d",
+          "band",
+          "ca_share",
+          "gaps",
+          "truncated",
+          "summary",
+          "question",
+          "stripe",
+          "disclaimer"
+        ],
+        "description": "Round 43: how exposed this business is (aggregate live Stripe counts, the owner's estimate, or unknown), with summary.line to show people and, while nothing is known, one optional owner question (exposure.question: ask once, never blocking). Same object as retrieveSiteExposure. Never changes the status or next_action."
+      },
       "CompliancePlan": {
         "type": "object",
         "properties": {
@@ -9475,9 +10176,10 @@
               "action_required",
               "verifying",
               "compliant",
-              "blocked"
+              "blocked",
+              "risk_accepted"
             ],
-            "description": "action_required (an agent can apply open tasks now), verifying (changes applied; waiting for confirming observations), compliant (every required check passes or only waits for a live check — an automated assessment, not a legal determination; see compliance.pending_live_checks and coverage), blocked (only human answers (\"Your call\") or declined critical tasks remain). The value \"compliant\" is kept so published SDKs keep working; prefer checks_status (\"checks_pass\") and show status_label to people: never tell anyone the site \"is compliant\".",
+            "description": "action_required (an agent can apply open tasks now), verifying (changes applied; waiting for confirming observations), compliant (every required check passes or only waits for a live check — an automated assessment, not a legal determination; see compliance.pending_live_checks and coverage), blocked (only human answers (\"Your call\") or declined critical tasks remain), risk_accepted (round 43: every Do-this item meets its requirement and every other required item is met or the owner accepted its risk; the accepted items' checks do not pass, so never \"compliant\"). The value \"compliant\" is kept so published SDKs keep working; prefer checks_status (\"checks_pass\") and show status_label to people: never tell anyone the site \"is compliant\".",
             "example": "action_required"
           },
           "checks_status": {
@@ -9486,7 +10188,8 @@
               "action_required",
               "verifying",
               "checks_pass",
-              "blocked"
+              "blocked",
+              "risk_accepted"
             ],
             "description": "The same as status, with \"checks_pass\" in place of the older value \"compliant\" (every required check passes or only waits for a live check: an automated assessment, not a legal determination). Read this one in new code.",
             "example": "checks_pass"
@@ -9598,11 +10301,44 @@
                 "livemode": false,
                 "site": "site_3f9a1c2e7b4d4e0f9a8b7c6d5e4f3a2b",
                 "key": "signup_disclosure",
-                "title": "Show the renewal terms and an unchecked consent box above the Subscribe button",
+                "title": "Show the renewal terms right above the purchase button",
                 "status": "open",
                 "priority": "critical",
                 "tier": "required",
                 "launch_tier": "before_launch",
+                "conversion_impact": {
+                  "level": "none",
+                  "reason": "Text next to your purchase button; the button and its label stay as they are."
+                },
+                "kind": "do_this",
+                "risk_if_skipped": {
+                  "level": "low",
+                  "reason": "Few subscribers in Vermont; the law has no private right of action.",
+                  "basis": [],
+                  "affected": null,
+                  "affected_lower_bound": true
+                },
+                "risk_decision": {
+                  "status": "open",
+                  "label": "Your call: fix or accept the risk",
+                  "reason": null,
+                  "reason_source": "owner",
+                  "by": null,
+                  "at": 1793318400,
+                  "revisit_triggers": [],
+                  "can_accept": false,
+                  "not_acceptable_reason": "This is one of the three things Checkbox always asks for…",
+                  "reopened": {
+                    "at": 1793318400,
+                    "reason": "It has been 12 months since you accepted this risk (2026-11-14).",
+                    "code": "twelve_months"
+                  },
+                  "proposal": {
+                    "at": 1793318400,
+                    "reason": null,
+                    "expires": 1793318400
+                  }
+                },
                 "compliance_status": "pending_live_check",
                 "compliance_status_label": "Checks pass",
                 "order": 1,
@@ -9898,7 +10634,8 @@
                 "compliant": 9,
                 "not_applicable": 6,
                 "not_set_up": 0,
-                "not_checked": 0
+                "not_checked": 0,
+                "risk_accepted": 0
               },
               "pending_live_checks": [
                 {
@@ -10004,12 +10741,12 @@
                   "properties": {
                     "id": {
                       "type": "string",
-                      "description": "The id answerTask takes: the id of the task whose question it is (task_…), or the question's name for those that are not one task's: \"email_sender\", \"notices_support_email\", \"notices_cancel_timing\", \"stripe_terms_url\", \"stripe_portal_login\", \"replace_payment_link\" (send site with the answer when the account has several sites). Every listed question is answered with answerTask and this id.",
+                      "description": "The id answerTask takes: the id of the task whose question it is (task_…), or the question's name for those that are not one task's: \"email_sender\", \"notices_support_email\", \"notices_cancel_timing\", \"stripe_terms_url\", \"stripe_portal_login\", \"replace_payment_link\", \"connect_stripe\" (send site with the answer when the account has several sites). Every listed question is answered with answerTask and this id.",
                       "example": "email_sender"
                     },
                     "key": {
                       "type": "string",
-                      "description": "What the question is: \"email_sender\" (who sends the required emails), \"notices_support_email\" / \"notices_cancel_timing\" (what Checkbox Notices needs before it sends), \"stripe_terms_url\" (the Terms of Service URL Stripe needs before it collects consent, in test mode too), \"stripe_portal_login\" / \"replace_payment_link\" (Stripe Dashboard steps of a Payment Link site), or the key of the task whose question it is.",
+                      "description": "What the question is: \"email_sender\" (who sends the required emails), \"notices_support_email\" / \"notices_cancel_timing\" (what Checkbox Notices needs before it sends), \"stripe_terms_url\" (the Terms of Service URL Stripe needs before it collects consent, in test mode too), \"stripe_portal_login\" / \"replace_payment_link\" (Stripe Dashboard steps of a Payment Link site), \"connect_stripe\" (the owner's one \"Connect with Stripe\" link, read-only; closes when Checkbox sees the connection), or the key of the task whose question it is.",
                       "example": "email_sender"
                     },
                     "added_later": {
@@ -10021,6 +10758,11 @@
                       "type": "boolean",
                       "description": "true when the question closed earlier (see closed) and is asked again because what it is about changed back. Absent otherwise.",
                       "example": true
+                    },
+                    "owner_link": {
+                      "type": "string",
+                      "description": "Round 44: a legal question the owner answers themselves at this link (their To-do page, signed in). Send it in the same message as the other questions: their answer there counts at once, with no second confirmation. Absent for other questions.",
+                      "example": "https://app.checkbox.site/todo"
                     },
                     "text": {
                       "type": "string",
@@ -10075,6 +10817,7 @@
                     "key": "email_sender",
                     "added_later": true,
                     "reopened": true,
+                    "owner_link": "https://app.checkbox.site/todo",
                     "text": "Who sends the required emails (renewal reminder, charge notice): you (your code), or Checkbox Notices?",
                     "options": [
                       "me",
@@ -10201,6 +10944,7 @@
                   "key": "email_sender",
                   "added_later": true,
                   "reopened": true,
+                  "owner_link": "https://app.checkbox.site/todo",
                   "text": "Who sends the required emails (renewal reminder, charge notice): you (your code), or Checkbox Notices?",
                   "options": [
                     "me",
@@ -10346,6 +11090,189 @@
                 "task": null
               }
             ]
+          },
+          "exposure": {
+            "$ref": "#/components/schemas/Exposure"
+          },
+          "exposure_summary": {
+            "type": "object",
+            "properties": {
+              "level": {
+                "type": "string",
+                "enum": [
+                  "very_low",
+                  "low",
+                  "medium",
+                  "high"
+                ],
+                "description": "very_low, low, medium or high.",
+                "example": "low"
+              },
+              "line": {
+                "type": "string",
+                "description": "One line to show (the MCP exposure line, the Overview card).",
+                "example": "Exposure: not known yet (connect live Stripe or answer one question)"
+              },
+              "reasons": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Why, each with its basis.",
+                "example": []
+              },
+              "known": {
+                "type": "boolean",
+                "description": "Whether Checkbox knows anything of the exposure (live Stripe counts or the owner's estimate).",
+                "example": false
+              }
+            },
+            "required": [
+              "level",
+              "line",
+              "reasons"
+            ],
+            "description": "Round 43: the exposure in one line and a level.",
+            "example": {
+              "level": "low",
+              "line": "Exposure: not known yet (connect live Stripe or answer one question)",
+              "reasons": [],
+              "known": false
+            }
+          },
+          "owner_decisions": {
+            "type": "object",
+            "properties": {
+              "message": {
+                "type": "string",
+                "description": "The one message to send the owner: each Your-call item with its risk if skipped and its cost to sign-ups; \"Fix or accept the risk\".",
+                "example": "Fix or accept the risk: 2 items are your call…"
+              },
+              "items": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "task": {
+                      "type": "string",
+                      "description": "Unique identifier of the task (task_…).",
+                      "example": "task_3f9a1c2e7b4d4e0f9a8b7c6d5e4f3a2b"
+                    },
+                    "key": {
+                      "type": "string",
+                      "description": "Task key.",
+                      "example": "terms_refund"
+                    },
+                    "title": {
+                      "type": "string",
+                      "description": "Task title.",
+                      "example": "Make the refund policy match every refund / money-back promise on the site"
+                    },
+                    "risk_if_skipped": {
+                      "$ref": "#/components/schemas/RiskIfSkipped"
+                    },
+                    "conversion_impact": {
+                      "type": "object",
+                      "properties": {
+                        "level": {
+                          "type": "string",
+                          "enum": [
+                            "none",
+                            "small",
+                            "noticeable"
+                          ],
+                          "description": "none, small or noticeable.",
+                          "example": "none"
+                        },
+                        "reason": {
+                          "type": "string",
+                          "description": "Why.",
+                          "example": "Does not change the checkout."
+                        }
+                      },
+                      "required": [
+                        "level",
+                        "reason"
+                      ],
+                      "description": "What fixing it costs at checkout.",
+                      "example": {
+                        "level": "none",
+                        "reason": "Does not change the checkout."
+                      }
+                    }
+                  },
+                  "required": [
+                    "task",
+                    "key",
+                    "title",
+                    "risk_if_skipped",
+                    "conversion_impact"
+                  ]
+                },
+                "description": "The open Your-call items.",
+                "example": [
+                  {
+                    "task": "task_3f9a1c2e7b4d4e0f9a8b7c6d5e4f3a2b",
+                    "key": "terms_refund",
+                    "title": "Make the refund policy match every refund / money-back promise on the site",
+                    "risk_if_skipped": {
+                      "level": "low",
+                      "reason": "Few subscribers in Vermont; the law has no private right of action.",
+                      "basis": [],
+                      "affected": null,
+                      "affected_lower_bound": true
+                    },
+                    "conversion_impact": {
+                      "level": "none",
+                      "reason": "Does not change the checkout."
+                    }
+                  }
+                ]
+              },
+              "accept_url": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The owner's To-do page, where only the owner accepts a risk.",
+                "example": "https://app.checkbox.site/todo"
+              },
+              "how": {
+                "type": "string",
+                "description": "Agents propose (proposeRiskAcceptance), never accept.",
+                "example": "Agents may propose accepting a risk…"
+              }
+            },
+            "required": [
+              "message",
+              "items",
+              "accept_url",
+              "how"
+            ],
+            "description": "Round 43: the open Your-call items as ONE owner decision (\"Fix or accept the risk\"). Absent when none is open.",
+            "example": {
+              "message": "Fix or accept the risk: 2 items are your call…",
+              "items": [
+                {
+                  "task": "task_3f9a1c2e7b4d4e0f9a8b7c6d5e4f3a2b",
+                  "key": "terms_refund",
+                  "title": "Make the refund policy match every refund / money-back promise on the site",
+                  "risk_if_skipped": {
+                    "level": "low",
+                    "reason": "Few subscribers in Vermont; the law has no private right of action.",
+                    "basis": [],
+                    "affected": null,
+                    "affected_lower_bound": true
+                  },
+                  "conversion_impact": {
+                    "level": "none",
+                    "reason": "Does not change the checkout."
+                  }
+                }
+              ],
+              "accept_url": "https://app.checkbox.site/todo",
+              "how": "Agents may propose accepting a risk…"
+            }
           },
           "rules_version": {
             "type": [
@@ -10507,19 +11434,97 @@
               "wont_fix",
               "not_applicable"
             ],
-            "description": "in_progress claims the task (other agents see it), wont_fix declines it (needs reason; a declined critical/high task keeps the plan from reaching status compliant), not_applicable records that the task does not apply to this business (needs reason, e.g. \"no price changes are planned\"; the task closes as no_longer_applicable and does not block the plan), open clears any of them.",
+            "description": "in_progress claims the task (other agents see it); open clears the claim. wont_fix and not_applicable (each needs reason) are, on a Your-call task, a proposal the owner confirms at a link (the task stays open until then); on a Do-this task they are refused (409 do_this_not_acceptable).",
             "example": "in_progress"
           },
           "reason": {
             "type": "string",
             "minLength": 3,
             "maxLength": 1000,
-            "description": "Why (required for wont_fix).",
+            "description": "Why (required for wont_fix and not_applicable; shown to the owner with the proposal).",
             "example": "This plan is no longer sold; no subscribers left."
           }
         },
         "required": [
           "status"
+        ]
+      },
+      "RiskAcceptanceProposal": {
+        "type": "object",
+        "properties": {
+          "object": {
+            "type": "string",
+            "enum": [
+              "risk_acceptance_proposal"
+            ],
+            "description": "Object type.",
+            "example": "risk_acceptance_proposal"
+          },
+          "task": {
+            "type": "string",
+            "description": "Unique identifier of the task (task_…).",
+            "example": "task_3f9a1c2e7b4d4e0f9a8b7c6d5e4f3a2b"
+          },
+          "key": {
+            "type": "string",
+            "description": "Task key.",
+            "example": "annual_terms_notice"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "awaiting_owner_confirmation"
+            ],
+            "description": "Always awaiting_owner_confirmation: nothing is accepted until the owner confirms.",
+            "example": "awaiting_owner_confirmation"
+          },
+          "reason": {
+            "type": "string",
+            "description": "Your reason, as recorded.",
+            "example": "Fewer than 20 subscribers in Vermont."
+          },
+          "confirmation_url": {
+            "type": "string",
+            "description": "The link the owner opens (signed in) to accept or decline.",
+            "example": "https://app.checkbox.site/confirm-risk?task=task_…&token=…"
+          },
+          "todo_url": {
+            "type": "string",
+            "description": "The owner's To-do page (every decision on one page).",
+            "example": "https://app.checkbox.site/todo"
+          },
+          "risk_if_skipped": {
+            "$ref": "#/components/schemas/RiskIfSkipped"
+          },
+          "next_action": {
+            "$ref": "#/components/schemas/PlanNextAction"
+          }
+        },
+        "required": [
+          "object",
+          "task",
+          "key",
+          "status",
+          "reason",
+          "confirmation_url",
+          "todo_url",
+          "next_action"
+        ],
+        "description": "An agent's proposal to accept a task's risk, waiting for the owner. Never an acceptance."
+      },
+      "ProposeRiskAcceptanceParams": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 1000,
+            "description": "Why you propose accepting the risk (shown to the owner with the risk if skipped).",
+            "example": "Fewer than 20 subscribers in Vermont; bold renewal text would need a redesign of the checkout."
+          }
+        },
+        "required": [
+          "reason"
         ]
       },
       "AnsweredTask": {
@@ -10626,6 +11631,18 @@
             "maxLength": 100,
             "description": "Only for an owner question named like email_sender: the site it belongs to (needed when the account has several sites).",
             "example": "site_3ce96a872b444dbb8c30bc247624d3ea"
+          },
+          "task": {
+            "type": "string",
+            "maxLength": 100,
+            "description": "Optional: the same id as in the path (a task id or an owner question's name). Accepted so a body that repeats it works; a different id is refused (parameter_invalid).",
+            "example": "email_sender"
+          },
+          "key": {
+            "type": "string",
+            "maxLength": 100,
+            "description": "Optional: the owner question's key, the same as the path id (owner_questions[].key). Accepted and checked like task.",
+            "example": "email_sender"
           }
         },
         "required": [
@@ -10659,6 +11676,16 @@
             "type": "string",
             "description": "What was observed.",
             "example": "No recurring price near the purchase button."
+          },
+          "status": {
+            "type": "string",
+            "description": "Round 44: this check's result in one word, the same value as observed (pass, fail, needs_review, missing_data, not_checked, not_applicable, unknown, informational). Never null.",
+            "example": "pass"
+          },
+          "blocking": {
+            "type": "boolean",
+            "description": "Round 42, whole-site verifications only: true when the plan counts this check as something left to do (it fails, or a required task that owns it is still open); false for a check that passes or only waits (a live check that completes on its own, an optional suggestion, a check no open task owns). Count only blocking checks as \"not passing\".",
+            "example": true
           }
         },
         "required": [
@@ -10666,7 +11693,8 @@
           "expected",
           "observed",
           "source",
-          "detail"
+          "detail",
+          "status"
         ],
         "description": "Expected vs observed for one check."
       },
@@ -10949,7 +11977,9 @@
                 "expected": "pass",
                 "observed": "fail",
                 "source": "static_fetch",
-                "detail": "No recurring price near the purchase button."
+                "detail": "No recurring price near the purchase button.",
+                "status": "pass",
+                "blocking": true
               }
             ]
           },
@@ -10965,7 +11995,9 @@
                 "expected": "pass",
                 "observed": "fail",
                 "source": "static_fetch",
-                "detail": "No recurring price near the purchase button."
+                "detail": "No recurring price near the purchase button.",
+                "status": "pass",
+                "blocking": true
               }
             ]
           },
@@ -10978,7 +12010,8 @@
               "action_required",
               "verifying",
               "compliant",
-              "blocked"
+              "blocked",
+              "risk_accepted"
             ],
             "description": "Plan status after this verification (null while pending).",
             "example": "action_required"
@@ -11087,7 +12120,7 @@
           "html": {
             "type": "string",
             "maxLength": 900000,
-            "description": "page_fetch tasks: the rendered page HTML before you deploy, at most ~900 KB (request bodies are limited to 1 MB). Pre-check only; the confirming scan runs on the live page.",
+            "description": "page_fetch tasks and the sign-up tasks (signup_disclosure): the rendered page HTML before you deploy, at most ~900 KB (request bodies are limited to 1 MB). Pre-check only; the confirming scan runs on the live page. Other tasks (cancellation, account page) refuse it (parameter_invalid): deploy, then verify without it.",
             "example": "<html>…</html>"
           },
           "stripe_checkout_session": {
@@ -11244,7 +12277,9 @@
                     "expected": "pass",
                     "observed": "fail",
                     "source": "static_fetch",
-                    "detail": "No recurring price near the purchase button."
+                    "detail": "No recurring price near the purchase button.",
+                    "status": "pass",
+                    "blocking": true
                   }
                 ],
                 "diff": [
@@ -11253,7 +12288,9 @@
                     "expected": "pass",
                     "observed": "fail",
                     "source": "static_fetch",
-                    "detail": "No recurring price near the purchase button."
+                    "detail": "No recurring price near the purchase button.",
+                    "status": "pass",
+                    "blocking": true
                   }
                 ],
                 "plan_status": "action_required",
@@ -11299,6 +12336,37 @@
           "url"
         ],
         "description": "A page of verifications, newest first."
+      },
+      "UpdateExposureParams": {
+        "type": "object",
+        "properties": {
+          "subscribers": {
+            "type": "string",
+            "enum": [
+              "lt100",
+              "100to1k",
+              "1kto10k",
+              "gt10k"
+            ],
+            "description": "About how many subscribers: lt100, 100to1k, 1kto10k, gt10k.",
+            "example": "100to1k"
+          },
+          "california_share": {
+            "type": "string",
+            "enum": [
+              "low",
+              "medium",
+              "high"
+            ],
+            "description": "About how many of them are in California: low (under about 8%), medium (8-20%), high (over 20%).",
+            "example": "low"
+          },
+          "declined": {
+            "type": "boolean",
+            "description": "true: the owner prefers not to say (the question is not asked again).",
+            "example": false
+          }
+        }
       },
       "FixArtifact": {
         "type": "object",
@@ -14624,17 +15692,17 @@
           },
           "consent_label": {
             "type": "string",
-            "description": "Label for the unchecked, required consent checkbox.",
+            "description": "Label for an unchecked, required consent checkbox, for a page that adds its own consent checkbox or for Checkbox Elements; see note.",
             "example": "I agree that my Acme subscription renews automatically …"
           },
           "button_text": {
             "type": "string",
-            "description": "Purchase button label that itself states the renewal.",
-            "example": "Subscribe — $19.99/month, renews automatically"
+            "description": "Your purchase button label (the one you sent, else a plain \"Subscribe\" / \"Start free trial\"). Keep your own label: Checkbox never asks for an \"Agree &\" button.",
+            "example": "Subscribe"
           },
           "html": {
             "type": "string",
-            "description": "Drop-in markup: disclosure + unchecked required checkbox + button. When consent_on is set (the purchase completes on a Stripe Payment Link or Stripe Checkout), the terms only: no checkbox, no button.",
+            "description": "Drop-in markup for directly above your own purchase button. By default the one renewal line ending with its consent sentence (\"By subscribing, you agree to these renewal terms.\"): no checkbox, no button, your button keeps its label. A required, unchecked checkbox only when note says so. When consent_on is set (the purchase completes on a Stripe Payment Link or Stripe Checkout), the terms only.",
             "example": "<div class=\"checkbox-renewal-terms\">…</div>"
           },
           "consent_on": {
@@ -14648,8 +15716,8 @@
           },
           "note": {
             "type": "string",
-            "description": "What html contains and what is still needed elsewhere (set with consent_on).",
-            "example": "html is the renewal terms only (no checkbox, no button) …"
+            "description": "What html contains (with or without a checkbox, and why) and what is still needed elsewhere.",
+            "example": "html is the renewal line (replacement.short_disclosure_text) ending with …"
           },
           "jsx": {
             "type": "string",
@@ -15226,7 +16294,12 @@
               },
               "bold": {
                 "type": "boolean",
-                "description": "The disclosure is bold / semibold.",
+                "description": "The disclosure is semibold or bold (font-weight 600 or more; modelled as semibold).",
+                "example": true
+              },
+              "region_script": {
+                "type": "boolean",
+                "description": "The line is shown by Checkbox Elements, the snippet-rendered disclosure, or replacement.html with its region script (/g.js), which show it in bold to visitors Checkbox places in Vermont by IP (plans with a first term of a year or more). Default false.",
                 "example": true
               },
               "boxed": {
@@ -15250,6 +16323,7 @@
               "font_size_px": 14,
               "contrast_ratio": 7,
               "bold": true,
+              "region_script": true,
               "boxed": true,
               "body_font_size_px": 14
             }
@@ -15310,7 +16384,7 @@
           "site": {
             "type": "string",
             "maxLength": 100,
-            "description": "Round 23: a site of yours (site_…): the disclosure is judged against the plan it states among the site's plans (the connected Stripe Prices win over plans typed in setup), with the site's merchant name, cancellation URL and jurisdictions, as verifyTask judges it. Plan fields you send are replaced by the plan's. \"none\" judges only what you send.",
+            "description": "Round 23: a site of yours (site_…): the disclosure is judged against the plan it states among the site's plans (the connected Stripe Prices win over plans typed in setup), with the site's merchant name, cancellation URL and jurisdictions, as verifyTask judges it, when you send no price. Plan terms you send (a price, with its interval, trial…) are never replaced: they are judged as sent, the plan fields you leave out come from the site plan they match, and when they match none the result carries a site_plans_differ warning. \"none\" judges only what you send.",
             "example": "site_4b35bd074dca41e498ea4bc02b3744d8"
           },
           "plan": {
@@ -15341,12 +16415,14 @@
           "path": {
             "type": "string",
             "description": "JSON Pointer into params.",
-            "example": "/consent_collection"
+            "example": "/custom_text"
           },
           "value": {
             "description": "Value to set.",
             "example": {
-              "terms_of_service": "required"
+              "submit": {
+                "message": "Renews automatically at $12.00 every month until you cancel. Cancel anytime at https://example.com/account. By subscribing, you agree to these renewal terms."
+              }
             }
           }
         },
@@ -15675,9 +16751,11 @@
                 "example": [
                   {
                     "op": "add",
-                    "path": "/consent_collection",
+                    "path": "/custom_text",
                     "value": {
-                      "terms_of_service": "required"
+                      "submit": {
+                        "message": "Renews automatically at $12.00 every month until you cancel. Cancel anytime at https://example.com/account. By subscribing, you agree to these renewal terms."
+                      }
                     }
                   }
                 ]
@@ -15687,8 +16765,10 @@
                 "additionalProperties": {},
                 "description": "The full params with the fix applied.",
                 "example": {
-                  "consent_collection": {
-                    "terms_of_service": "required"
+                  "custom_text": {
+                    "submit": {
+                      "message": "Renews automatically at $12.00 every month until you cancel. Cancel anytime at https://example.com/account. By subscribing, you agree to these renewal terms."
+                    }
                   }
                 }
               },
@@ -15790,15 +16870,19 @@
               "patch": [
                 {
                   "op": "add",
-                  "path": "/consent_collection",
+                  "path": "/custom_text",
                   "value": {
-                    "terms_of_service": "required"
+                    "submit": {
+                      "message": "Renews automatically at $12.00 every month until you cancel. Cancel anytime at https://example.com/account. By subscribing, you agree to these renewal terms."
+                    }
                   }
                 }
               ],
               "corrected_params": {
-                "consent_collection": {
-                  "terms_of_service": "required"
+                "custom_text": {
+                  "submit": {
+                    "message": "Renews automatically at $12.00 every month until you cancel. Cancel anytime at https://example.com/account. By subscribing, you agree to these renewal terms."
+                  }
                 }
               },
               "verification": {
@@ -16001,7 +17085,7 @@
           "site": {
             "type": "string",
             "maxLength": 100,
-            "description": "A site of yours (site_…): the params are judged as verifyTask judges them — the plan each line_items Price sells (the connected Stripe Prices win over plans typed in setup), the site's merchant name, cancellation URL and jurisdictions; merchant fields you send other than the plan's price / interval / trial are kept. Without it, the params are judged with merchant only (or the one site of the account with Stripe connected when you pass plan). \"none\" judges only what you send.",
+            "description": "A site of yours (site_…): the params are judged as verifyTask judges them — the plan each line_items Price sells (the connected Stripe Prices win over plans typed in setup), the site's merchant name, cancellation URL and jurisdictions; merchant fields you send other than the plan's price / interval / trial are kept. Without it, the params are judged with merchant only (or the one site of the account with Stripe connected when you pass plan). \"none\" judges only what you send. The Price in line_items decides the charge: a merchant price / interval that says otherwise is named (warning merchant_terms_differ_from_price). Without site and without merchant.cancel_url, the cancellation page recorded for the account's one site fills cancel_url (warning cancel_url_from_site).",
             "example": "site_4b35bd074dca41e498ea4bc02b3744d8"
           },
           "plan": {
@@ -16364,9 +17448,11 @@
                 "example": [
                   {
                     "op": "add",
-                    "path": "/consent_collection",
+                    "path": "/custom_text",
                     "value": {
-                      "terms_of_service": "required"
+                      "submit": {
+                        "message": "Renews automatically at $12.00 every month until you cancel. Cancel anytime at https://example.com/account. By subscribing, you agree to these renewal terms."
+                      }
                     }
                   }
                 ]
@@ -16376,8 +17462,10 @@
                 "additionalProperties": {},
                 "description": "The full params with the fix applied.",
                 "example": {
-                  "consent_collection": {
-                    "terms_of_service": "required"
+                  "custom_text": {
+                    "submit": {
+                      "message": "Renews automatically at $12.00 every month until you cancel. Cancel anytime at https://example.com/account. By subscribing, you agree to these renewal terms."
+                    }
                   }
                 }
               },
@@ -16497,15 +17585,19 @@
               "patch": [
                 {
                   "op": "add",
-                  "path": "/consent_collection",
+                  "path": "/custom_text",
                   "value": {
-                    "terms_of_service": "required"
+                    "submit": {
+                      "message": "Renews automatically at $12.00 every month until you cancel. Cancel anytime at https://example.com/account. By subscribing, you agree to these renewal terms."
+                    }
                   }
                 }
               ],
               "corrected_params": {
-                "consent_collection": {
-                  "terms_of_service": "required"
+                "custom_text": {
+                  "submit": {
+                    "message": "Renews automatically at $12.00 every month until you cancel. Cancel anytime at https://example.com/account. By subscribing, you agree to these renewal terms."
+                  }
                 }
               },
               "verification": {
@@ -17087,7 +18179,7 @@
           "site": {
             "type": "string",
             "maxLength": 100,
-            "description": "A site of yours (site_…): the email is judged as verifyTask judges it, against the plan it names (\"Annual\") among the site's plans (the connected Stripe Prices win over plans typed in setup), with the site's jurisdictions. Without it, the one site of the account with Stripe connected is used when there is exactly one (the result says so in warnings, code site_from_stripe). \"none\" judges only the terms you send.",
+            "description": "A site of yours (site_…): the email is judged as verifyTask judges it, against the plan it names (\"Annual\") among the site's plans (the connected Stripe Prices win over plans typed in setup), with the site's jurisdictions, when terms carry no price. Plan terms you send (a price, with its interval, trial…) are never replaced: they are judged as sent, the plan fields you leave out come from the site plan they match, and when they match none the result carries a site_plans_differ warning. Without it, the one site of the account with Stripe connected is used when there is exactly one (the result says so in warnings, code site_from_stripe). \"none\" judges only the terms you send.",
             "example": "site_4b35bd074dca41e498ea4bc02b3744d8"
           },
           "plan": {
@@ -17632,10 +18724,10 @@
                 "disclosure_text": "Your Acme subscription automatically renews every month at $19.99 …",
                 "short_disclosure_text": "Renews automatically every month at $19.99 (plus applicable taxes) until you cancel. Cancel anytime online at https://acme.example/cancel before your next billing date to avoid the next charge.",
                 "consent_label": "I agree that my Acme subscription renews automatically …",
-                "button_text": "Subscribe — $19.99/month, renews automatically",
+                "button_text": "Subscribe",
                 "html": "<div class=\"checkbox-renewal-terms\">…</div>",
                 "consent_on": "payment_link",
-                "note": "html is the renewal terms only (no checkbox, no button) …",
+                "note": "html is the renewal line (replacement.short_disclosure_text) ending with …",
                 "jsx": "<div className=\"checkbox-renewal-terms\">…</div>",
                 "placeholders": [
                   "{{cancel_url}}"
@@ -17790,7 +18882,7 @@
           "site": {
             "type": "string",
             "maxLength": 100,
-            "description": "A site of yours (site_…): the page is judged exactly as verifyTask judges it — against the site's plans (the connected Stripe Prices win over plans typed in setup), its jurisdictions and its checkout type. These replace terms, plans, jurisdictions and checkout_type when the site knows them. Without it, the one site of the account with Stripe connected gives the plans when there is exactly one (warning site_from_stripe says so). \"none\" judges only what you send.",
+            "description": "A site of yours (site_…): the page is judged exactly as verifyTask judges it — against the site's plans (the connected Stripe Prices win over plans typed in setup), its jurisdictions and its checkout type. Its jurisdictions and checkout type replace the ones sent. Plans / terms you send (a price, with its interval, trial…) are never replaced: they are judged as sent, the plan fields you leave out come from the site plan they match, and when they match none the result carries a site_plans_differ warning. Without it, the one site of the account with Stripe connected gives the plans when there is exactly one (warning site_from_stripe says so). \"none\" judges only what you send.",
             "example": "site_4b35bd074dca41e498ea4bc02b3744d8"
           },
           "jurisdictions": {
@@ -18299,6 +19391,207 @@
           }
         },
         "description": "A subscription to plan the legally required notices for."
+      },
+      "VisitorRegion": {
+        "type": "object",
+        "properties": {
+          "object": {
+            "type": "string",
+            "enum": [
+              "visitor_region"
+            ],
+            "description": "String representing the object's type. Always \"visitor_region\".",
+            "example": "visitor_region"
+          },
+          "region": {
+            "type": "string",
+            "enum": [
+              "US-VT",
+              "US-DC",
+              "other",
+              "unknown"
+            ],
+            "description": "The visitor's region from the IP address: \"US-VT\" (Vermont), \"US-DC\" (the District of Columbia), \"other\" (an address elsewhere) or \"unknown\" (no usable address: private, loopback or malformed). Only these two regions are told apart, from an offline table (DB-IP Lite, CC BY 4.0); a VPN, a mobile network or travel can place a visitor wrongly.",
+            "example": "other"
+          },
+          "dc_trial_consent": {
+            "type": "string",
+            "enum": [
+              "geo",
+              "all"
+            ],
+            "description": "DC_TRIAL_CONSENT on this deployment: \"geo\" (default) = the D.C. free-trial consent only for visitors in D.C.; \"all\" = for every visitor of a D.C.-scoped free trial.",
+            "example": "geo"
+          }
+        },
+        "required": [
+          "object",
+          "region",
+          "dc_trial_consent"
+        ],
+        "description": "The requesting browser's region, from its IP address (not stored)."
+      },
+      "RegionCheckResult": {
+        "type": "object",
+        "properties": {
+          "object": {
+            "type": "string",
+            "enum": [
+              "region_check"
+            ],
+            "description": "String representing the object's type. Always \"region_check\".",
+            "example": "region_check"
+          },
+          "region": {
+            "type": "string",
+            "enum": [
+              "US-VT",
+              "US-DC",
+              "other",
+              "unknown"
+            ],
+            "description": "The visitor's region from the IP address: \"US-VT\" (Vermont), \"US-DC\" (the District of Columbia), \"other\" (an address elsewhere) or \"unknown\" (no usable address: private, loopback or malformed). Only these two regions are told apart, from an offline table (DB-IP Lite, CC BY 4.0); a VPN, a mobile network or travel can place a visitor wrongly.",
+            "example": "US-DC"
+          },
+          "separate_opt_in": {
+            "type": "boolean",
+            "description": "This visitor must give a separate opt-in to the renewal (one required, unchecked checkbox; on Stripe Checkout consent_collection.terms_of_service = \"required\"): visitors in Vermont on a plan with a first term of a year or more; visitors in the District of Columbia on a free trial (every visitor of a D.C.-scoped trial with dc_trial_consent \"all\"). true when the region is unknown.",
+            "example": true
+          },
+          "bold_renewal_terms": {
+            "type": "boolean",
+            "description": "Show the renewal terms in bold-face type for this visitor (Vermont, a first term of a year or more). true when the region is unknown.",
+            "example": false
+          },
+          "consent_collection": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "terms_of_service": {
+                "type": "string",
+                "enum": [
+                  "required"
+                ],
+                "description": "Stripe's terms checkbox, required.",
+                "example": "required"
+              }
+            },
+            "required": [
+              "terms_of_service"
+            ],
+            "description": "What to pass to stripe.checkout.sessions.create for this visitor (null: nothing; the renewal line with its \"By subscribing, you agree to these renewal terms.\" sentence is the consent).",
+            "example": {
+              "terms_of_service": "required"
+            }
+          },
+          "reasons": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Why, in plain words with the citation.",
+            "example": [
+              "The District of Columbia asks for a separate opt-in to the renewal for free trials (D.C. Code § 28A-203(c)(2))."
+            ]
+          },
+          "dc_trial_consent": {
+            "type": "string",
+            "enum": [
+              "geo",
+              "all"
+            ],
+            "description": "DC_TRIAL_CONSENT on this deployment: \"geo\" (default) = the D.C. free-trial consent only for visitors in D.C.; \"all\" = for every visitor of a D.C.-scoped free trial.",
+            "example": "geo"
+          },
+          "note": {
+            "type": "string",
+            "description": "How Checkbox judges this and the limits of an IP address.",
+            "example": ""
+          }
+        },
+        "required": [
+          "object",
+          "region",
+          "separate_opt_in",
+          "bold_renewal_terms",
+          "consent_collection",
+          "reasons",
+          "dc_trial_consent",
+          "note"
+        ],
+        "description": "Whether this visitor needs a separate opt-in or bold renewal terms."
+      },
+      "RegionCheckParams": {
+        "type": "object",
+        "properties": {
+          "ip": {
+            "type": "string",
+            "maxLength": 64,
+            "description": "The visitor's IP address, as your server received it (IPv4 or IPv6). Not stored. Give ip or region.",
+            "example": "203.0.113.7"
+          },
+          "region": {
+            "type": "string",
+            "maxLength": 10,
+            "description": "The visitor's region when you already know it (e.g. \"US-DC\", \"DC\", \"US-VT\"); otherwise pass ip.",
+            "example": "US-DC"
+          },
+          "interval": {
+            "type": "string",
+            "enum": [
+              "day",
+              "week",
+              "month",
+              "year"
+            ],
+            "description": "Billing interval of the plan.",
+            "example": "month"
+          },
+          "interval_count": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 36,
+            "description": "Intervals per billing period (default 1).",
+            "example": 1
+          },
+          "trial_days": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 730,
+            "description": "Free-trial days (0 or absent: no trial).",
+            "example": 14
+          },
+          "jurisdictions": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "all"
+                ]
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "maxLength": 10
+                },
+                "maxItems": 60
+              }
+            ],
+            "description": "Where you sell: \"all\" (default) or state codes (\"US-CA\", \"CA\", \"US-NY\"; \"US-FED\" is always included).",
+            "example": [
+              "US-CA",
+              "US-NY"
+            ]
+          }
+        },
+        "required": [
+          "interval"
+        ],
+        "additionalProperties": false,
+        "description": "A visitor (IP or region) and the plan they are about to buy."
       },
       "SuggestionPatchOp": {
         "type": "object",
@@ -19573,12 +20866,12 @@
           "version": {
             "type": "string",
             "description": "Semver of the bundle.",
-            "example": "1.5.9"
+            "example": "1.6.1"
           },
           "url": {
             "type": "string",
             "description": "Immutable URL of this version.",
-            "example": "https://app.checkbox.site/v1/elements/1.5.9/elements.js"
+            "example": "https://app.checkbox.site/v1/elements/1.6.1/elements.js"
           },
           "integrity": {
             "type": "string",
@@ -19620,8 +20913,8 @@
             "description": "Every released version, newest first.",
             "example": [
               {
-                "version": "1.5.9",
-                "url": "https://app.checkbox.site/v1/elements/1.5.9/elements.js",
+                "version": "1.6.1",
+                "url": "https://app.checkbox.site/v1/elements/1.6.1/elements.js",
                 "integrity": "sha384-…",
                 "size": 33000
               }
@@ -20030,7 +21323,7 @@
             "properties": {
               "checked": {
                 "type": "boolean",
-                "description": "Always true.",
+                "description": "The box was ticked (always true for a checkbox consent; false for a clickwrap consent, which has no box).",
                 "example": true
               },
               "initially_checked": {
@@ -20055,6 +21348,15 @@
               "initially_checked": false,
               "required": true
             }
+          },
+          "mechanism": {
+            "type": "string",
+            "enum": [
+              "checkbox",
+              "clickwrap"
+            ],
+            "description": "How the subscriber consented: checkbox (ticked the box) or clickwrap (clicked the pay button next to the renewal terms).",
+            "example": "checkbox"
           },
           "page_url": {
             "type": [
@@ -20111,7 +21413,7 @@
               "null"
             ],
             "description": "elements.js version.",
-            "example": "1.5.9"
+            "example": "1.6.1"
           },
           "client_timestamp": {
             "type": [
@@ -20282,6 +21584,7 @@
           "disclosure",
           "terms",
           "checkbox",
+          "mechanism",
           "page_url",
           "origin",
           "user_agent_sha256",
@@ -20599,12 +21902,21 @@
             "required": [
               "checked"
             ],
-            "description": "Checkbox state.",
+            "description": "Checkbox state. Required unless mechanism is clickwrap.",
             "example": {
               "checked": true,
               "initially_checked": false,
               "required": true
             }
+          },
+          "mechanism": {
+            "type": "string",
+            "enum": [
+              "checkbox",
+              "clickwrap"
+            ],
+            "description": "How the subscriber consented: checkbox (ticked the unchecked box; default) or clickwrap (clicked the pay button next to the renewal terms, which end with \"By subscribing, you agree to these renewal terms.\"; consent_label is that sentence). <checkbox-disclosure> 1.6+ sends clickwrap unless a separate opt-in applies (Vermont) or the merchant chose the checkbox.",
+            "example": "clickwrap"
           },
           "page_url": {
             "type": "string",
@@ -20628,7 +21940,7 @@
             "type": "string",
             "maxLength": 20,
             "description": "elements.js version that rendered the disclosure.",
-            "example": "1.5.9"
+            "example": "1.6.1"
           },
           "presentation": {
             "$ref": "#/components/schemas/ConsentPresentationInput"
@@ -20677,8 +21989,7 @@
         "required": [
           "terms",
           "disclosure_text",
-          "consent_label",
-          "checkbox"
+          "consent_label"
         ]
       },
       "ConsentUpdateParams": {
@@ -20747,13 +22058,14 @@
                   "initially_checked": false,
                   "required": true
                 },
+                "mechanism": "checkbox",
                 "page_url": "https://acme.example/checkout",
                 "origin": "https://acme.example",
                 "user_agent_sha256": null,
                 "customer_reference": "cs_test_a1b2c3",
                 "client_reference": null,
                 "source": "elements",
-                "element_version": "1.5.9",
+                "element_version": "1.6.1",
                 "client_timestamp": null,
                 "presentation": {
                   "violations": [],
@@ -22461,7 +23773,7 @@
               "null"
             ],
             "additionalProperties": {},
-            "description": "Engine-verified params that pass, when Checkbox can correct them: put them in your code, then register again.",
+            "description": "Engine-verified params that pass, when Checkbox can correct them: put them in your code, then register again. When they set consent_collection.terms_of_service = \"required\", Stripe needs a Terms of Service URL in Settings → Business → Public details first (next_action says so).",
             "example": {}
           },
           "problem": {
@@ -23239,7 +24551,7 @@
           },
           "auto_started": {
             "type": "boolean",
-            "description": "Round 41: true when Checkbox started the run itself because the compliance plan asked for one (test mode, with the site's Stripe TEST key stored). createTestRun returns this run while it is active instead of starting another.",
+            "description": "Round 41: true when Checkbox started the run itself because the compliance plan asked for one (test mode, with the site's Stripe TEST key stored). createTestRun without a plan returns this run while it is active, whichever plan it runs (plan says which plan it covers, plans_not_run the others), instead of starting another.",
             "example": false
           },
           "steps": {
@@ -24845,9 +26157,10 @@
               "action_required",
               "verifying",
               "compliant",
-              "blocked"
+              "blocked",
+              "risk_accepted"
             ],
-            "description": "action_required (an agent can apply open tasks now), verifying (changes applied; waiting for confirming observations), compliant (every required check passes or only waits for a live check — an automated assessment, not a legal determination; see compliance.pending_live_checks and coverage), blocked (only human answers (\"Your call\") or declined critical tasks remain). The value \"compliant\" is kept so published SDKs keep working; prefer checks_status (\"checks_pass\") and show status_label to people: never tell anyone the site \"is compliant\".",
+            "description": "action_required (an agent can apply open tasks now), verifying (changes applied; waiting for confirming observations), compliant (every required check passes or only waits for a live check — an automated assessment, not a legal determination; see compliance.pending_live_checks and coverage), blocked (only human answers (\"Your call\") or declined critical tasks remain), risk_accepted (round 43: every Do-this item meets its requirement and every other required item is met or the owner accepted its risk; the accepted items' checks do not pass, so never \"compliant\"). The value \"compliant\" is kept so published SDKs keep working; prefer checks_status (\"checks_pass\") and show status_label to people: never tell anyone the site \"is compliant\".",
             "example": "action_required"
           },
           "status_label": {
@@ -27931,7 +29244,7 @@
       "post": {
         "operationId": "updateFinding",
         "summary": "Triage a finding",
-        "description": "Sets the triage state (open, acknowledged, accepted_risk, resolved) and an optional note. Triage does not change the check result; fixing the issue and re-scanning does.",
+        "description": "Sets the triage state (open, acknowledged, resolved) and an optional note. Triage does not change the check result; fixing the issue and re-scanning does. accepted_risk is refused for API keys (409): only the owner accepts a risk, in the dashboard; agents propose it with proposeRiskAcceptance.",
         "tags": [
           "Findings"
         ],
@@ -28192,7 +29505,7 @@
       "post": {
         "operationId": "updateTask",
         "summary": "Claim, decline or reopen a task",
-        "description": "status in_progress claims the task (shown to other agents and the dashboard); wont_fix declines it with a reason (the merchant's decision, recorded; a declined critical or high task keeps the plan blocked); open clears the decision. Applying a change does not need this call: call verifyTask.",
+        "description": "status in_progress claims the task (shown to other agents and the dashboard); open clears the claim. Round 43: wont_fix / not_applicable (with a reason) on a Your-call task (kind your_call) records a PROPOSAL for the owner, like proposeRiskAcceptance: next_action carries the confirmation link, and nothing closes until the owner confirms it signed in. On a Do-this task (kind do_this) they are refused with 409 do_this_not_acceptable: fix it. Applying a change does not need this call: call verifyTask.",
         "tags": [
           "Compliance plans"
         ],
@@ -28283,6 +29596,101 @@
         }
       }
     },
+    "/v1/tasks/{task}/risk_acceptance": {
+      "post": {
+        "operationId": "proposeRiskAcceptance",
+        "summary": "Propose accepting the risk of a Your-call task (the owner confirms)",
+        "description": "Round 43: for a task with kind your_call that is not met, records a PROPOSAL to accept its risk, with your reason, and returns confirmation_url: the owner opens it while signed in to Checkbox and accepts (with their own reason) or fixes it instead. Nothing is accepted until the owner confirms: the task stays open, and you must not tell anyone it is accepted. A do_this task (renewal terms next to the purchase button with consent, online cancellation, the required reminder and acknowledgment emails) can never be accepted: 409 resource_conflict with why. Prefer fixing: a Your-call item's risk_if_skipped and conversion_impact are on the task; the plan's owner_decisions batches them into one message.",
+        "tags": [
+          "Compliance plans"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "basicAuth": []
+          }
+        ],
+        "x-checkbox-scope": "compliance_plans:write",
+        "x-checkbox-idempotent": true,
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Unique identifier of the task (task_…).",
+              "example": "task_3f9a1c2e7b4d4e0f9a8b7c6d5e4f3a2b"
+            },
+            "required": true,
+            "name": "task",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "API version (date). Defaults to the version your account is pinned to. Known: 2026-10-30.",
+              "example": "2026-10-30"
+            },
+            "required": false,
+            "name": "Checkbox-Version",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 255,
+              "description": "Makes the POST safe to retry: the same key and body within 24 hours return the stored response.",
+              "example": "7f8c3b0e-setup-site-1"
+            },
+            "required": false,
+            "name": "Idempotency-Key",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProposeRiskAcceptanceParams"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RiskAcceptanceProposal"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Error. See error.code (stable) and error.next_action.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "Error. See error.code (stable) and error.next_action.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/tasks/{task}/answer": {
       "post": {
         "operationId": "answerTask",
@@ -28308,7 +29716,7 @@
               "type": "string",
               "minLength": 2,
               "maxLength": 100,
-              "description": "The task id (task_…), or an owner_questions id that is not a task's (email_sender, notices_support_email, notices_cancel_timing, stripe_portal_login, replace_payment_link, stripe_terms_url).",
+              "description": "The task id (task_…), or an owner_questions id that is not a task's (email_sender, notices_support_email, notices_cancel_timing, stripe_portal_login, replace_payment_link, stripe_terms_url, connect_stripe).",
               "example": "task_3f9a1c2e7b4d4e0f9a8b7c6d5e4f3a2b"
             },
             "required": true,
@@ -28777,6 +30185,187 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/VerificationList"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Error. See error.code (stable) and error.next_action.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "Error. See error.code (stable) and error.next_action.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sites/{site}/exposure": {
+      "get": {
+        "operationId": "retrieveSiteExposure",
+        "summary": "Get a site's exposure",
+        "description": "Aggregate subscriber counts read from live Stripe through the read-only connection (active and trialing subscriptions, the share billed yearly, counts per billing state or country, the 90-day dispute rate), refreshed daily and when Stripe is connected; else the owner's estimate; else unknown with one optional question. Counts only: no names, emails or addresses are stored. summary.line is the sentence to show people. Not legal advice.",
+        "tags": [
+          "Exposure"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "basicAuth": []
+          }
+        ],
+        "x-checkbox-scope": "sites:read",
+        "x-checkbox-min-role": "viewer",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Unique identifier of the site (site_…).",
+              "example": "site_3f9a1c2e7b4d4e0f9a8b7c6d5e4f3a2b"
+            },
+            "required": true,
+            "name": "site",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "API version (date). Defaults to the version your account is pinned to. Known: 2026-10-30.",
+              "example": "2026-10-30"
+            },
+            "required": false,
+            "name": "Checkbox-Version",
+            "in": "header"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/Exposure"
+                    },
+                    {
+                      "description": "How exposed this business is: aggregate subscriber counts (never names, emails or addresses), where they are, the dispute rate, and the overall level the risk estimates use."
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Error. See error.code (stable) and error.next_action.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "Error. See error.code (stable) and error.next_action.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "updateSiteExposure",
+        "summary": "Record the owner's exposure estimate",
+        "description": "The owner's answer to the one optional question \"About how many subscribers do you have, and how many are in California?\": subscribers (lt100, 100to1k, 1kto10k, gt10k) and california_share (low, medium, high), or declined: true. Used only while live Stripe figures are not available; live figures win once read. Never blocks the plan. Round 43 review: an estimate sent with an API key is shown as \"estimate entered by your agent\" (estimate_by agent) and never lowers a risk level below what no estimate gives; ask the owner, never guess.",
+        "tags": [
+          "Exposure"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "basicAuth": []
+          }
+        ],
+        "x-checkbox-scope": "sites:write",
+        "x-checkbox-idempotent": true,
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Unique identifier of the site (site_…).",
+              "example": "site_3f9a1c2e7b4d4e0f9a8b7c6d5e4f3a2b"
+            },
+            "required": true,
+            "name": "site",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "API version (date). Defaults to the version your account is pinned to. Known: 2026-10-30.",
+              "example": "2026-10-30"
+            },
+            "required": false,
+            "name": "Checkbox-Version",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 255,
+              "description": "Makes the POST safe to retry: the same key and body within 24 hours return the stored response.",
+              "example": "7f8c3b0e-setup-site-1"
+            },
+            "required": false,
+            "name": "Idempotency-Key",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateExposureParams"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/Exposure"
+                    },
+                    {
+                      "description": "How exposed this business is: aggregate subscriber counts (never names, emails or addresses), where they are, the dispute rate, and the overall level the risk estimates use."
+                    }
+                  ]
                 }
               }
             }
@@ -30977,7 +32566,7 @@
       "post": {
         "operationId": "checkStripeCheckoutSession",
         "summary": "Check Stripe Checkout Session params",
-        "description": "Body: `{ params, merchant }` (or `{ params, site }`). `params` is exactly the object your code gives stripe.checkout.sessions.create; `merchant` adds merchant_name, cancel_url, and price/interval when line_items use a Price id. Checkbox models the Stripe-hosted page those params render and returns findings plus `correction`: a JSON Patch (RFC 6902) and the full corrected params (custom_text.submit with the renewal terms, consent_collection.terms_of_service = \"required\", custom_text.terms_of_service_acceptance as the consent label), verified by the engine. Stripe's own small grey styling keeps \"clear and conspicuous\" at needs_review on any Stripe-hosted page; also show the terms on your page before redirecting. Stateless and deterministic: nothing is stored, the same input on the same as_of date gives the same verdicts. Every verdict comes from the Checkbox rules engine over the legal catalog (federal ROSCA / EFTA plus the state automatic-renewal laws); the response carries rules_version, catalog_version and a disclaimer (not legal advice). Read `verdict`, then `next_action`: it tells you exactly what to change and to call the check again until verdict is pass.",
+        "description": "Body: `{ params, merchant }` (or `{ params, site }`). `params` is exactly the object your code gives stripe.checkout.sessions.create; `merchant` adds merchant_name, cancel_url, and price/interval when line_items use a Price id. Checkbox models the Stripe-hosted page those params render and returns findings plus `correction`: a JSON Patch (RFC 6902) and the full corrected params, verified by the engine: by default only custom_text.submit with the renewal terms, ending with the sentence that makes the click consent (no checkbox); consent_collection only where a cited law asks for a separate opt-in. Stripe's own small grey styling keeps \"clear and conspicuous\" at needs_review on any Stripe-hosted page; also show the terms on your page before redirecting. Stateless and deterministic: nothing is stored, the same input on the same as_of date gives the same verdicts. Every verdict comes from the Checkbox rules engine over the legal catalog (federal ROSCA / EFTA plus the state automatic-renewal laws); the response carries rules_version, catalog_version and a disclaimer (not legal advice). Read `verdict`, then `next_action`: it tells you exactly what to change and to call the check again until verdict is pass.",
         "tags": [
           "Checks"
         ],
@@ -31343,6 +32932,136 @@
         }
       }
     },
+    "/v1/visitor-region": {
+      "get": {
+        "operationId": "getVisitorRegion",
+        "summary": "Get the calling browser's region from its IP address",
+        "description": "Used by <checkbox-disclosure> (Elements 1.6.0 by default; 1.6.1 and later only with extras=\"vt-dc\"; Vermont / D.C. are not checked by default): in Vermont it shows the renewal terms of a plan of a year or more in bold and adds the separate consent checkbox; in the District of Columbia it adds the separate consent checkbox for a free trial. No key; CORS *; not cached. The IP address is looked up in memory and not stored.",
+        "tags": [
+          "Region"
+        ],
+        "security": [],
+        "x-checkbox-scope": "none",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "API version (date). Defaults to the version your account is pinned to. Known: 2026-10-30.",
+              "example": "2026-10-30"
+            },
+            "required": false,
+            "name": "Checkbox-Version",
+            "in": "header"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VisitorRegion"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Error. See error.code (stable) and error.next_action.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "Error. See error.code (stable) and error.next_action.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/checks/region": {
+      "post": {
+        "operationId": "checkRegion",
+        "summary": "Check whether a visitor needs a separate opt-in or bold terms",
+        "description": "For your server when it creates a Stripe Checkout Session (or renders its own checkout): pass the visitor's IP address (or region) and the plan. Returns whether a separate opt-in to the renewal applies to this visitor (add consent_collection: { terms_of_service: \"required\" } to the session when it is not null) and whether the renewal terms must be bold. Stateless; the IP address is not stored. Checkbox cannot see this per-visitor branch from one Checkout Session, so a session without consent_collection, where the Vermont or D.C. opt-in applies, stays for you to confirm in the checks. A Payment Link serves every visitor the same: keep consent_collection on it.",
+        "tags": [
+          "Region"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "basicAuth": []
+          }
+        ],
+        "x-checkbox-scope": "checks:read",
+        "x-checkbox-min-role": "viewer",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "API version (date). Defaults to the version your account is pinned to. Known: 2026-10-30.",
+              "example": "2026-10-30"
+            },
+            "required": false,
+            "name": "Checkbox-Version",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegionCheckParams"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegionCheckResult"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Error. See error.code (stable) and error.next_action.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "Error. See error.code (stable) and error.next_action.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/sites/{site}/suggestions": {
       "get": {
         "operationId": "listSiteSuggestions",
@@ -31631,7 +33350,7 @@
             "schema": {
               "type": "string",
               "description": "Semver, e.g. 1.0.0.",
-              "example": "1.5.9"
+              "example": "1.6.1"
             },
             "required": true,
             "name": "version",
@@ -31847,7 +33566,7 @@
       "post": {
         "operationId": "createConsent",
         "summary": "Record a consent",
-        "description": "Records that a subscriber ticked the consent checkbox for the exact disclosure shown: stored with the text, its hashes, the terms, the page, a hash of the user agent and your customer reference, written to the site's hash-chained evidence vault, and fed to the compliance evaluation as corroborating evidence. <checkbox-disclosure> calls this with the publishable key (Origin-checked); servers may call it with a secret key and site. Next: attach the returned cons_… id to the subscription (metadata.checkbox_consent) or call updateConsent.",
+        "description": "Records that a subscriber consented to the exact disclosure shown (ticked the consent checkbox, or with mechanism clickwrap clicked the pay button next to the renewal line): stored with the text, its hashes, the terms, the page, a hash of the user agent and your customer reference, written to the site's hash-chained evidence vault, and fed to the compliance evaluation as corroborating evidence. <checkbox-disclosure> calls this with the publishable key (Origin-checked); servers may call it with a secret key and site. Next: attach the returned cons_… id to the subscription (metadata.checkbox_consent) or call updateConsent.",
         "tags": [
           "Elements"
         ],
@@ -35904,7 +37623,9 @@
                                 "expected": "pass",
                                 "observed": "fail",
                                 "source": "static_fetch",
-                                "detail": "No recurring price near the purchase button."
+                                "detail": "No recurring price near the purchase button.",
+                                "status": "pass",
+                                "blocking": true
                               }
                             ],
                             "diff": [
@@ -35913,7 +37634,9 @@
                                 "expected": "pass",
                                 "observed": "fail",
                                 "source": "static_fetch",
-                                "detail": "No recurring price near the purchase button."
+                                "detail": "No recurring price near the purchase button.",
+                                "status": "pass",
+                                "blocking": true
                               }
                             ],
                             "plan_status": "action_required",
@@ -36800,7 +38523,8 @@
                                   "compliant": 9,
                                   "not_applicable": 6,
                                   "not_set_up": 0,
-                                  "not_checked": 0
+                                  "not_checked": 0,
+                                  "risk_accepted": 0
                                 },
                                 "pending_live_checks": [
                                   {
@@ -38082,13 +39806,14 @@
                               "initially_checked": false,
                               "required": true
                             },
+                            "mechanism": "checkbox",
                             "page_url": "https://acme.example/checkout",
                             "origin": "https://acme.example",
                             "user_agent_sha256": null,
                             "customer_reference": "cs_test_a1b2c3",
                             "client_reference": null,
                             "source": "elements",
-                            "element_version": "1.5.9",
+                            "element_version": "1.6.1",
                             "client_timestamp": null,
                             "presentation": {
                               "violations": [],
@@ -38278,7 +40003,8 @@
                                   "compliant": 9,
                                   "not_applicable": 6,
                                   "not_set_up": 0,
-                                  "not_checked": 0
+                                  "not_checked": 0,
+                                  "risk_accepted": 0
                                 },
                                 "pending_live_checks": [
                                   {
@@ -38574,7 +40300,8 @@
                                   "compliant": 9,
                                   "not_applicable": 6,
                                   "not_set_up": 0,
-                                  "not_checked": 0
+                                  "not_checked": 0,
+                                  "risk_accepted": 0
                                 },
                                 "pending_live_checks": [
                                   {
@@ -38892,6 +40619,11 @@
       "status": 409,
       "type": "invalid_request_error",
       "description": "The object is in a state that does not allow this action."
+    },
+    "do_this_not_acceptable": {
+      "status": 409,
+      "type": "invalid_request_error",
+      "description": "Round 43: the task is a Do-this item (renewal terms next to the purchase button with consent, easy online cancellation, the required reminder and acknowledgment emails). It cannot be declined, marked not applicable or accepted as a risk: fix it. next_action names the task's change."
     },
     "scan_already_queued": {
       "status": 409,

@@ -1,7 +1,7 @@
 # Checkbox
 
-Check a subscription checkout's renewal terms in one command. Free auto-renewal law checks (FTC ROSCA, click-to-cancel,
-California, New York and other state automatic renewal laws) for Stripe Checkout, cancellation flows and renewal
+Check a subscription checkout's renewal terms in one command. Free auto-renewal law checks (FTC ROSCA,
+California, New York and other state automatic renewal laws) for Stripe Checkout, online cancellation and renewal
 reminder emails. Offline: no account, no key, nothing leaves your machine.
 
 ```bash
@@ -24,9 +24,9 @@ FAIL  disclosure · all jurisdictions · rules 1.4.0 · catalog 2026.11.09.3 · 
 
 Suggested replacement (passes the checks) (verified by the rules engine)
   disclosure:     Renews automatically every month at $19.99 (plus applicable taxes) until you cancel. Cancel anytime online at
-                  https://acme.example/cancel before your next billing date to avoid the next charge.
-  checkbox:       I agree that my Acme subscription renews automatically every month at $19.99 (plus applicable taxes) until I
-                  cancel, and I understand I can cancel anytime online at https://acme.example/cancel.
+                  https://acme.example/cancel before your next billing date to avoid the next charge. By
+                  subscribing, you agree to these renewal terms.
+  button:         keep your own label (no checkbox needed: the last sentence is the consent)
 ```
 
 The output is abridged: the full run also prints each failing check's reason and fix, and a fuller version of the
@@ -107,8 +107,9 @@ projects.
 
 This repository mirrors the public parts of Checkbox's main codebase and is updated with each release: `node/`,
 `mcp/` (npm workspaces), `python/`, `openapi/`, `integrations/`, `plugins/`, `mcp-registry/`, the GitHub Action
-(`action.yml`) and the CLI's README (`cli/`; the CLI is built and published from the main codebase). Releases are
-published from tags by GitHub Actions ([RELEASING.md](RELEASING.md)). Issues and pull requests are welcome: see
+(`action.yml`) and the CLI package (`cli/`: the exact files npm publishes as `@checkbox-site/cli`, a single bundled
+`dist/checkbox.js` built from the main codebase, which also holds its sources and tests; do not edit it here).
+Releases, the CLI included, are published from tags by GitHub Actions ([RELEASING.md](RELEASING.md)). Issues and pull requests are welcome: see
 [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License

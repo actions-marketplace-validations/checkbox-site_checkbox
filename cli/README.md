@@ -1,8 +1,8 @@
 # `checkbox` CLI (`@checkbox-site/cli`)
 
-Subscription compliance checks for auto-renewal law (automatic renewal laws: ROSCA, click-to-cancel, California ARL, New
-York GBL § 527-a and the other state laws) on Stripe Checkout, cancellation flows and renewal reminder emails, from a
-terminal, a CI job or an AI coding agent. Node 20+.
+Subscription compliance checks for auto-renewal law (automatic renewal laws: ROSCA, California ARL, New York GBL
+§ 527-a and the other state laws) on Stripe Checkout, online cancellation (customers can cancel online as easily as they
+signed up) and renewal reminder emails, from a terminal, a CI job or an AI coding agent. Node 20+. (The FTC's 2024 click-to-cancel amendments were vacated in July 2025; Checkbox does not check them.)
 
 ```sh
 npx @checkbox-site/cli ci init --yes      # checkbox.json + .github/workflows/checkbox.yml from your project

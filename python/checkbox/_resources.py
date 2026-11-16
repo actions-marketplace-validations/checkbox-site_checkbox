@@ -588,6 +588,23 @@ OPERATIONS: Dict[str, Dict[str, Any]] = {
         "paginated": False,
         "summary": "Claim, decline or reopen a task",
     },
+    "proposeRiskAcceptance": {
+        "operation_id": "proposeRiskAcceptance",
+        "namespace": "risk_acceptances",
+        "method": "propose",
+        "http_method": "POST",
+        "path": "/v1/tasks/{task}/risk_acceptance",
+        "path_params": ("task", ),
+        "query_params": (),
+        "body": True,
+        "idempotent": True,
+        "auth": True,
+        "scope": "compliance_plans:write",
+        "response": "json",
+        "list": False,
+        "paginated": False,
+        "summary": "Propose accepting the risk of a Your-call task (the owner confirms)",
+    },
     "answerTask": {
         "operation_id": "answerTask",
         "namespace": "tasks",
@@ -672,6 +689,40 @@ OPERATIONS: Dict[str, Dict[str, Any]] = {
         "list": True,
         "paginated": True,
         "summary": "List verifications of a site",
+    },
+    "retrieveSiteExposure": {
+        "operation_id": "retrieveSiteExposure",
+        "namespace": "site_exposures",
+        "method": "retrieve",
+        "http_method": "GET",
+        "path": "/v1/sites/{site}/exposure",
+        "path_params": ("site", ),
+        "query_params": (),
+        "body": False,
+        "idempotent": False,
+        "auth": True,
+        "scope": "sites:read",
+        "response": "json",
+        "list": False,
+        "paginated": False,
+        "summary": "Get a site's exposure",
+    },
+    "updateSiteExposure": {
+        "operation_id": "updateSiteExposure",
+        "namespace": "site_exposures",
+        "method": "update",
+        "http_method": "POST",
+        "path": "/v1/sites/{site}/exposure",
+        "path_params": ("site", ),
+        "query_params": (),
+        "body": True,
+        "idempotent": True,
+        "auth": True,
+        "scope": "sites:write",
+        "response": "json",
+        "list": False,
+        "paginated": False,
+        "summary": "Record the owner's exposure estimate",
     },
     "retrieveFindingFix": {
         "operation_id": "retrieveFindingFix",
@@ -1148,6 +1199,40 @@ OPERATIONS: Dict[str, Dict[str, Any]] = {
         "list": False,
         "paginated": False,
         "summary": "Get the dates each required notice must be sent",
+    },
+    "getVisitorRegion": {
+        "operation_id": "getVisitorRegion",
+        "namespace": "visitor_regions",
+        "method": "retrieve",
+        "http_method": "GET",
+        "path": "/v1/visitor-region",
+        "path_params": (),
+        "query_params": (),
+        "body": False,
+        "idempotent": False,
+        "auth": False,
+        "scope": "none",
+        "response": "json",
+        "list": False,
+        "paginated": False,
+        "summary": "Get the calling browser's region from its IP address",
+    },
+    "checkRegion": {
+        "operation_id": "checkRegion",
+        "namespace": "regions",
+        "method": "check",
+        "http_method": "POST",
+        "path": "/v1/checks/region",
+        "path_params": (),
+        "query_params": (),
+        "body": True,
+        "idempotent": False,
+        "auth": True,
+        "scope": "checks:read",
+        "response": "json",
+        "list": False,
+        "paginated": False,
+        "summary": "Check whether a visitor needs a separate opt-in or bold terms",
     },
     "listSiteSuggestions": {
         "operation_id": "listSiteSuggestions",
@@ -2236,7 +2321,7 @@ class FindingsResource(Resource):
     def update(self, finding: str, params: Optional["types.UpdateFindingParams"] = None, /, *, request_options: Optional[RequestOptions] = None, **kwargs: Any) -> "types.Finding":
         """Triage a finding.
 
-        Sets the triage state (open, acknowledged, accepted_risk, resolved) and an optional note. Triage does not change the check result; fixing the issue and re-scanning does.
+        Sets the triage state (open, acknowledged, resolved) and an optional note. Triage does not change the check result; fixing the issue and re-scanning does. accepted_risk is refused for API keys (409): only the owner accepts a risk, in the dashboard; agents propose it with proposeRiskAcceptance.
 
         Parameters can be given as a dict (positional) or as keyword arguments.
 
@@ -2273,7 +2358,7 @@ class TasksResource(Resource):
     def update(self, task: str, params: Optional["types.UpdateTaskParams"] = None, /, *, request_options: Optional[RequestOptions] = None, **kwargs: Any) -> "types.Task":
         """Claim, decline or reopen a task.
 
-        status in_progress claims the task (shown to other agents and the dashboard); wont_fix declines it with a reason (the merchant's decision, recorded; a declined critical or high task keeps the plan blocked); open clears the decision. Applying a change does not need this call: call verifyTask.
+        status in_progress claims the task (shown to other agents and the dashboard); open clears the claim. Round 43: wont_fix / not_applicable (with a reason) on a Your-call task (kind your_call) records a PROPOSAL for the owner, like proposeRiskAcceptance: next_action carries the confirmation link, and nothing closes until the owner confirms it signed in. On a Do-this task (kind do_this) they are refused with 409 do_this_not_acceptable: fix it. Applying a change does not need this call: call verifyTask.
 
         Parameters can be given as a dict (positional) or as keyword arguments.
 
@@ -2304,6 +2389,21 @@ class TasksResource(Resource):
         return self._call("verifyTask", (task, ), params, kwargs, request_options)  # type: ignore[no-any-return]
 
 
+class RiskAcceptancesResource(Resource):
+    """``checkbox.risk_acceptances``"""
+
+    def propose(self, task: str, params: Optional["types.ProposeRiskAcceptanceParams"] = None, /, *, request_options: Optional[RequestOptions] = None, **kwargs: Any) -> "types.RiskAcceptanceProposal":
+        """Propose accepting the risk of a Your-call task (the owner confirms).
+
+        Round 43: for a task with kind your_call that is not met, records a PROPOSAL to accept its risk, with your reason, and returns confirmation_url: the owner opens it while signed in to Checkbox and accepts (with their own reason) or fixes it instead. Nothing is accepted until the owner confirms: the task stays open, and you must not tell anyone it is accepted. A do_this task (renewal terms next to the purchase button with consent, online cancellation, the required reminder and acknowledgment emails) can never be accepted: 409 resource_conflict with why. Prefer fixing: a Your-call item's risk_if_skipped and conversion_impact are on the task; the plan's owner_decisions batches them into one message.
+
+        Parameters can be given as a dict (positional) or as keyword arguments.
+
+        ``POST /v1/tasks/{task}/risk_acceptance`` (operation ``proposeRiskAcceptance``, scope ``compliance_plans:write``).
+        """
+        return self._call("proposeRiskAcceptance", (task, ), params, kwargs, request_options)  # type: ignore[no-any-return]
+
+
 class VerificationsResource(Resource):
     """``checkbox.verifications``"""
 
@@ -2328,6 +2428,30 @@ class VerificationsResource(Resource):
         ``GET /v1/sites/{site}/verifications`` (operation ``listVerifications``, scope ``compliance_plans:read``).
         """
         return self._call("listVerifications", (site, ), params, kwargs, request_options)  # type: ignore[no-any-return]
+
+
+class SiteExposuresResource(Resource):
+    """``checkbox.site_exposures``"""
+
+    def retrieve(self, site: str, /, *, request_options: Optional[RequestOptions] = None) -> "types.RetrieveSiteExposureResponse":
+        """Get a site's exposure.
+
+        Aggregate subscriber counts read from live Stripe through the read-only connection (active and trialing subscriptions, the share billed yearly, counts per billing state or country, the 90-day dispute rate), refreshed daily and when Stripe is connected; else the owner's estimate; else unknown with one optional question. Counts only: no names, emails or addresses are stored. summary.line is the sentence to show people. Not legal advice.
+
+        ``GET /v1/sites/{site}/exposure`` (operation ``retrieveSiteExposure``, scope ``sites:read``).
+        """
+        return self._call("retrieveSiteExposure", (site, ), None, None, request_options)  # type: ignore[no-any-return]
+
+    def update(self, site: str, params: Optional["types.UpdateExposureParams"] = None, /, *, request_options: Optional[RequestOptions] = None, **kwargs: Any) -> "types.UpdateSiteExposureResponse":
+        """Record the owner's exposure estimate.
+
+        The owner's answer to the one optional question "About how many subscribers do you have, and how many are in California?": subscribers (lt100, 100to1k, 1kto10k, gt10k) and california_share (low, medium, high), or declined: true. Used only while live Stripe figures are not available; live figures win once read. Never blocks the plan. Round 43 review: an estimate sent with an API key is shown as "estimate entered by your agent" (estimate_by agent) and never lowers a risk level below what no estimate gives; ask the owner, never guess.
+
+        Parameters can be given as a dict (positional) or as keyword arguments.
+
+        ``POST /v1/sites/{site}/exposure`` (operation ``updateSiteExposure``, scope ``sites:write``).
+        """
+        return self._call("updateSiteExposure", (site, ), params, kwargs, request_options)  # type: ignore[no-any-return]
 
 
 class FixesResource(Resource):
@@ -2605,7 +2729,7 @@ class ChecksResource(Resource):
     def stripe_checkout_session(self, params: Optional["types.StripeCheckParams"] = None, /, *, request_options: Optional[RequestOptions] = None, **kwargs: Any) -> "types.StripeCheckoutSessionCheckResult":
         """Check Stripe Checkout Session params.
 
-        Body: `{ params, merchant }` (or `{ params, site }`). `params` is exactly the object your code gives stripe.checkout.sessions.create; `merchant` adds merchant_name, cancel_url, and price/interval when line_items use a Price id. Checkbox models the Stripe-hosted page those params render and returns findings plus `correction`: a JSON Patch (RFC 6902) and the full corrected params (custom_text.submit with the renewal terms, consent_collection.terms_of_service = "required", custom_text.terms_of_service_acceptance as the consent label), verified by the engine. Stripe's own small grey styling keeps "clear and conspicuous" at needs_review on any Stripe-hosted page; also show the terms on your page before redirecting. Stateless and deterministic: nothing is stored, the same input on the same as_of date gives the same verdicts. Every verdict comes from the Checkbox rules engine over the legal catalog (federal ROSCA / EFTA plus the state automatic-renewal laws); the response carries rules_version, catalog_version and a disclaimer (not legal advice). Read `verdict`, then `next_action`: it tells you exactly what to change and to call the check again until verdict is pass.
+        Body: `{ params, merchant }` (or `{ params, site }`). `params` is exactly the object your code gives stripe.checkout.sessions.create; `merchant` adds merchant_name, cancel_url, and price/interval when line_items use a Price id. Checkbox models the Stripe-hosted page those params render and returns findings plus `correction`: a JSON Patch (RFC 6902) and the full corrected params, verified by the engine: by default only custom_text.submit with the renewal terms, ending with the sentence that makes the click consent (no checkbox); consent_collection only where a cited law asks for a separate opt-in. Stripe's own small grey styling keeps "clear and conspicuous" at needs_review on any Stripe-hosted page; also show the terms on your page before redirecting. Stateless and deterministic: nothing is stored, the same input on the same as_of date gives the same verdicts. Every verdict comes from the Checkbox rules engine over the legal catalog (federal ROSCA / EFTA plus the state automatic-renewal laws); the response carries rules_version, catalog_version and a disclaimer (not legal advice). Read `verdict`, then `next_action`: it tells you exactly what to change and to call the check again until verdict is pass.
 
         Parameters can be given as a dict (positional) or as keyword arguments.
 
@@ -2656,6 +2780,34 @@ class ChecksResource(Resource):
         ``POST /v1/checks/notice_schedule`` (operation ``checkNoticeSchedule``, scope ``checks:read``).
         """
         return self._call("checkNoticeSchedule", (), params, kwargs, request_options)  # type: ignore[no-any-return]
+
+
+class VisitorRegionsResource(Resource):
+    """``checkbox.visitor_regions``"""
+
+    def retrieve(self, *, request_options: Optional[RequestOptions] = None) -> "types.VisitorRegion":
+        """Get the calling browser's region from its IP address.
+
+        Used by <checkbox-disclosure> (Elements 1.6.0 by default; 1.6.1 and later only with extras="vt-dc"; Vermont / D.C. are not checked by default): in Vermont it shows the renewal terms of a plan of a year or more in bold and adds the separate consent checkbox; in the District of Columbia it adds the separate consent checkbox for a free trial. No key; CORS *; not cached. The IP address is looked up in memory and not stored.
+
+        ``GET /v1/visitor-region`` (operation ``getVisitorRegion``, scope ``none``).
+        """
+        return self._call("getVisitorRegion", (), None, None, request_options)  # type: ignore[no-any-return]
+
+
+class RegionsResource(Resource):
+    """``checkbox.regions``"""
+
+    def check(self, params: Optional["types.RegionCheckParams"] = None, /, *, request_options: Optional[RequestOptions] = None, **kwargs: Any) -> "types.RegionCheckResult":
+        """Check whether a visitor needs a separate opt-in or bold terms.
+
+        For your server when it creates a Stripe Checkout Session (or renders its own checkout): pass the visitor's IP address (or region) and the plan. Returns whether a separate opt-in to the renewal applies to this visitor (add consent_collection: { terms_of_service: "required" } to the session when it is not null) and whether the renewal terms must be bold. Stateless; the IP address is not stored. Checkbox cannot see this per-visitor branch from one Checkout Session, so a session without consent_collection, where the Vermont or D.C. opt-in applies, stays for you to confirm in the checks. A Payment Link serves every visitor the same: keep consent_collection on it.
+
+        Parameters can be given as a dict (positional) or as keyword arguments.
+
+        ``POST /v1/checks/region`` (operation ``checkRegion``, scope ``checks:read``).
+        """
+        return self._call("checkRegion", (), params, kwargs, request_options)  # type: ignore[no-any-return]
 
 
 class SuggestionsResource(Resource):
@@ -2745,7 +2897,7 @@ class ConsentsResource(Resource):
     def create(self, params: Optional["types.ConsentCreateParams"] = None, /, *, request_options: Optional[RequestOptions] = None, **kwargs: Any) -> "types.Consent":
         """Record a consent.
 
-        Records that a subscriber ticked the consent checkbox for the exact disclosure shown: stored with the text, its hashes, the terms, the page, a hash of the user agent and your customer reference, written to the site's hash-chained evidence vault, and fed to the compliance evaluation as corroborating evidence. <checkbox-disclosure> calls this with the publishable key (Origin-checked); servers may call it with a secret key and site. Next: attach the returned cons_… id to the subscription (metadata.checkbox_consent) or call updateConsent.
+        Records that a subscriber consented to the exact disclosure shown (ticked the consent checkbox, or with mechanism clickwrap clicked the pay button next to the renewal line): stored with the text, its hashes, the terms, the page, a hash of the user agent and your customer reference, written to the site's hash-chained evidence vault, and fed to the compliance evaluation as corroborating evidence. <checkbox-disclosure> calls this with the publishable key (Origin-checked); servers may call it with a secret key and site. Next: attach the returned cons_… id to the subscription (metadata.checkbox_consent) or call updateConsent.
 
         Parameters can be given as a dict (positional) or as keyword arguments.
 
@@ -3167,7 +3319,9 @@ class ResourceNamespaces:
     findings: FindingsResource
     plans: PlansResource
     tasks: TasksResource
+    risk_acceptances: RiskAcceptancesResource
     verifications: VerificationsResource
+    site_exposures: SiteExposuresResource
     fixes: FixesResource
     evidence: EvidenceResource
     certificates: CertificatesResource
@@ -3176,6 +3330,8 @@ class ResourceNamespaces:
     notices: NoticesResource
     law_updates: LawUpdatesResource
     checks: ChecksResource
+    visitor_regions: VisitorRegionsResource
+    regions: RegionsResource
     suggestions: SuggestionsResource
     elements: ElementsResource
     disclosures: DisclosuresResource
@@ -3206,7 +3362,9 @@ RESOURCES = {
     "findings": FindingsResource,
     "plans": PlansResource,
     "tasks": TasksResource,
+    "risk_acceptances": RiskAcceptancesResource,
     "verifications": VerificationsResource,
+    "site_exposures": SiteExposuresResource,
     "fixes": FixesResource,
     "evidence": EvidenceResource,
     "certificates": CertificatesResource,
@@ -3215,6 +3373,8 @@ RESOURCES = {
     "notices": NoticesResource,
     "law_updates": LawUpdatesResource,
     "checks": ChecksResource,
+    "visitor_regions": VisitorRegionsResource,
+    "regions": RegionsResource,
     "suggestions": SuggestionsResource,
     "elements": ElementsResource,
     "disclosures": DisclosuresResource,

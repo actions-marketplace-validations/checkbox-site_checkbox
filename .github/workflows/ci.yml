@@ -26,12 +26,13 @@ jobs:
         run: npm run typecheck:examples
       - name: Smoke-test the MCP server (stdio handshake)
         run: node scripts/smoke-mcp.mjs
-      - name: Versions agree
+      - name: Versions agree (and the committed CLI bundle runs)
         run: node scripts/check-versions.mjs
       - name: Package contents
         run: |
           npm pack --dry-run --workspace node
           npm pack --dry-run --workspace mcp
+          (cd cli && npm pack --dry-run)
 
   python:
     name: Python ${{ matrix.python }}

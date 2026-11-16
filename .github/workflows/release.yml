@@ -1,4 +1,5 @@
-# Publishes @checkbox-site/node and @checkbox-site/mcp to npm and checkbox-site to PyPI. See RELEASING.md.
+# Publishes @checkbox-site/node and @checkbox-site/mcp to npm and checkbox-site to PyPI, and the CLI
+# (@checkbox-site/cli, from the committed build in cli/) to npm when its version is not there yet. See RELEASING.md.
 #
 # npm: the first publish uses the NPM_TOKEN repository secret (a short-lived granular token). Once a trusted publisher
 # is configured for each package on npmjs.com (this repository, workflow release.yml), npm >= 11.5 authenticates with
@@ -66,6 +67,67 @@ jobs:
               npm publish --workspace "$ws"
             fi
           done
+
+  cli:
+    # The CLI has its own version (cli/package.json), independent of the tag. Its folder is the exact package npm
+    # receives (dist/checkbox.js, package.json, README.md, LICENSE), built and synced from Checkbox's main codebase.
+    # Same authentication as the job above: trusted publishing (OIDC), or NPM_TOKEN while that secret is set.
+    name: Publish CLI to npm
+    needs: versions
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # trusted publishing and provenance
+    env:
+      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Upgrade npm (trusted publishing needs npm >= 11.5.1)
+        run: npm install -g npm@^11.5.1 && npm --version
+      - name: Use NPM_TOKEN when the secret is set
+        if: ${{ env.NODE_AUTH_TOKEN != '' }}
+        run: echo '//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}' >> ~/.npmrc
+      - name: Smoke-test the CLI bundle
+        working-directory: cli
+        run: |
+          test "$(node dist/checkbox.js --version)" = "$(node -p "require('./package.json').version")"
+          node dist/checkbox.js ci --help >/dev/null
+          npm pack --dry-run
+      - name: Publish (skipped when this CLI version is already on npm)
+        id: publish
+        working-directory: cli
+        run: |
+          name=$(node -p "require('./package.json').name")
+          version=$(node -p "require('./package.json').version")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if npm view "$name@$version" version >/dev/null 2>&1; then
+            echo "$name@$version is already on npm; skipping."
+          else
+            npm publish --provenance --access public
+          fi
+      - name: Wait until npm serves this CLI version
+        run: |
+          ver='${{ steps.publish.outputs.version }}'
+          for i in $(seq 1 30); do
+            if [ "$(npm view "@checkbox-site/cli@$ver" version 2>/dev/null)" = "$ver" ]; then echo "@checkbox-site/cli@$ver is on npm"; exit 0; fi
+            echo "waiting for @checkbox-site/cli@$ver on npm ($i/30)"; sleep 10
+          done
+          echo "@checkbox-site/cli@$ver is not on npm after 5 minutes"; exit 1
+      - name: The GitHub Action's default CLI version is on npm
+        # action.yml must only name a published CLI (check-versions.mjs: never newer than cli/). Raising the default and
+        # moving the v1 tag come after this job, from Checkbox's main codebase (RELEASING.md, "GitHub Action").
+        run: |
+          def=$(sed -n '/^  version:/,/default:/s/^ *default: *"\{0,1\}\([0-9.]*\)"\{0,1\}.*/\1/p' action.yml)
+          test -n "$def" || { echo "action.yml has no default CLI version"; exit 1; }
+          if [ "$(npm view "@checkbox-site/cli@$def" version 2>/dev/null)" != "$def" ]; then
+            echo "action.yml defaults to @checkbox-site/cli@$def, which is not on npm"; exit 1
+          fi
+          ver='${{ steps.publish.outputs.version }}'
+          if [ "$def" = "$ver" ]; then echo "The Action runs @checkbox-site/cli@$def (on npm)."
+          else echo "::notice::@checkbox-site/cli@$ver is on npm; the Action still defaults to $def. Next: raise action.yml's default to $ver and move the v1 tag (RELEASING.md)."; fi
 
   pypi-build:
     name: Build Python distributions

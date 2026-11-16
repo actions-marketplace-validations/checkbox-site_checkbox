@@ -438,7 +438,7 @@ export interface SetupSession {
       }>;
     } | null;
   }>;
-  /** Stripe test mode for lifecycle test runs. */
+  /** Stripe connection and the test-mode key for lifecycle test runs. */
   stripe: {
     /** Whether the human ticked the box “Let your agent store a Stripe test-mode restricted key for this project” (agent sign-in) or “Let this app store a Stripe test-mode restricted key for your sites” (app connection) (checkbox id consent-stripe-test-key) on the approval page (device login or OAuth connection). False: the agent may not store one (createTestCredential answers test_key_declined); the human adds it in the dashboard. Sessions started with a key the human made in the dashboard: true. */
     test_key_consent: boolean;
@@ -468,6 +468,17 @@ export interface SetupSession {
       /** The same key as plain numbered steps for the owner (the permissions grouped: Write, then Read). Send them as they are. */
       steps: Array<string>;
     };
+    /** "Connect with Stripe" (read-only): the owner's one step to connect Stripe when this server offers it; Checkbox then reads billing settings, prices, Checkout and Payment Link settings, the portal and subscription events through it, and restricted_key is only for test runs (asked for when the plan wants one). null: this server does not offer it, and restricted_key is the one key for everything. */
+    connect: {
+      /** How Checkbox connects: the read-only Checkbox Stripe App. */
+      method: "stripe_app";
+      /** The one link the owner opens: a Checkbox page that names the site and sends them to Stripe to install the Checkbox app. Give it to the owner as it is. */
+      url: string;
+      /** Stripe's install link the page sends them to (the owner opens url, not this). */
+      install_url: string;
+      /** Whether the site is connected with Stripe this way. */
+      connected: boolean;
+    } | null;
   };
   /** Latest lifecycle test run of the site. */
   test_run: {
@@ -488,14 +499,16 @@ export interface SetupSession {
     description: string;
     /** Every choice only the owner makes, together. Empty when nothing is left to ask and only closed questions are reported. */
     questions: Array<{
-      /** The id answerTask takes: the id of the task whose question it is (task_…), or the question's name for those that are not one task's: "email_sender", "notices_support_email", "notices_cancel_timing", "stripe_terms_url", "stripe_portal_login", "replace_payment_link" (send site with the answer when the account has several sites). Every listed question is answered with answerTask and this id. */
+      /** The id answerTask takes: the id of the task whose question it is (task_…), or the question's name for those that are not one task's: "email_sender", "notices_support_email", "notices_cancel_timing", "stripe_terms_url", "stripe_portal_login", "replace_payment_link", "connect_stripe" (send site with the answer when the account has several sites). Every listed question is answered with answerTask and this id. */
       id: string;
-      /** What the question is: "email_sender" (who sends the required emails), "notices_support_email" / "notices_cancel_timing" (what Checkbox Notices needs before it sends), "stripe_terms_url" (the Terms of Service URL Stripe needs before it collects consent, in test mode too), "stripe_portal_login" / "replace_payment_link" (Stripe Dashboard steps of a Payment Link site), or the key of the task whose question it is. */
+      /** What the question is: "email_sender" (who sends the required emails), "notices_support_email" / "notices_cancel_timing" (what Checkbox Notices needs before it sends), "stripe_terms_url" (the Terms of Service URL Stripe needs before it collects consent, in test mode too), "stripe_portal_login" / "replace_payment_link" (Stripe Dashboard steps of a Payment Link site), "connect_stripe" (the owner's one "Connect with Stripe" link, read-only; closes when Checkbox sees the connection), or the key of the task whose question it is. */
       key: string;
       /** true when the question was not in the first batch the owner was asked: if they already answered the others, ask only these. Absent otherwise. */
       added_later?: boolean;
       /** true when the question closed earlier (see closed) and is asked again because what it is about changed back. Absent otherwise. */
       reopened?: boolean;
+      /** Round 44: a legal question the owner answers themselves at this link (their To-do page, signed in). Send it in the same message as the other questions: their answer there counts at once, with no second confirmation. Absent for other questions. */
+      owner_link?: string;
       /** The question, in plain words for the owner. */
       text: string;
       /** The answers. */
@@ -1035,8 +1048,8 @@ export interface CheckoutVerdict {
 
 /** Roll-up of the user-facing statuses of the required checks. */
 export interface ComplianceRollup {
-  /** needs_fix (a required check needs a fix or something is not set up yet), your_call (a decision is needed), incomplete (only "not checked yet" items are left, e.g. the cancel flow was never tried), compliant (every required check passes; pending live checks count as passing), not_checked (never evaluated). */
-  status: "needs_fix" | "your_call" | "incomplete" | "compliant" | "not_checked";
+  /** needs_fix (a required check needs a fix or something is not set up yet), your_call (a decision is needed), incomplete (only "not checked yet" items are left, e.g. the cancel flow was never tried), compliant (every required check passes; pending live checks count as passing), not_checked (never evaluated), risk_accepted (nothing is left but items whose risk the owner accepted: their checks do not pass, so never "Checks pass"). */
+  status: "needs_fix" | "your_call" | "incomplete" | "compliant" | "not_checked" | "risk_accepted";
   /** Label to show. */
   label: string;
   /** Required checks per user-facing status. */
@@ -1057,6 +1070,8 @@ export interface ComplianceRollup {
     not_set_up: number;
     /** Not checked yet (Checkbox has not tried it). */
     not_checked: number;
+    /** Round 43: Your-call items whose risk the owner accepted (not passing, not open). Absent when none. */
+    risk_accepted?: number;
   };
   /** What each pending live check waits for and how it completes. */
   pending_live_checks: Array<PendingLiveCheck & {
@@ -1078,7 +1093,7 @@ export type SiteCompliance = {
   /** Open findings waiting for a human look. */
   needs_review: number;
   /** User-facing roll-up of the required checks: needs_fix > your_call > compliant (every required check passes; pending live checks count as passing). */
-  status: "needs_fix" | "your_call" | "incomplete" | "compliant" | "not_checked";
+  status: "needs_fix" | "your_call" | "incomplete" | "compliant" | "not_checked" | "risk_accepted";
   /** Label to show. */
   label: string;
   rollup: ComplianceRollup;
@@ -1120,7 +1135,7 @@ export type SiteShopify = {
 /** The compliance status of the evaluation this scan produced (null until evaluated). Retrieve the evaluation for the checks and counts. */
 export type ScanCompliance = {
   /** Roll-up status of that evaluation: needs_fix, your_call, incomplete, compliant or not_checked. */
-  status: "needs_fix" | "your_call" | "incomplete" | "compliant" | "not_checked";
+  status: "needs_fix" | "your_call" | "incomplete" | "compliant" | "not_checked" | "risk_accepted";
   /** The status label to show, counted in tasks ("2 fixes needed", "Checks pass"). */
   label: string;
 } | null;
@@ -1800,6 +1815,65 @@ export interface FindingList {
   url: string;
 }
 
+/** Round 43: the risk of skipping this task for this business (likelihood x consequence from sourced research and the exposure). An estimate, not legal advice. */
+export interface RiskIfSkipped {
+  /** very_low, low, medium or high. */
+  level: "very_low" | "low" | "medium" | "high";
+  /** One plain line: why, for this business (its exposure). */
+  reason: string;
+  /** What the level rests on (sources, exposure facts). Empty when Checkbox has no estimate yet. */
+  basis: Array<string>;
+  /** Subscribers this requirement reaches, when known. */
+  affected?: number | null;
+  /** Round 43 review: affected is a lower bound ("at least"): some subscribers could not be placed by state, or the Stripe read was capped. The very-low rules for few or no affected subscribers do not apply then. */
+  affected_lower_bound?: boolean;
+}
+
+/** Round 43: the owner's decision on this task (fix it or accept the risk). The field `decision` is the separate updateTask claim / decline record. */
+export interface RiskDecision {
+  /** open (not met, no decision), fixed (meets the requirement), accepted (the owner accepted the risk: "Risk accepted", never passing), not_applicable (recorded on the plan as not applying to this business; nothing was observed passing, never "Fixed"). */
+  status: "open" | "fixed" | "accepted" | "not_applicable";
+  /** The words to show. */
+  label: string;
+  /** accepted: the owner's reason. */
+  reason: string | null;
+  /** accepted: whose words the reason is: owner (the owner's own), or agent_proposal (the owner confirmed the agent's proposed reason unchanged). */
+  reason_source?: "owner" | "agent_proposal";
+  /** accepted: the owner's user id. */
+  by: string | null;
+  /** accepted: when. Unix timestamp in seconds. */
+  at: number | null;
+  /** accepted: what reopens the decision (Checkbox checks them at every plan read and in the background). */
+  revisit_triggers: Array<{
+    /** affected_growth, size_band, law_changed, dispute_rate, twelve_months, scope_changed (the item came to cover a requirement or a state the owner did not accept), exposure_known (the exposure was unknown or estimated when accepted and is now read from live Stripe). */
+    code: string;
+    /** What reopens it. */
+    text: string;
+  }>;
+  /** A Your-call task that is not met: the owner may accept its risk (agents: proposeRiskAcceptance; only the owner confirms). */
+  can_accept: boolean;
+  /** Do-this tasks: why this cannot be accepted as a risk. */
+  not_acceptable_reason?: string;
+  /** An earlier acceptance a revisit trigger reopened: decide again. */
+  reopened?: {
+    /** When. Unix timestamp in seconds. */
+    at: number | null;
+    /** Why it reopened. */
+    reason: string;
+    /** The trigger. */
+    code: string | null;
+  };
+  /** An agent proposed accepting the risk; it waits for the owner's confirmation (never accepted until then). */
+  proposal?: {
+    /** When it was proposed. Unix timestamp in seconds. */
+    at: number | null;
+    /** The proposing agent's reason. */
+    reason: string | null;
+    /** When the confirmation link expires. Unix timestamp in seconds. */
+    expires: number | null;
+  };
+}
+
 /** One legal requirement behind a task. */
 export interface PlanCitation {
   /** Requirement id in the legal catalog. */
@@ -1833,7 +1907,7 @@ export interface PlanEdit {
 
 /** What the caller (usually an AI coding agent) should do next. */
 export interface PlanNextAction {
-  /** Stable action type: apply_task, provide_facts, verify_task, answer_question, ask_human_to_confirm, connect_billing_in_dashboard, store_stripe_test_key, wait_for_verification, run_first_check, review_wont_fix, done_for_now (nothing left an agent can do in code now: the rest waits for a deploy / real send, and maybe the owner; the description lists both; finish the change), done. */
+  /** Stable action type: apply_task, provide_facts, verify_task, answer_question, ask_human_to_confirm, connect_billing_in_dashboard, connect_stripe (give the owner the one “Connect with Stripe” link in the description; read-only, no key), store_stripe_test_key, wait_for_verification, run_first_check, review_wont_fix, done_for_now (nothing left an agent can do in code now: the rest waits for a deploy / real send, and maybe the owner; the description lists both; finish the change), done. */
   type: string;
   /** One or two sentences telling the agent exactly what to do now. */
   description: string;
@@ -1885,6 +1959,17 @@ export interface Task {
   tier?: "required" | "recommended" | "extra";
   /** before_launch (tier required: an open one concerns a requirement at checkout, cancellation or a required notice; only these keep the site from being ready to launch) or good_practice (tier recommended or extra: optional suggestions, never blocking). Always present on API responses. */
   launch_tier?: "before_launch" | "good_practice";
+  /** Round 42: the conversion cost of this task's change. Checkbox's default fix is the lowest-friction change that meets the cited law. Always present on API responses. */
+  conversion_impact?: {
+    /** What the change costs at checkout: none (text only, or not on the checkout), small (one extra click: a required checkbox, only where a cited law asks for a separate opt-in), noticeable (a change to the purchase button's own label; never a default fix). */
+    level: "none" | "small" | "noticeable";
+    /** One plain line: why. */
+    reason: string;
+  };
+  /** Round 43: do_this (one of the three things Checkbox always asks for: renewal terms next to the purchase button with consent, easy online cancellation, the required reminder and acknowledgment emails; never acceptable as a risk) or your_call (the owner fixes it or accepts the risk). Always present on API responses. */
+  kind?: "do_this" | "your_call";
+  risk_if_skipped?: RiskIfSkipped;
+  risk_decision?: RiskDecision;
   /** User-facing status. needs_fix (a requirement is clearly not met: `compliance.fix` is the one change), pending_live_check (everything Checkbox can see is right; the live event has not been observed yet — counts as passing the checks), verified_live (observed live: proof run, real BCC'd send, Stripe-confirmed cancellation), your_call (a real decision for a person: `compliance.question`), compliant (passes; grey areas carry a `compliance.note`), not_applicable, not_set_up (no sign the email or setting exists yet: `compliance.fix` is the one-click way to set it up; never counts as passing the checks), not_checked (Checkbox has not tried it yet, e.g. the cancel flow: `compliance.fix` says how; never counts as passing the checks). */
   compliance_status?: "needs_fix" | "pending_live_check" | "verified_live" | "your_call" | "compliant" | "not_applicable" | "not_set_up" | "not_checked";
   /** The status in words to show a person ("Needs a fix", "Your call", "Not set up yet", "Not checked yet", "Checks pass"…). Show this, never the machine value. */
@@ -1952,7 +2037,7 @@ export interface Task {
   /** What Checkbox needs before it can give the exact change or verify it (observation: it has not seen the page / email yet; facts: plan, price, cancel URL or merchant name; verify_domain: the site's domain is not verified yet, so Checkbox cannot visit it to verify this task: do the verify_domain task first; online_cancellation: the change names where subscribers cancel, so it waits on that task, listed in blocked_by). The title stays the same either way. */
   blocked_on: string | null;
   /** Done / declined tasks: verified (its checks pass), no_longer_applicable (its checks no longer apply, e.g. the data source changed), superseded, declined, decided (the owner confirmed a decision, e.g. New York notices by email only: closed, but its checks are not verified). */
-  closed_reason: "verified" | "no_longer_applicable" | "superseded" | "declined" | "decided" | null;
+  closed_reason: "verified" | "no_longer_applicable" | "superseded" | "declined" | "decided" | "risk_accepted" | null;
   /** Tasks to finish first (their result changes this task's content). */
   depends_on: Array<string>;
   /** Unfinished tasks among depends_on. */
@@ -1992,8 +2077,8 @@ export interface Task {
   last_verification: {
     /** Unique identifier of the verification (ver_…). */
     id: string;
-    /** Result. incomplete: every check observed passes, but something the task covers was not given to Checkbox yet (e.g. a plan's Checkout config is not registered); not done. */
-    status: "pending" | "passed" | "incomplete" | "failed";
+    /** Result, the same word retrieveVerification gives for this verification (see Verification.status; superseded and passed_with_notes are only said there, with the plan). incomplete: every check observed passes, but something the task covers was not given to Checkbox yet (e.g. a plan's Checkout config is not registered); not done. */
+    status: "pending" | "passed" | "passed_with_gaps" | "not_checked" | "pending_live_check" | "needs_review" | "incomplete" | "failed";
     /** When it was requested. Unix timestamp in seconds. */
     created: number;
   } | null;
@@ -2024,6 +2109,85 @@ export interface Task {
   unfamiliar?: Array<UnfamiliarNote>;
 }
 
+/** The optional owner question while nothing is known (null otherwise, or once answered or declined). */
+export type ExposureQuestion = {
+  /** Always "exposure_estimate". */
+  id: "exposure_estimate";
+  /** The question for the owner, in plain words. */
+  text: string;
+  /** Always true: never blocks anything. Ask it once; skip it if the owner prefers not to say. */
+  optional: true;
+  /** The answers. */
+  options: {
+    /** lt100 (fewer than 100), 100to1k, 1kto10k, gt10k (more than 10,000). */
+    subscribers: Array<"lt100" | "100to1k" | "1kto10k" | "gt10k">;
+    /** low (under about 8%), medium (8-20%), high (over 20%). */
+    california_share: Array<"low" | "medium" | "high">;
+  };
+  /** The call that records the answer. */
+  how_to_answer: string;
+} | null;
+
+/** Round 43: how exposed this business is (aggregate live Stripe counts, the owner's estimate, or unknown), with summary.line to show people and, while nothing is known, one optional owner question (exposure.question: ask once, never blocking). Same object as retrieveSiteExposure. Never changes the status or next_action. */
+export interface Exposure {
+  /** String representing the object's type. Always "exposure". */
+  object: "exposure";
+  /** The site. */
+  site: string;
+  /** true for live-mode objects, false for test mode (ck_test_ keys act on an isolated sandbox). */
+  livemode: boolean;
+  /** stripe_live: aggregate counts read from live Stripe (read-only connection); owner_estimate: the owner's answer to the one question; unknown: neither yet (levels are general estimates). Test-mode Stripe data is never used. */
+  source: "stripe_live" | "owner_estimate" | "unknown";
+  /** Round 43 review: owner_estimate only: who entered it. agent (an API key, never confirmed by the owner): shown as "estimate entered by your agent", and it never lowers a risk level below what no estimate gives. */
+  estimate_by?: "owner" | "agent" | null;
+  /** When the figures were read or answered. Unix timestamp in seconds. */
+  as_of: number | null;
+  /** Active + trialing subscriptions in live Stripe (null when unknown). */
+  active_subscriptions: number | null;
+  /** Of which in a trial. */
+  trialing: number | null;
+  /** Share (0-1) billed yearly or longer. */
+  annual_share: number | null;
+  /** Subscriptions per billing location: "US-CA" (a U.S. state), "US" (state unknown), another country's code, or "unknown". Empty when locations could not be read (see gaps). Counts only. */
+  by_jurisdiction: Record<string, number>;
+  /** Disputes / successful charges over the last 90 days (0-1). */
+  dispute_rate_90d: number | null;
+  /** Subscriber band (owner estimate, or from the live count). */
+  band: "lt100" | "100to1k" | "1kto10k" | "gt10k" | null;
+  /** Share in California (owner estimate, or from live locations). */
+  ca_share: "low" | "medium" | "high" | null;
+  /** Fields that could not be read and why (for example a permission the installed Stripe App does not have yet). */
+  gaps: Array<{
+    /** The field Checkbox could not read. */
+    field: string;
+    /** Why, in plain words. */
+    reason: string;
+  }>;
+  /** A read stopped at its cap: counts are lower bounds. */
+  truncated: boolean;
+  /** The overall exposure line. */
+  summary: {
+    /** very_low, low, medium or high: Checkbox's estimate, not legal advice. */
+    level: "very_low" | "low" | "medium" | "high";
+    /** One line for people: counts, California share, dispute rate and the overall level. */
+    line: string;
+    /** What raised or lowered the level. */
+    reasons: Array<string>;
+    /** false when nothing is known and levels are general estimates. */
+    known: boolean;
+  };
+  question: ExposureQuestion;
+  /** The live Stripe read (refreshed daily and when Stripe is connected). */
+  stripe: {
+    /** When live Stripe was last read successfully. Unix timestamp in seconds. */
+    last_read: number | null;
+    /** The last read failure, if the newest read failed (the previous figures are kept). */
+    last_error: string | null;
+  };
+  /** Estimates from public enforcement records and these counts; not legal advice. */
+  disclaimer: string;
+}
+
 /** The ordered, machine-readable list of changes that makes a site's checks pass, recomputed from its latest evaluation. */
 export interface CompliancePlan {
   /** Unique identifier of the compliance plan (plan_…). */
@@ -2034,10 +2198,10 @@ export interface CompliancePlan {
   livemode: boolean;
   /** The site. */
   site: string;
-  /** action_required (an agent can apply open tasks now), verifying (changes applied; waiting for confirming observations), compliant (every required check passes or only waits for a live check — an automated assessment, not a legal determination; see compliance.pending_live_checks and coverage), blocked (only human answers ("Your call") or declined critical tasks remain). The value "compliant" is kept so published SDKs keep working; prefer checks_status ("checks_pass") and show status_label to people: never tell anyone the site "is compliant". */
-  status: "action_required" | "verifying" | "compliant" | "blocked";
+  /** action_required (an agent can apply open tasks now), verifying (changes applied; waiting for confirming observations), compliant (every required check passes or only waits for a live check — an automated assessment, not a legal determination; see compliance.pending_live_checks and coverage), blocked (only human answers ("Your call") or declined critical tasks remain), risk_accepted (round 43: every Do-this item meets its requirement and every other required item is met or the owner accepted its risk; the accepted items' checks do not pass, so never "compliant"). The value "compliant" is kept so published SDKs keep working; prefer checks_status ("checks_pass") and show status_label to people: never tell anyone the site "is compliant". */
+  status: "action_required" | "verifying" | "compliant" | "blocked" | "risk_accepted";
   /** The same as status, with "checks_pass" in place of the older value "compliant" (every required check passes or only waits for a live check: an automated assessment, not a legal determination). Read this one in new code. */
-  checks_status?: "action_required" | "verifying" | "checks_pass" | "blocked";
+  checks_status?: "action_required" | "verifying" | "checks_pass" | "blocked" | "risk_accepted";
   /** The plan status in words to show a person, from the same counts as the summary ("1 fix needed · 2 to set up", "1 decision for you"; else action_required "Fixes needed", blocked "Your call"), "Checks still running (N)" while checks are still running (verifying), compliant "Checks pass"; while an agent works the site and everything left waits for a deploy or the owner (next_action done_for_now): "Waiting on deploy and you" or "Waiting on deploy". Show this, never the machine value (`compliant` is a status name, not a legal conclusion). */
   status_label?: string;
   /** The evaluation the plan was built from (null before the first check). */
@@ -2120,14 +2284,16 @@ export interface CompliancePlan {
     description: string;
     /** Every choice only the owner makes, together. Empty when nothing is left to ask and only closed questions are reported. */
     questions: Array<{
-      /** The id answerTask takes: the id of the task whose question it is (task_…), or the question's name for those that are not one task's: "email_sender", "notices_support_email", "notices_cancel_timing", "stripe_terms_url", "stripe_portal_login", "replace_payment_link" (send site with the answer when the account has several sites). Every listed question is answered with answerTask and this id. */
+      /** The id answerTask takes: the id of the task whose question it is (task_…), or the question's name for those that are not one task's: "email_sender", "notices_support_email", "notices_cancel_timing", "stripe_terms_url", "stripe_portal_login", "replace_payment_link", "connect_stripe" (send site with the answer when the account has several sites). Every listed question is answered with answerTask and this id. */
       id: string;
-      /** What the question is: "email_sender" (who sends the required emails), "notices_support_email" / "notices_cancel_timing" (what Checkbox Notices needs before it sends), "stripe_terms_url" (the Terms of Service URL Stripe needs before it collects consent, in test mode too), "stripe_portal_login" / "replace_payment_link" (Stripe Dashboard steps of a Payment Link site), or the key of the task whose question it is. */
+      /** What the question is: "email_sender" (who sends the required emails), "notices_support_email" / "notices_cancel_timing" (what Checkbox Notices needs before it sends), "stripe_terms_url" (the Terms of Service URL Stripe needs before it collects consent, in test mode too), "stripe_portal_login" / "replace_payment_link" (Stripe Dashboard steps of a Payment Link site), "connect_stripe" (the owner's one "Connect with Stripe" link, read-only; closes when Checkbox sees the connection), or the key of the task whose question it is. */
       key: string;
       /** true when the question was not in the first batch the owner was asked: if they already answered the others, ask only these. Absent otherwise. */
       added_later?: boolean;
       /** true when the question closed earlier (see closed) and is asked again because what it is about changed back. Absent otherwise. */
       reopened?: boolean;
+      /** Round 44: a legal question the owner answers themselves at this link (their To-do page, signed in). Send it in the same message as the other questions: their answer there counts at once, with no second confirmation. Absent for other questions. */
+      owner_link?: string;
       /** The question, in plain words for the owner. */
       text: string;
       /** The answers. */
@@ -2180,6 +2346,44 @@ export interface CompliancePlan {
   }>;
   /** Setups on this site Checkbox has not seen before, logged for review (informational; never changes the status). Tell the human the headline and the line; do not promise a reply. Absent unless the deployment shows them. */
   unfamiliar?: Array<UnfamiliarNote>;
+  exposure?: Exposure;
+  /** Round 43: the exposure in one line and a level. */
+  exposure_summary?: {
+    /** very_low, low, medium or high. */
+    level: "very_low" | "low" | "medium" | "high";
+    /** One line to show (the MCP exposure line, the Overview card). */
+    line: string;
+    /** Why, each with its basis. */
+    reasons: Array<string>;
+    /** Whether Checkbox knows anything of the exposure (live Stripe counts or the owner's estimate). */
+    known?: boolean;
+  };
+  /** Round 43: the open Your-call items as ONE owner decision ("Fix or accept the risk"). Absent when none is open. */
+  owner_decisions?: {
+    /** The one message to send the owner: each Your-call item with its risk if skipped and its cost to sign-ups; "Fix or accept the risk". */
+    message: string;
+    /** The open Your-call items. */
+    items: Array<{
+      /** Unique identifier of the task (task_…). */
+      task: string;
+      /** Task key. */
+      key: string;
+      /** Task title. */
+      title: string;
+      risk_if_skipped: RiskIfSkipped;
+      /** What fixing it costs at checkout. */
+      conversion_impact: {
+        /** none, small or noticeable. */
+        level: "none" | "small" | "noticeable";
+        /** Why. */
+        reason: string;
+      };
+    }>;
+    /** The owner's To-do page, where only the owner accepts a risk. */
+    accept_url: string | null;
+    /** Agents propose (proposeRiskAcceptance), never accept. */
+    how: string;
+  };
   /** Rules / catalog version of the evaluation. */
   rules_version: string | null;
   /** Automated assessment; not legal advice. */
@@ -2208,10 +2412,35 @@ export interface CompliancePlan {
 }
 
 export interface UpdateTaskParams {
-  /** in_progress claims the task (other agents see it), wont_fix declines it (needs reason; a declined critical/high task keeps the plan from reaching status compliant), not_applicable records that the task does not apply to this business (needs reason, e.g. "no price changes are planned"; the task closes as no_longer_applicable and does not block the plan), open clears any of them. */
+  /** in_progress claims the task (other agents see it); open clears the claim. wont_fix and not_applicable (each needs reason) are, on a Your-call task, a proposal the owner confirms at a link (the task stays open until then); on a Do-this task they are refused (409 do_this_not_acceptable). */
   status: "open" | "in_progress" | "wont_fix" | "not_applicable";
-  /** Why (required for wont_fix). */
+  /** Why (required for wont_fix and not_applicable; shown to the owner with the proposal). */
   reason?: string;
+}
+
+/** An agent's proposal to accept a task's risk, waiting for the owner. Never an acceptance. */
+export interface RiskAcceptanceProposal {
+  /** Object type. */
+  object: "risk_acceptance_proposal";
+  /** Unique identifier of the task (task_…). */
+  task: string;
+  /** Task key. */
+  key: string;
+  /** Always awaiting_owner_confirmation: nothing is accepted until the owner confirms. */
+  status: "awaiting_owner_confirmation";
+  /** Your reason, as recorded. */
+  reason: string;
+  /** The link the owner opens (signed in) to accept or decline. */
+  confirmation_url: string;
+  /** The owner's To-do page (every decision on one page). */
+  todo_url: string;
+  risk_if_skipped?: RiskIfSkipped;
+  next_action: PlanNextAction;
+}
+
+export interface ProposeRiskAcceptanceParams {
+  /** Why you propose accepting the risk (shown to the owner with the risk if skipped). */
+  reason: string;
 }
 
 /** The task after answerTask, with the confirmation link at the top level when the human must confirm. */
@@ -2246,6 +2475,10 @@ export interface AnswerTaskParams {
   note?: string;
   /** Only for an owner question named like email_sender: the site it belongs to (needed when the account has several sites). */
   site?: string;
+  /** Optional: the same id as in the path (a task id or an owner question's name). Accepted so a body that repeats it works; a different id is refused (parameter_invalid). */
+  task?: string;
+  /** Optional: the owner question's key, the same as the path id (owner_questions[].key). Accepted and checked like task. */
+  key?: string;
 }
 
 /** Expected vs observed for one check. */
@@ -2260,6 +2493,10 @@ export interface VerificationCheck {
   source: string;
   /** What was observed. */
   detail: string;
+  /** Round 44: this check's result in one word, the same value as observed (pass, fail, needs_review, missing_data, not_checked, not_applicable, unknown, informational). Never null. */
+  status: string;
+  /** Round 42, whole-site verifications only: true when the plan counts this check as something left to do (it fails, or a required task that owns it is still open); false for a check that passes or only waits (a live check that completes on its own, an optional suggestion, a check no open task owns). Count only blocking checks as "not passing". */
+  blocking?: boolean;
 }
 
 /** A re-check of one task (or the whole site) after the agent applied changes. */
@@ -2331,7 +2568,7 @@ export interface Verification {
   /** Only the checks whose observation differs from the expectation. */
   diff: Array<VerificationCheck>;
   /** Plan status after this verification (null while pending). */
-  plan_status: "action_required" | "verifying" | "compliant" | "blocked" | null;
+  plan_status: "action_required" | "verifying" | "compliant" | "blocked" | "risk_accepted" | null;
   /** The plan status in words to show a person, from the same counts as the summary ("1 fix needed · 2 to set up", "1 decision for you"; else action_required "Fixes needed", blocked "Your call"), "Checks still running (N)" while checks are still running (verifying), compliant "Checks pass"; while an agent works the site and everything left waits for a deploy or the owner (next_action done_for_now): "Waiting on deploy and you" or "Waiting on deploy". Show this, never the machine value (`compliant` is a status name, not a legal conclusion). */
   plan_status_label?: string | null;
   /** Open plan tasks this re-check (or the checks it started) found, new since the plan was read before it: work them too. Omitted when there are none. */
@@ -2355,7 +2592,7 @@ export interface Verification {
 }
 
 export interface VerifyTaskParams {
-  /** page_fetch tasks: the rendered page HTML before you deploy, at most ~900 KB (request bodies are limited to 1 MB). Pre-check only; the confirming scan runs on the live page. */
+  /** page_fetch tasks and the sign-up tasks (signup_disclosure): the rendered page HTML before you deploy, at most ~900 KB (request bodies are limited to 1 MB). Pre-check only; the confirming scan runs on the live page. Other tasks (cancellation, account page) refuse it (parameter_invalid): deploy, then verify without it. */
   html?: string;
   /** stripe_params tasks and the sign-up tasks (signup_disclosure): exactly what your code now passes to stripe.checkout.sessions.create. Judged together with the page (any failing check fails the verification). A task that does not use it refuses it (parameter_invalid, naming the task that takes it). */
   stripe_checkout_session?: Record<string, unknown>;
@@ -2390,6 +2627,15 @@ export interface VerificationList {
   has_more: boolean;
   /** The URL of this list. */
   url: string;
+}
+
+export interface UpdateExposureParams {
+  /** About how many subscribers: lt100, 100to1k, 1kto10k, gt10k. */
+  subscribers?: "lt100" | "100to1k" | "1kto10k" | "gt10k";
+  /** About how many of them are in California: low (under about 8%), medium (8-20%), high (over 20%). */
+  california_share?: "low" | "medium" | "high";
+  /** true: the owner prefers not to say (the question is not asked again). */
+  declined?: boolean;
 }
 
 /** A concrete change to apply. */
@@ -3141,15 +3387,15 @@ export interface CheckReplacement {
   disclosure_text: string;
   /** The same terms as one short line, verified by the engine like disclosure_text (present only when it passes every targeted check); disclosure_text is then the fuller version. */
   short_disclosure_text?: string;
-  /** Label for the unchecked, required consent checkbox. */
+  /** Label for an unchecked, required consent checkbox, for a page that adds its own consent checkbox or for Checkbox Elements; see note. */
   consent_label: string;
-  /** Purchase button label that itself states the renewal. */
+  /** Your purchase button label (the one you sent, else a plain "Subscribe" / "Start free trial"). Keep your own label: Checkbox never asks for an "Agree &" button. */
   button_text: string;
-  /** Drop-in markup: disclosure + unchecked required checkbox + button. When consent_on is set (the purchase completes on a Stripe Payment Link or Stripe Checkout), the terms only: no checkbox, no button. */
+  /** Drop-in markup for directly above your own purchase button. By default the one renewal line ending with its consent sentence ("By subscribing, you agree to these renewal terms."): no checkbox, no button, your button keeps its label. A required, unchecked checkbox only when note says so. When consent_on is set (the purchase completes on a Stripe Payment Link or Stripe Checkout), the terms only. */
   html: string;
   /** Set when consent is collected on the Stripe-hosted page, not on this page: html is then the terms only. */
   consent_on?: "payment_link" | "stripe_checkout";
-  /** What html contains and what is still needed elsewhere (set with consent_on). */
+  /** What html contains (with or without a checkbox, and why) and what is still needed elsewhere. */
   note?: string;
   /** The same markup as JSX for React / Next.js components (className, htmlFor, style objects, self-closed inputs); the text is unchanged. */
   jsx?: string;
@@ -3265,8 +3511,10 @@ export interface DisclosureCheckParams {
     font_size_px?: number;
     /** WCAG contrast ratio of the text against its background (default ≈14.7). */
     contrast_ratio?: number;
-    /** The disclosure is bold / semibold. */
+    /** The disclosure is semibold or bold (font-weight 600 or more; modelled as semibold). */
     bold?: boolean;
+    /** The line is shown by Checkbox Elements, the snippet-rendered disclosure, or replacement.html with its region script (/g.js), which show it in bold to visitors Checkbox places in Vermont by IP (plans with a first term of a year or more). Default false. */
+    region_script?: boolean;
     /** The disclosure is set off in a bordered or shaded box. */
     boxed?: boolean;
     /** Font size of the surrounding body text (default 14). */
@@ -3287,7 +3535,7 @@ export interface DisclosureCheckParams {
   checkout_type?: "own_page" | "stripe_checkout" | "payment_link";
   /** Evaluate the law as of this date (YYYY-MM-DD, default today). */
   as_of?: string;
-  /** Round 23: a site of yours (site_…): the disclosure is judged against the plan it states among the site's plans (the connected Stripe Prices win over plans typed in setup), with the site's merchant name, cancellation URL and jurisdictions, as verifyTask judges it. Plan fields you send are replaced by the plan's. "none" judges only what you send. */
+  /** Round 23: a site of yours (site_…): the disclosure is judged against the plan it states among the site's plans (the connected Stripe Prices win over plans typed in setup), with the site's merchant name, cancellation URL and jurisdictions, as verifyTask judges it, when you send no price. Plan terms you send (a price, with its interval, trial…) are never replaced: they are judged as sent, the plan fields you leave out come from the site plan they match, and when they match none the result carries a site_plans_differ warning. "none" judges only what you send. */
   site?: string;
   /** With a site: judge the disclosure against this plan (name or Stripe Price id). An unknown plan is refused with the list of plans. */
   plan?: string;
@@ -3420,7 +3668,7 @@ export interface StripeCheckParams {
   /** Exactly the object your code passes to Stripe (checkout.sessions.create / paymentLinks.create), or a retrieved Payment Link. */
   params: Record<string, unknown>;
   merchant?: CheckPlanTerms;
-  /** A site of yours (site_…): the params are judged as verifyTask judges them — the plan each line_items Price sells (the connected Stripe Prices win over plans typed in setup), the site's merchant name, cancellation URL and jurisdictions; merchant fields you send other than the plan's price / interval / trial are kept. Without it, the params are judged with merchant only (or the one site of the account with Stripe connected when you pass plan). "none" judges only what you send. */
+  /** A site of yours (site_…): the params are judged as verifyTask judges them — the plan each line_items Price sells (the connected Stripe Prices win over plans typed in setup), the site's merchant name, cancellation URL and jurisdictions; merchant fields you send other than the plan's price / interval / trial are kept. Without it, the params are judged with merchant only (or the one site of the account with Stripe connected when you pass plan). "none" judges only what you send. The Price in line_items decides the charge: a merchant price / interval that says otherwise is named (warning merchant_terms_differ_from_price). Without site and without merchant.cancel_url, the cancellation page recorded for the account's one site fills cancel_url (warning cancel_url_from_site). */
   site?: string;
   /** With a site: judge the params against this plan (name or Stripe Price id) instead of the plan their Price id sells. An unknown plan is refused with the list of plans. */
   plan?: string;
@@ -3603,7 +3851,7 @@ export interface EmailCheckParams {
     /** Support email / URL shown in the generated template. */
     support_contact?: string;
   };
-  /** A site of yours (site_…): the email is judged as verifyTask judges it, against the plan it names ("Annual") among the site's plans (the connected Stripe Prices win over plans typed in setup), with the site's jurisdictions. Without it, the one site of the account with Stripe connected is used when there is exactly one (the result says so in warnings, code site_from_stripe). "none" judges only the terms you send. */
+  /** A site of yours (site_…): the email is judged as verifyTask judges it, against the plan it names ("Annual") among the site's plans (the connected Stripe Prices win over plans typed in setup), with the site's jurisdictions, when terms carry no price. Plan terms you send (a price, with its interval, trial…) are never replaced: they are judged as sent, the plan fields you leave out come from the site plan they match, and when they match none the result carries a site_plans_differ warning. Without it, the one site of the account with Stripe connected is used when there is exactly one (the result says so in warnings, code site_from_stripe). "none" judges only the terms you send. */
   site?: string;
   /** With a site: the plan (name or Stripe Price id) the email is for, instead of the plan the email names. */
   plan?: string;
@@ -3717,7 +3965,7 @@ export interface PageCheckParams {
   checkout_type?: "own_page" | "stripe_checkout" | "payment_link";
   /** Your Stripe Payment Link URLs (buy.stripe.com or your own domain). A link to one of them is the purchase button, and the purchase and consent complete on Stripe, so no checkbox is added on this page. With site, the Payment Links read from your connected Stripe account are added. */
   payment_links?: Array<string>;
-  /** A site of yours (site_…): the page is judged exactly as verifyTask judges it — against the site's plans (the connected Stripe Prices win over plans typed in setup), its jurisdictions and its checkout type. These replace terms, plans, jurisdictions and checkout_type when the site knows them. Without it, the one site of the account with Stripe connected gives the plans when there is exactly one (warning site_from_stripe says so). "none" judges only what you send. */
+  /** A site of yours (site_…): the page is judged exactly as verifyTask judges it — against the site's plans (the connected Stripe Prices win over plans typed in setup), its jurisdictions and its checkout type. Its jurisdictions and checkout type replace the ones sent. Plans / terms you send (a price, with its interval, trial…) are never replaced: they are judged as sent, the plan fields you leave out come from the site plan they match, and when they match none the result carries a site_plans_differ warning. Without it, the one site of the account with Stripe connected gives the plans when there is exactly one (warning site_from_stripe says so). "none" judges only what you send. */
   site?: string;
   /** Where you sell: "all" (default) or state codes ("US-CA", "CA", "US-NY"; "US-FED" is always included). */
   jurisdictions?: "all" | Array<string>;
@@ -3821,6 +4069,55 @@ export interface NoticeScheduleParams {
   jurisdictions?: "all" | Array<string>;
   /** Evaluate the law as of this date (YYYY-MM-DD, default today). */
   as_of?: string;
+}
+
+/** The requesting browser's region, from its IP address (not stored). */
+export interface VisitorRegion {
+  /** String representing the object's type. Always "visitor_region". */
+  object: "visitor_region";
+  /** The visitor's region from the IP address: "US-VT" (Vermont), "US-DC" (the District of Columbia), "other" (an address elsewhere) or "unknown" (no usable address: private, loopback or malformed). Only these two regions are told apart, from an offline table (DB-IP Lite, CC BY 4.0); a VPN, a mobile network or travel can place a visitor wrongly. */
+  region: "US-VT" | "US-DC" | "other" | "unknown";
+  /** DC_TRIAL_CONSENT on this deployment: "geo" (default) = the D.C. free-trial consent only for visitors in D.C.; "all" = for every visitor of a D.C.-scoped free trial. */
+  dc_trial_consent: "geo" | "all";
+}
+
+/** Whether this visitor needs a separate opt-in or bold renewal terms. */
+export interface RegionCheckResult {
+  /** String representing the object's type. Always "region_check". */
+  object: "region_check";
+  /** The visitor's region from the IP address: "US-VT" (Vermont), "US-DC" (the District of Columbia), "other" (an address elsewhere) or "unknown" (no usable address: private, loopback or malformed). Only these two regions are told apart, from an offline table (DB-IP Lite, CC BY 4.0); a VPN, a mobile network or travel can place a visitor wrongly. */
+  region: "US-VT" | "US-DC" | "other" | "unknown";
+  /** This visitor must give a separate opt-in to the renewal (one required, unchecked checkbox; on Stripe Checkout consent_collection.terms_of_service = "required"): visitors in Vermont on a plan with a first term of a year or more; visitors in the District of Columbia on a free trial (every visitor of a D.C.-scoped trial with dc_trial_consent "all"). true when the region is unknown. */
+  separate_opt_in: boolean;
+  /** Show the renewal terms in bold-face type for this visitor (Vermont, a first term of a year or more). true when the region is unknown. */
+  bold_renewal_terms: boolean;
+  /** What to pass to stripe.checkout.sessions.create for this visitor (null: nothing; the renewal line with its "By subscribing, you agree to these renewal terms." sentence is the consent). */
+  consent_collection: {
+    /** Stripe's terms checkbox, required. */
+    terms_of_service: "required";
+  } | null;
+  /** Why, in plain words with the citation. */
+  reasons: Array<string>;
+  /** DC_TRIAL_CONSENT on this deployment: "geo" (default) = the D.C. free-trial consent only for visitors in D.C.; "all" = for every visitor of a D.C.-scoped free trial. */
+  dc_trial_consent: "geo" | "all";
+  /** How Checkbox judges this and the limits of an IP address. */
+  note: string;
+}
+
+/** A visitor (IP or region) and the plan they are about to buy. */
+export interface RegionCheckParams {
+  /** The visitor's IP address, as your server received it (IPv4 or IPv6). Not stored. Give ip or region. */
+  ip?: string;
+  /** The visitor's region when you already know it (e.g. "US-DC", "DC", "US-VT"); otherwise pass ip. */
+  region?: string;
+  /** Billing interval of the plan. */
+  interval: "day" | "week" | "month" | "year";
+  /** Intervals per billing period (default 1). */
+  interval_count?: number;
+  /** Free-trial days (0 or absent: no trial). */
+  trial_days?: number;
+  /** Where you sell: "all" (default) or state codes ("US-CA", "CA", "US-NY"; "US-FED" is always included). */
+  jurisdictions?: "all" | Array<string>;
 }
 
 /** RFC 6902 operation. */
@@ -4226,13 +4523,15 @@ export interface Consent {
   terms: Record<string, unknown>;
   /** Checkbox state. */
   checkbox: {
-    /** Always true. */
+    /** The box was ticked (always true for a checkbox consent; false for a clickwrap consent, which has no box). */
     checked: boolean;
     /** The box was pre-ticked (consent then is not affirmative). */
     initially_checked: boolean;
     /** Ticking was required. */
     required: boolean;
   };
+  /** How the subscriber consented: checkbox (ticked the box) or clickwrap (clicked the pay button next to the renewal terms). */
+  mechanism: "checkbox" | "clickwrap";
   /** Page of the consent. */
   page_url: string | null;
   /** Origin of the browser request (null for server-recorded consents). */
@@ -4359,8 +4658,8 @@ export interface ConsentCreateParams {
   disclosure_text: string;
   /** The exact label of the consent checkbox. */
   consent_label: string;
-  /** Checkbox state. */
-  checkbox: {
+  /** Checkbox state. Required unless mechanism is clickwrap. */
+  checkbox?: {
     /** The box was ticked when the consent was recorded (must be true). */
     checked: boolean;
     /** The box was ticked before the subscriber touched it (default false). */
@@ -4368,6 +4667,8 @@ export interface ConsentCreateParams {
     /** Ticking the box was required to subscribe (default true). */
     required?: boolean;
   };
+  /** How the subscriber consented: checkbox (ticked the unchecked box; default) or clickwrap (clicked the pay button next to the renewal terms, which end with "By subscribing, you agree to these renewal terms."; consent_label is that sentence). <checkbox-disclosure> 1.6+ sends clickwrap unless a separate opt-in applies (Vermont) or the merchant chose the checkbox. */
+  mechanism?: "checkbox" | "clickwrap";
   /** Page the consent was given on (fragment removed). */
   page_url?: string;
   /** Your id for the subscriber: Stripe customer / Checkout Session / subscription id. Not an email address: no raw personal data is needed. */
@@ -4794,7 +5095,7 @@ export interface StripeCheckoutConfigJudgement {
     /** What the params do wrong and how to fix it. */
     detail: string;
   }>;
-  /** Engine-verified params that pass, when Checkbox can correct them: put them in your code, then register again. */
+  /** Engine-verified params that pass, when Checkbox can correct them: put them in your code, then register again. When they set consent_collection.terms_of_service = "required", Stripe needs a Terms of Service URL in Settings → Business → Public details first (next_action says so). */
   corrected_params: Record<string, unknown> | null;
   /** needs_review only: why Checkbox could not judge them yet (e.g. a Price it has not read from Stripe). */
   problem?: string;
@@ -4977,7 +5278,7 @@ export interface TestRun {
   finished_at: number | null;
   /** How long the run took, from started (or created) to finished, in seconds; null while it runs. */
   duration_seconds: number | null;
-  /** Round 41: true when Checkbox started the run itself because the compliance plan asked for one (test mode, with the site's Stripe TEST key stored). createTestRun returns this run while it is active instead of starting another. */
+  /** Round 41: true when Checkbox started the run itself because the compliance plan asked for one (test mode, with the site's Stripe TEST key stored). createTestRun without a plan returns this run while it is active, whichever plan it runs (plan says which plan it covers, plans_not_run the others), instead of starting another. */
   auto_started: boolean;
   /** Lifecycle steps in order. */
   steps: Array<TestRunStep>;
@@ -5321,8 +5622,8 @@ export interface CompliancePlanSummary {
   livemode: boolean;
   /** The site. */
   site: string;
-  /** action_required (an agent can apply open tasks now), verifying (changes applied; waiting for confirming observations), compliant (every required check passes or only waits for a live check — an automated assessment, not a legal determination; see compliance.pending_live_checks and coverage), blocked (only human answers ("Your call") or declined critical tasks remain). The value "compliant" is kept so published SDKs keep working; prefer checks_status ("checks_pass") and show status_label to people: never tell anyone the site "is compliant". */
-  status: "action_required" | "verifying" | "compliant" | "blocked";
+  /** action_required (an agent can apply open tasks now), verifying (changes applied; waiting for confirming observations), compliant (every required check passes or only waits for a live check — an automated assessment, not a legal determination; see compliance.pending_live_checks and coverage), blocked (only human answers ("Your call") or declined critical tasks remain), risk_accepted (round 43: every Do-this item meets its requirement and every other required item is met or the owner accepted its risk; the accepted items' checks do not pass, so never "compliant"). The value "compliant" is kept so published SDKs keep working; prefer checks_status ("checks_pass") and show status_label to people: never tell anyone the site "is compliant". */
+  status: "action_required" | "verifying" | "compliant" | "blocked" | "risk_accepted";
   /** The plan status in words to show a person, from the same counts as the summary ("1 fix needed · 2 to set up", "1 decision for you"; else action_required "Fixes needed", blocked "Your call"), "Checks still running (N)" while checks are still running (verifying), compliant "Checks pass"; while an agent works the site and everything left waits for a deploy or the owner (next_action done_for_now): "Waiting on deploy and you" or "Waiting on deploy". Show this, never the machine value (`compliant` is a status name, not a legal conclusion). */
   status_label?: string;
   /** Two or three sentences for an LLM: where the site stands and what comes next. */
@@ -6186,6 +6487,7 @@ export const ERROR_CODES = {
   resource_missing: { status: 404, type: "invalid_request_error", description: "No object with this id exists in this mode of the account." },
   route_not_found: { status: 404, type: "invalid_request_error", description: "No such endpoint. See /v1/openapi.json for the list." },
   resource_conflict: { status: 409, type: "invalid_request_error", description: "The object is in a state that does not allow this action." },
+  do_this_not_acceptable: { status: 409, type: "invalid_request_error", description: "Round 43: the task is a Do-this item (renewal terms next to the purchase button with consent, easy online cancellation, the required reminder and acknowledgment emails). It cannot be declined, marked not applicable or accepted as a risk: fix it. next_action names the task's change." },
   scan_already_queued: { status: 409, type: "invalid_request_error", description: "A scan of this site is already queued or running." },
   consent_reference_locked: { status: 409, type: "invalid_request_error", description: "The consent already carries a different customer_reference; references are set once and never changed." },
   billing_account_mismatch: { status: 409, type: "invalid_request_error", description: "The key's Stripe account looks like another site's (the site's prices or Payment Links are not in it, or it is already connected in another workspace), so nothing was stored or evaluated. Ask the human the question in `message`; retry with confirm_account_mismatch: true only if they say yes (that only proposes it: the key is held until a person confirms the account in the dashboard), else use this site's own key. `problems` lists what did not match." },

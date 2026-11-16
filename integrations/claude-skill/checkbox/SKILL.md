@@ -71,7 +71,7 @@ with OAuth in the browser; you never handle an API key:
 
 Then work the loop: follow each `next_action`, apply the compliance plan's tasks one at a time and verify each one
 (`get_compliance_plan`, `verify_task`) until the plan reports no open automated tasks or only human answers remain.
-Tasks with `change.type: "manual"` need the human: ask them the task's `question`; never answer for them. Agent loop
+Tasks with `change.type: "manual"` need the human: ask them the task's `question`; never answer for them. Your-call items: fix them, or propose accepting the risk (`call_api` with `proposeRiskAcceptance`: the owner confirms); never accept a risk for the owner. Agent loop
 details: [reference/agent-loop.md](reference/agent-loop.md).
 
 Report results as "Checkbox's checks pass" and list any `needs_review` items. Never tell the user their business or
