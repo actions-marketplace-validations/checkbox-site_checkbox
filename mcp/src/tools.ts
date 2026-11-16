@@ -1198,7 +1198,9 @@ const getTask: ToolDef = {
     const task = await api.request<{ id: string; title: string; status: string; requirement?: { citations?: unknown[] } }>('GET', `/v1/tasks/${enc(String(args.task))}`);
     // Audit P3: a task citing every state's law listed dozens of citations; the first 8 and a count are enough here.
     const shown = compactTask(task as unknown as Record<string, unknown>);
-    const word = (task as { compliance_status?: string }).compliance_status === 'not_applicable' ? 'not applicable' : task.status;
+    // Round 48 (pilot 47 core-ai-builder): a superseded task whose replacement has not passed reads "tracked by", never done.
+    const tracked = (task as { tracked_by?: { title?: string } }).tracked_by;
+    const word = tracked ? `tracked by: ${String(tracked.title ?? 'another task')}` : (task as { compliance_status?: string }).compliance_status === 'not_applicable' ? 'not applicable' : task.status;
     // Round 39: get_task is where one task's full detail lives (the plan lists ids and titles); verbose=true adds every citation.
     return { headline: `Task ${task.id} [${word}]: ${task.title}`, data: task, compact: shown };
   },
@@ -1519,7 +1521,7 @@ const startTestRun: ToolDef = {
   description: [
     'Observes the WHOLE subscription lifecycle in Stripe TEST mode: a test customer (card 4242…, a Checkbox inbox) subscribes; Checkbox waits for the acknowledgment, fast-forwards a test clock through each notice window (collecting reminders), cancels online and waits for the confirmation. Nothing is charged.',
     'Needs the site\'s Stripe TEST restricted key (rk_test_…): store it with store_stripe_test_key; never ask the human to paste a key. Non-Stripe sites: type "generic". When the compliance plan asks for a run and the key is stored, Checkbox starts it automatically (test mode); this tool then returns that run.',
-    'Takes 1-2 minutes (real_checkout: a few): poll get_test_run with wait: 55. Each step reports observations, checks and fixes; apply them and run again.',
+    'Takes 1-2 minutes (real_checkout: a few): poll get_test_run with wait: 45. Each step reports observations, checks and fixes; apply them and run again.',
     'mode "real_checkout" is the PROOF run: the shopper buys through the merchant\'s own checkout on its test deployment (stripe.checkout_url or stripe.payment_link), so the merchant\'s webhook handlers and email code fire; give stripe.test_account + stripe.cancel_url when customers cancel in the app. Several plan buttons: pass plan, or stripe.pre_checkout_steps [{action:"click",text:"<button>"}]. A step is "passed" only with evidence; "warning" means needs review.',
     'Cancel: stripe.cancel_via "stripe_portal" (default) or "merchant_flow" (cancel_url + cancel_steps; behind a login, test_account { login_url, email, password }).',
   ].join('\n'),
@@ -1594,19 +1596,19 @@ export function stepCounts(steps: ReadonlyArray<{ status?: string }> | undefined
   return [`Steps: ${[...n].map(([k, v]) => `${v} ${k}${k === 'info' ? ' (informational, not counted)' : ''}`).join(', ')}.${checks ? ` Checks (result.summary): ${checks}.` : ''}`];
 }
 
-const TEST_RUN_MAX_WAIT = 55;
+const TEST_RUN_MAX_WAIT = 45;
 const TEST_RUN_DONE = new Set(['succeeded', 'incomplete', 'failed', 'canceled']);
 
 const getTestRun: ToolDef = {
   name: 'get_test_run',
   title: 'Get a test run (steps, observations, fixes)',
   description:
-    'A synthetic test subscription with every step (checkout, acknowledgment email, reminders at each legal window, cancellation, confirmation): what was observed, check results, evidence ids and fixes. While running, next_action.type is "wait" and waiting_for says what it waits for: pass wait: 55 to get the answer as soon as the run finishes (one or two calls per run). When finished, apply the fixes (usually via get_compliance_plan) and start another run to verify. Without test_run, returns the newest run of the site.',
+    'A synthetic test subscription with every step (checkout, acknowledgment email, reminders at each legal window, cancellation, confirmation): what was observed, check results, evidence ids and fixes. While running, next_action.type is "wait" and waiting_for says what it waits for: pass wait: 45 to get the answer as soon as the run finishes (one or two calls per run). When finished, apply the fixes (usually via get_compliance_plan) and start another run to verify. Without test_run, returns the newest run of the site.',
   input: {
     test_run: z.string().max(100).optional().describe('Test run id (run_…). Default: the newest run of the site.'),
     site: siteId.optional(),
     // Round 34 (pilot 33 item 22, core-codex: 25 polls with wait=30 for runs of 1-2 minutes, because each poll answered
-    // on every step): wait up to 55 s (under common 60 s client tool timeouts), answering when the run finishes.
+    // on every step): wait up to 45 s (round 48: 55 s tripped 60 s client tool timeouts, e.g. Codex), answering when the run finishes.
     wait: z
       .number()
       .int()

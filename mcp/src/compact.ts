@@ -62,7 +62,7 @@ export function nextToolCall(next: NextAction | null | undefined, data?: unknown
     case 'get_test_run': {
       const run = ID('run').exec(endpoint)?.[1] ?? (d.object === 'test_run' ? str(d.id) : undefined);
       if (run) args.test_run = run;
-      if (next.type === 'wait' || next.type === 'wait_for_test_run') args.wait = 55;
+      if (next.type === 'wait' || next.type === 'wait_for_test_run') args.wait = 45;
       break;
     }
     case 'get_setup_status':

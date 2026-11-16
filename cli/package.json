@@ -1,6 +1,6 @@
 {
   "name": "@checkbox-site/cli",
-  "version": "0.4.21",
+  "version": "0.4.22",
   "description": "The checkbox CLI: auto-renewal law and subscription compliance checks (FTC ROSCA, California ARL, New York and other states) for Stripe Checkout compliance (Checkout Session params, Payment Links), pages, disclosures, online cancellation flows and renewal reminder emails, from a terminal, CI or an AI coding agent. Runs offline.",
   "keywords": [
     "checkbox",

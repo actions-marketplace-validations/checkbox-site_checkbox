@@ -2934,6 +2934,19 @@ TaskVerify = TypedDict(
 )
 
 
+#: Round 48: a superseded task whose remaining checks are tracked by another task that has not passed yet. Show "Tracked by: <title>", never done or fixed; it disappears once that task passes.
+TaskTrackedBy = TypedDict(
+    "TaskTrackedBy",
+    {
+        #: Unique identifier of the task (task_…).
+        "task": str,
+        #: Its title.
+        "title": str,
+    },
+    total=False,
+)
+
+
 #: For manual tasks: the human question; answer with answerTask.
 TaskQuestion = TypedDict(
     "TaskQuestion",
@@ -3081,6 +3094,8 @@ Task = TypedDict(
         "blocked_on": Optional[str],
         #: Done / declined tasks: verified (its checks pass), no_longer_applicable (its checks no longer apply, e.g. the data source changed), superseded, declined, decided (the owner confirmed a decision, e.g. New York notices by email only: closed, but its checks are not verified).
         "closed_reason": Optional[Literal["verified", "no_longer_applicable", "superseded", "declined", "decided", "risk_accepted"]],
+        #: Round 48: a superseded task whose remaining checks are tracked by another task that has not passed yet. Show "Tracked by: <title>", never done or fixed; it disappears once that task passes. (optional)
+        "tracked_by": "TaskTrackedBy",
         #: Tasks to finish first (their result changes this task's content).
         "depends_on": List[str],
         #: Unfinished tasks among depends_on.
@@ -3750,6 +3765,19 @@ AnsweredTaskVerify = TypedDict(
 )
 
 
+#: Round 48: a superseded task whose remaining checks are tracked by another task that has not passed yet. Show "Tracked by: <title>", never done or fixed; it disappears once that task passes.
+AnsweredTaskTrackedBy = TypedDict(
+    "AnsweredTaskTrackedBy",
+    {
+        #: Unique identifier of the task (task_…).
+        "task": str,
+        #: Its title.
+        "title": str,
+    },
+    total=False,
+)
+
+
 #: For manual tasks: the human question; answer with answerTask.
 AnsweredTaskQuestion = TypedDict(
     "AnsweredTaskQuestion",
@@ -3897,6 +3925,8 @@ AnsweredTask = TypedDict(
         "blocked_on": Optional[str],
         #: Done / declined tasks: verified (its checks pass), no_longer_applicable (its checks no longer apply, e.g. the data source changed), superseded, declined, decided (the owner confirmed a decision, e.g. New York notices by email only: closed, but its checks are not verified).
         "closed_reason": Optional[Literal["verified", "no_longer_applicable", "superseded", "declined", "decided", "risk_accepted"]],
+        #: Round 48: a superseded task whose remaining checks are tracked by another task that has not passed yet. Show "Tracked by: <title>", never done or fixed; it disappears once that task passes. (optional)
+        "tracked_by": "AnsweredTaskTrackedBy",
         #: Tasks to finish first (their result changes this task's content).
         "depends_on": List[str],
         #: Unfinished tasks among depends_on.
