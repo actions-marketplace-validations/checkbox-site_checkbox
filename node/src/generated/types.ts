@@ -2038,6 +2038,13 @@ export interface Task {
   blocked_on: string | null;
   /** Done / declined tasks: verified (its checks pass), no_longer_applicable (its checks no longer apply, e.g. the data source changed), superseded, declined, decided (the owner confirmed a decision, e.g. New York notices by email only: closed, but its checks are not verified). */
   closed_reason: "verified" | "no_longer_applicable" | "superseded" | "declined" | "decided" | "risk_accepted" | null;
+  /** Round 48: a superseded task whose remaining checks are tracked by another task that has not passed yet. Show "Tracked by: <title>", never done or fixed; it disappears once that task passes. */
+  tracked_by?: {
+    /** Unique identifier of the task (task_…). */
+    task: string;
+    /** Its title. */
+    title: string;
+  };
   /** Tasks to finish first (their result changes this task's content). */
   depends_on: Array<string>;
   /** Unfinished tasks among depends_on. */

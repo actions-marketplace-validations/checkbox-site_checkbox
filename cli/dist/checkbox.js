@@ -3769,7 +3769,7 @@ var SDK_VERSION;
 var init_version = __esm({
   "packages/sdk-node/src/version.ts"() {
     "use strict";
-    SDK_VERSION = "0.4.7";
+    SDK_VERSION = "0.4.8";
   }
 });
 
@@ -12733,12 +12733,15 @@ function signupLinksToPaymentLink(captures, paymentLinks = []) {
 function paymentLinkOnlySignup(captures, paymentLinks = []) {
   if (!signupLinksToPaymentLink(captures, paymentLinks)) return false;
   if (captures.some((c) => (c.links ?? []).some((l) => stripePayKind(l.href) === "stripe_checkout"))) return false;
-  return !captures.some((c) => OWN_CARD_FORM_RE.test(c.text ?? ""));
+  return !hasOwnCardForm(captures);
+}
+function hasOwnCardForm(captures) {
+  return captures.some((c) => !POLICY_PAGE_RE.test(c.url ?? "") && c.pageKind !== "account" && c.pageKind !== "cancel" && c.pageKind !== "confirmation" && OWN_CARD_FORM_RE.test(c.text ?? ""));
 }
 function checkoutSessionsForSite(sessions, captures, checkoutType) {
   if (!sessions.length || checkoutType === "own_page" || checkoutType === "payment_link") return [];
   const linksToCheckout = captures.some((c) => (c.links ?? []).some((l) => stripePayKind(l.href) === "stripe_checkout"));
-  const ownCardForm = captures.some((c) => OWN_CARD_FORM_RE.test(c.text ?? ""));
+  const ownCardForm = hasOwnCardForm(captures);
   if (checkoutType !== "stripe_checkout" && !linksToCheckout && ownCardForm) return [];
   if (checkoutType !== "stripe_checkout" && !linksToCheckout && stripePayLinksIn(captures).length) return [];
   const picked = /* @__PURE__ */ new Map();
@@ -12906,7 +12909,7 @@ function hostedStripeObject(view, config) {
   const session = cs ? checkoutSessionsOf(config).find((s2) => s2.id === cs) : void 0;
   return session ? { kind: "stripe_checkout", object: session } : void 0;
 }
-var STRIPE_PAY_HOST_RE, MAX_CHECKOUT_SESSIONS, OWN_CARD_FORM_RE, MAX_PAYMENT_LINKS, INTERVAL_WORDS2;
+var STRIPE_PAY_HOST_RE, MAX_CHECKOUT_SESSIONS, OWN_CARD_FORM_RE, POLICY_PAGE_RE, MAX_PAYMENT_LINKS, INTERVAL_WORDS2;
 var init_checkout_plans = __esm({
   "packages/rules/src/checks/checkout-plans.ts"() {
     "use strict";
@@ -12915,6 +12918,7 @@ var init_checkout_plans = __esm({
     STRIPE_PAY_HOST_RE = /^(?:checkout|buy)\.stripe\.com$/i;
     MAX_CHECKOUT_SESSIONS = 3;
     OWN_CARD_FORM_RE = /\b(?:card\s+number|card\s+details|cardholder|expir(?:y|ation)\s+date|cvc|cvv)\b/i;
+    POLICY_PAGE_RE = /[#&?]checkbox-policy=|\/(?:privacy|terms|tos|legal|policies|policy|refunds?|cookies?)(?:[-_/.#?]|$)/i;
     MAX_PAYMENT_LINKS = 6;
     INTERVAL_WORDS2 = [
       ["month", /\b(?:month|monthly)\b/i],
@@ -18534,6 +18538,7 @@ function guardNoticesOn(id, result, notices) {
   if (!notices) return result;
   const on = noticeFor(id, notices);
   if (!on) return result;
+  if (notices.mode === "checkbox" && result.status !== "not_applicable") result = { ...result, data: { ...result.data, noticesSends: true, noticesKind: on.kind } };
   const missing = result.data?.missingData === true;
   const settingOff = id === "config.trial_reminder_enabled" && (result.status === "fail" || result.status === "needs_review") && NOT_SEEN_RE.test(result.message);
   const notSeen = result.status === "needs_review" && NOT_SEEN_RE.test(result.message) && !result.data?.contentMissing;
@@ -20821,6 +20826,20 @@ function dcGeoOpenOnStripe(input, view, rules) {
   if (kind === "payment_link" || /^https?:\/\/buy\.stripe\.com\//i.test(view.capture?.url ?? "")) return false;
   return true;
 }
+function stripeRequiredTermsBox(input, view) {
+  if (!stripeHosted(view)) return void 0;
+  const stripeRequired = view.checkoutConfig?.consentRequired === true || hostedStripeObject(view, input.ctx.config)?.object.consentTermsOfService === "required";
+  return view.checkboxes.find((cb) => !cb.checkedByDefault && STRIPE_TOS_BOX_RE.test(labelOf(cb)) && (cb.required || stripeRequired));
+}
+function stripeTermsBoxGeneral(box, rules) {
+  const who = rules.map((r) => `${r.place} (${r.scope}, ${r.citation})`).join(" and ");
+  return unit(
+    "needs_review",
+    `Stripe's required terms box is set (consent_collection.terms_of_service = required), but its label agrees only to general terms (\u201C${quote(labelOf(box))}\u201D), not to the automatic renewal that ${who} ${rules.length > 1 ? "ask" : "asks"} a separate opt-in for \u2014 set custom_text.terms_of_service_acceptance to the renewal terms (e.g. \u201CI agree that my subscription renews automatically at the price above until I cancel.\u201D) so ticking the box is that opt-in`,
+    0.55,
+    { quote: quote(labelOf(box)), meta: { mechanism: "checkbox", selector: box.selector, required: true, requiredBy: "stripe_consent_collection", generalTermsOnly: true, separateActJurisdictions: rules.map((r) => r.jurisdiction) } }
+  );
+}
 function geoStripeSentence(rules) {
   const who = rules.map((r) => `${r.place} (${r.scope}, ${r.citation})`).join(" and ");
   return `${who} ${rules.length > 1 ? "ask" : "asks"} for a separate opt-in to the automatic renewal: ${DC_GEO_STRIPE_SENTENCE}`;
@@ -22034,6 +22053,8 @@ ${view.pageText}`;
         const separateActText = separateActSentence(separateRules);
         if (cta && (statesRenewal || consentLabelled && renewalNear)) {
           const separate = [...new Set(input.requirements.filter((r) => SEPARATE_CONSENT_JURISDICTIONS.has(r.jurisdiction)).map((r) => r.jurisdiction))];
+          const stripeBox = renewalNear && separateAct.length && dcGeoOpenOnStripe(input, view, separateRules) ? stripeRequiredTermsBox(input, view) : void 0;
+          if (stripeBox) return stripeTermsBoxGeneral(stripeBox, separateRules);
           if (renewalNear && separateAct.length && dcGeoOpenOnStripe(input, view, separateRules)) {
             return unit("needs_review", `consent is given only by the purchase button (\u201C${quote(cta.text)}\u201D), with the renewal terms next to it; ${geoStripeSentence(separateRules)}`, 0.5, {
               quote: quote(cta.text),
@@ -22085,6 +22106,8 @@ ${view.pageText}`;
               { quote: quote(clickwrap.quote), meta: { mechanism: "clickwrap", selector: cta.selector, ...clickwrap.names ? { namesOtherButton: clickwrap.names } : { gerundOtherButton: clickwrap.gerund } } }
             );
           }
+          const stripeBox = separateAct.length && dcGeoOpenOnStripe(input, view, separateRules) ? stripeRequiredTermsBox(input, view) : void 0;
+          if (stripeBox) return stripeTermsBoxGeneral(stripeBox, separateRules);
           if (separateAct.length && dcGeoOpenOnStripe(input, view, separateRules)) {
             return unit("needs_review", `the renewal terms next to \u201C${ctaText2}\u201D say that clicking it agrees to them (\u201C${quote(clickwrap.quote)}\u201D); ${geoStripeSentence(separateRules)}`, 0.5, {
               quote: quote(clickwrap.quote),
@@ -24118,7 +24141,7 @@ function pendingFor(checkId, text = "", data = {}) {
   if (/no billing platform connected|connect your billing platform|no billing-platform lifecycle events/.test(text) && !isEmailCheck(checkId)) {
     return p("Your billing-platform settings", "Connect Stripe (Integrations) so Checkbox can read them.", "connect_billing");
   }
-  if (data.noticesOn === true && isEmailCheck(checkId)) {
+  if ((data.noticesOn === true || data.noticesSends === true) && isEmailCheck(checkId)) {
     const what = /^confirmation\./.test(checkId) ? "Your acknowledgment email, sent by Checkbox Notices" : checkId === "cancel.confirmation" ? "Your cancellation confirmation, sent by Checkbox Notices" : `The ${emailNameOf(checkId)}, sent by Checkbox Notices`;
     return p(what, `Checkbox Notices sends it${due ? ` (first one due around ${due})` : ""}: it completes at its first send to a real subscriber${testRunCovers(checkId) ? ", or with a test run (createTestRun)" : ""}. Nothing to BCC.`, checkId.startsWith("confirmation.") ? "run_proof" : "wait_for_event");
   }
@@ -26889,7 +26912,7 @@ function htmlTermsOnly(disclosure, sha2562, onStripe, opts = {}) {
   const where2 = onStripe === "payment_link" ? "Payment Link" : "Stripe Checkout";
   return `<!-- Checkbox renewal terms (generated from your plan's price, interval and cancellation URL; regenerate instead of editing the text).
      Paste directly ABOVE your own subscribe / Join link or button. Keep that link or button as it is.
-     No consent checkbox here: the ${where2} collects consent (consent_collection.terms_of_service = "required").${geoComment(opts.geo, false)}
+     No consent checkbox here: consent is given on the ${where2} (its custom text says that paying agrees to the renewal terms; Stripe's terms checkbox only if you turn on consent_collection).${geoComment(opts.geo, false)}
 ${opts.boxed ? BOXED_NOTE : `     One line in your page's own font, size and colours: semibold sets it apart from normal-weight text (clear and conspicuous).
      If the text around it is already bold (a bold price line), put it in a bordered or shaded box instead.`} -->
 <div class="checkbox-renewal-terms" data-checkbox-terms="${esc(sha2562)}"${geoAttrs(opts.geo, false)} style="margin:12px 0;line-height:1.5;${opts.boxed ? BOXED_STYLE : ""}">
@@ -34545,7 +34568,7 @@ function keepConfirmUrl(msg2) {
 }
 function staleLinkNext(id, msg2 = "") {
   const url = keepConfirmUrl(msg2);
-  return ` After the owner changes the link in Stripe, run again: --online re-reads your Payment Links when one differs (or call resyncBilling, POST /v1/sites/{site}/billing/resync). To keep it on purpose, the owner confirms that in Checkbox while signed in${url ? ` (${url})` : " (the dashboard link for this Payment Link is in the --online result of checkbox ci)"}: only that counts as the owner's decision. A "stripe_links_kept" entry in checkbox.json ([{ "id": "${id.startsWith("plink_") ? id : "plink_\u2026"}", "reason": "\u2026" }]) only records it in the repository: it is shown as not confirmed by the owner, and with --online or --require-stripe the run still fails until the owner confirms.`;
+  return ` After the owner changes the link in Stripe, refresh Checkbox's read of Stripe first (resyncBilling: POST /v1/sites/{site}/billing/resync, or Re-sync Stripe in the dashboard), then run again: --online uses Checkbox's last read of your Payment Links. To keep it on purpose, the owner confirms that in Checkbox while signed in${url ? ` (${url})` : " (the dashboard link for this Payment Link is in the --online result of checkbox ci)"}: only that counts as the owner's decision. A "stripe_links_kept" entry in checkbox.json ([{ "id": "${id.startsWith("plink_") ? id : "plink_\u2026"}", "reason": "\u2026" }]) only records it in the repository: it is shown as not confirmed by the owner, and with --online or --require-stripe the run still fails until the owner confirms.`;
 }
 function staleLinkResults(checks, requireStripe, strictEntries = /* @__PURE__ */ new Set(), kept = [], online = false) {
   const out = [];
