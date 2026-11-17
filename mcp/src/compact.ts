@@ -203,6 +203,8 @@ export function compactPlanResult(plan: Obj, opTools: Record<string, string> = {
     // ("checks_pass"); the API keeps status "compliant" only for published SDKs.
     status: typeof plan.checks_status === 'string' ? plan.checks_status : plan.status === 'compliant' ? 'checks_pass' : plan.status,
     launch: launch?.label,
+    // Round 51 (pilot 50 core-codex): a passing plan names the rules not checked by default that apply, as `checkbox ci` does.
+    not_checked_by_default: typeof launch?.not_checked_line === 'string' ? launch.not_checked_line : Array.isArray(plan.not_checked_by_default) && plan.not_checked_by_default.length ? `Not checked by default: ${plan.not_checked_by_default.filter(isObj).map((r) => String(r.text)).join('; ')}.` : undefined,
     exposure,
     next_action: slimNext(plan.next_action, plan, opTools),
     owner_questions: compactOwnerQuestions(plan.owner_questions),
@@ -291,7 +293,8 @@ function compactSession(s: Obj, opTools: Record<string, string>, o: SetupCompact
       const t = nextType(st.next_action);
       return prune({ key: st.key, status: st.status, summary: clip(st.summary, 120), ...(t && t !== topType ? { next: t } : {}) });
     }),
-    compliance: c ? prune({ label: c.label, status: c.status, open_tasks: todo.length || undefined }) : undefined,
+    // Round 50 (pilot 49 core-codex): never the legacy value "compliant" (an older API still sends it).
+    compliance: c ? prune({ label: c.label, status: c.status === 'compliant' ? 'checks_pass' : c.status, open_tasks: todo.length || undefined }) : undefined,
     owner_questions: o.questions === 'full' ? compactOwnerQuestions(s.owner_questions) : questionIds(s.owner_questions),
     // The unpinned snippet tag while the snippet step is open (the Next line gives the pinned one).
     install: install && snippetOpen ? prune({ script_tag: install.script_tag }) : undefined,

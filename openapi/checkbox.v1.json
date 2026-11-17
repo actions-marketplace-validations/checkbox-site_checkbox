@@ -537,6 +537,11 @@
             "description": "Also ask for live-mode keys (live mode activates after domain verification).",
             "example": false
           },
+          "read_only": {
+            "type": "boolean",
+            "description": "The agent only needs to read (a quick check: sites, findings, plans and preflight checks; nothing set up or changed). The approval page starts on Read-only and no Stripe key is asked for.",
+            "example": false
+          },
           "stripe_test_key_hint": {
             "type": "string",
             "maxLength": 24,
@@ -2401,7 +2406,7 @@
                   "string",
                   "null"
                 ],
-                "description": "The site roll-up status: needs_fix, your_call, incomplete, compliant or not_checked.",
+                "description": "The site roll-up status: needs_fix, your_call, incomplete, checks_pass (every required check passes; \"compliant\" before 2026-11-17), risk_accepted or not_checked. Read `label` for the words.",
                 "example": "needs_fix"
               },
               "top_findings": {
@@ -3466,7 +3471,7 @@
                   "string",
                   "null"
                 ],
-                "description": "The site roll-up status: needs_fix, your_call, incomplete, compliant or not_checked.",
+                "description": "The site roll-up status: needs_fix, your_call, incomplete, checks_pass (every required check passes; \"compliant\" before 2026-11-17), risk_accepted or not_checked. Read `label` for the words.",
                 "example": "needs_fix"
               },
               "top_findings": {
@@ -10259,6 +10264,35 @@
               }
             ]
           },
+          "not_checked_by_default": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "requirement_id": {
+                  "type": "string",
+                  "description": "The catalog requirement id.",
+                  "example": "US-VT.2454a.a.1"
+                },
+                "text": {
+                  "type": "string",
+                  "description": "The rule in plain words.",
+                  "example": "Vermont: bold renewal terms for plans of 1 year or longer"
+                }
+              },
+              "required": [
+                "requirement_id",
+                "text"
+              ]
+            },
+            "description": "Round 51: with \"Checks pass\", the rules Checkbox does not check by default (Vermont for plans of a year or longer, D.C. for free trials) that apply to this site's plans where it sells; named in status_label, the summary and the done next_action, the same list `checkbox ci` gives. Absent when none apply.",
+            "example": [
+              {
+                "requirement_id": "US-DC.28A-203.c.2",
+                "text": "D.C.: separate consent for free trials that convert to paid"
+              }
+            ]
+          },
           "evaluation": {
             "type": [
               "string",
@@ -10650,6 +10684,11 @@
                 ],
                 "description": "\"1 good-practice suggestion (optional)\", or null when none is open.",
                 "example": "1 good-practice suggestion (optional)"
+              },
+              "not_checked_line": {
+                "type": "string",
+                "description": "Round 51: with ready, the rules not checked by default that apply to this site's plans (not_checked_by_default), in one line. Absent when none apply.",
+                "example": "Not checked by default: D.C.: separate consent for free trials that convert to paid."
               }
             },
             "required": [
@@ -10671,7 +10710,8 @@
                 "open": 1,
                 "total": 3
               },
-              "good_practice_line": "1 good-practice suggestion (optional)"
+              "good_practice_line": "1 good-practice suggestion (optional)",
+              "not_checked_line": "Not checked by default: D.C.: separate consent for free trials that convert to paid."
             }
           },
           "compliance": {

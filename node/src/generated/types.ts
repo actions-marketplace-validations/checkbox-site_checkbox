@@ -144,6 +144,8 @@ export interface DeviceAuthorizationParams {
   merchant_name?: string;
   /** Also ask for live-mode keys (live mode activates after domain verification). */
   live?: boolean;
+  /** The agent only needs to read (a quick check: sites, findings, plans and preflight checks; nothing set up or changed). The approval page starts on Read-only and no Stripe key is asked for. */
+  read_only?: boolean;
   /** A HINT of the Stripe restricted TEST key found in the project, never the key. Format: "rk_test_", the ellipsis character "…" (U+2026), then the key's last 4 characters, e.g. "rk_test_…a1b2". The human is asked once whether Checkbox may use it. Agents may store restricted test keys (rk_test_) only: an "sk_test_" hint (sent by older CLIs) is accepted and ignored, because a full secret key is refused on every path. */
   stripe_test_key_hint?: string;
 }
@@ -591,7 +593,7 @@ export interface SetupSession {
     needs_review: number;
     /** The site roll-up label, the same everywhere (dashboard, plan, emails): "2 fixes needed · 1 your call", "Checks pass · 2 live checks pending". */
     label: string | null;
-    /** The site roll-up status: needs_fix, your_call, incomplete, compliant or not_checked. */
+    /** The site roll-up status: needs_fix, your_call, incomplete, checks_pass (every required check passes; "compliant" before 2026-11-17), risk_accepted or not_checked. Read `label` for the words. */
     status: string | null;
     /**
      * Deprecated: open findings (evidence). The to-do list is `todo` (the compliance plan's ordered open tasks).
@@ -799,7 +801,7 @@ export interface SetupVerification {
     needs_review: number;
     /** The site roll-up label, the same everywhere (dashboard, plan, emails): "2 fixes needed · 1 your call", "Checks pass · 2 live checks pending". */
     label: string | null;
-    /** The site roll-up status: needs_fix, your_call, incomplete, compliant or not_checked. */
+    /** The site roll-up status: needs_fix, your_call, incomplete, checks_pass (every required check passes; "compliant" before 2026-11-17), risk_accepted or not_checked. Read `label` for the words. */
     status: string | null;
     /**
      * Deprecated: open findings (evidence). The to-do list is `todo` (the compliance plan's ordered open tasks).
@@ -2220,6 +2222,13 @@ export interface CompliancePlan {
     /** Why it is not counted as open. */
     why: string;
   }>;
+  /** Round 51: with "Checks pass", the rules Checkbox does not check by default (Vermont for plans of a year or longer, D.C. for free trials) that apply to this site's plans where it sells; named in status_label, the summary and the done next_action, the same list `checkbox ci` gives. Absent when none apply. */
+  not_checked_by_default?: Array<{
+    /** The catalog requirement id. */
+    requirement_id: string;
+    /** The rule in plain words. */
+    text: string;
+  }>;
   /** The evaluation the plan was built from (null before the first check). */
   evaluation: string | null;
   /** When that evaluation ran. Unix timestamp in seconds. */
@@ -2280,6 +2289,8 @@ export interface CompliancePlan {
     };
     /** "1 good-practice suggestion (optional)", or null when none is open. */
     good_practice_line: string | null;
+    /** Round 51: with ready, the rules not checked by default that apply to this site's plans (not_checked_by_default), in one line. Absent when none apply. */
+    not_checked_line?: string;
   };
   compliance: ComplianceRollup | null;
   /** What the assessment rests on. Tell the human about not_observed and attested items; never tell them the site "is compliant". */
