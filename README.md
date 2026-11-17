@@ -7,7 +7,7 @@ reminder emails. Offline: no account, no key, nothing leaves your machine.
 ```bash
 npx @checkbox-site/cli check disclosure --offline \
   --text '$19.99 per month.' --price 19.99 --interval month \
-  --merchant-name Acme --cancel-url https://acme.example/cancel --consent-checkbox --bold
+  --merchant-name Acme --cancel-url https://acme.example/cancel --no-consent-checkbox --bold
 ```
 
 ```text
@@ -19,7 +19,7 @@ FAIL  disclosure · all jurisdictions · rules 1.4.0 · catalog 2026.11.09.3 · 
   ✓ signup.disclosure.term_length (critical)
   ? signup.disclosure.proximity (critical)
   ? signup.disclosure.conspicuous (critical)
-  ? signup.consent.affirmative (critical)
+  ✗ signup.consent.affirmative (critical)
   ✓ signup.consent.not_prechecked (critical)
 
 Suggested replacement (passes the checks) (verified by the rules engine)

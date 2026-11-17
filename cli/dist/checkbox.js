@@ -3690,7 +3690,7 @@ var init_operations = __esm({
       /**
        * Send feedback.
        *
-       * Report a problem or a missing feature in Checkbox. Include what you tried, what happened and what you expected, and the site / request id when there is one. With type review, send a structured review of Checkbox the product (score 0-10, liked, disliked, wrong_verdicts, would_keep_using, stack) — only after the human said yes and saw the text. A review describes what worked or did not in Checkbox: it never states that the site broke a law or had unfixed problems, and carries no site names, URLs, customer data or quotes of the site's pages or emails (URLs are removed and no site is attached). Never include secrets or customer data: anything that looks like a secret, card number or email address is replaced with [redacted]. The Checkbox team reads every message. Rate limited to 20 per key per hour.
+       * Report a problem or a missing feature in Checkbox, or a check result you believe is wrong (type wrong_verdict with check_id, verdict, evidence_id and context.site: one call; a reported false pass is P1 and the team is alerted at once). Include what you tried, what happened and what you expected, and the site / request id when there is one. With type review, send a structured review of Checkbox the product (score 0-10, liked, disliked, wrong_verdicts, would_keep_using, stack) — only after the human said yes and saw the text. A review describes what worked or did not in Checkbox: it never states that the site broke a law or had unfixed problems, and carries no site names, URLs, customer data or quotes of the site's pages or emails (URLs are removed and no site is attached). Never include secrets or customer data: anything that looks like a secret, card number or email address is replaced with [redacted]. The Checkbox team reads every message. Rate limited to 20 per key per hour.
        *
        * @see POST /v1/feedback (operation `createFeedback`, scope `account:read`)
        */
@@ -3769,7 +3769,7 @@ var SDK_VERSION;
 var init_version = __esm({
   "packages/sdk-node/src/version.ts"() {
     "use strict";
-    SDK_VERSION = "0.4.8";
+    SDK_VERSION = "0.4.9";
   }
 });
 
@@ -14377,8 +14377,10 @@ function plural(noun, n) {
 }
 function aggregate(checkId, units, headlines, opts = {}) {
   const noun = opts.noun ?? "capture";
-  const fails = units.filter((u) => u.status === "fail");
-  const reviews = units.filter((u) => u.status === "needs_review");
+  const extra = (u) => (u.status === "fail" || u.status === "needs_review") && (u.meta?.vermontBold === false || Array.isArray(u.meta?.separateActJurisdictions) && u.meta.separateActJurisdictions.length > 0);
+  const coreOpen = units.some((u) => (u.status === "fail" || u.status === "needs_review") && !extra(u));
+  const fails = units.filter((u) => u.status === "fail" && !(coreOpen && extra(u)));
+  const reviews = units.filter((u) => u.status === "needs_review" && !(coreOpen && extra(u)));
   const passes = units.filter((u) => u.status === "pass");
   const nas = units.filter((u) => u.status === "not_applicable");
   const applicable2 = units.length - nas.length;
@@ -14404,7 +14406,7 @@ function aggregate(checkId, units, headlines, opts = {}) {
     message = headlines.not_applicable ?? (nas.length ? describe(nas) : "Not applicable");
     confidence = nas.length ? Math.min(...nas.map((u) => u.confidence)) : 0.8;
   }
-  const ordered = [...fails, ...reviews, ...passes, ...nas];
+  const ordered = [...fails, ...reviews, ...passes, ...nas, ...coreOpen ? units.filter(extra) : []];
   return makeResult(checkId, status, message, ordered.flatMap((u) => u.refs), confidence, {
     ...opts.data,
     units: units.map((u) => ({ label: u.label, status: u.status, detail: u.detail, ...u.quote ? { quote: u.quote } : {}, ...u.meta }))
@@ -20198,10 +20200,10 @@ function extrasOnlyVerdict(c) {
   if (c.status !== "fail" && c.status !== "needs_review") return false;
   if (NOT_CHECKED_BY_DEFAULT_NOTE_RE.test(c.explanation)) return true;
   if (c.check_id === "signup.consent.affirmative") return SEPARATE_ACT_RE.test(c.explanation) && !BASE_CONSENT_MISSING_RE.test(c.explanation);
-  if (c.check_id === "signup.disclosure.conspicuous") return VT_BOLD_RE.test(c.explanation);
+  if (c.check_id === "signup.disclosure.conspicuous") return VT_BOLD_RE.test(c.explanation) && !CORE_CONSPICUOUS_RE.test(c.explanation);
   return false;
 }
-var SEPARATE_ACT_RULES, SEPARATE_ACT_REQUIREMENT_IDS, SEPARATE_ACT_RE, NOT_CHECKED_BY_DEFAULT_NOTE_RE, BASE_CONSENT_MISSING_RE, VT_BOLD_RE;
+var SEPARATE_ACT_RULES, SEPARATE_ACT_REQUIREMENT_IDS, SEPARATE_ACT_RE, NOT_CHECKED_BY_DEFAULT_NOTE_RE, BASE_CONSENT_MISSING_RE, CORE_CONSPICUOUS_RE, VT_BOLD_RE;
 var init_separate_act = __esm({
   "packages/rules/src/separate-act.ts"() {
     "use strict";
@@ -20225,9 +20227,10 @@ var init_separate_act = __esm({
       }
     ];
     SEPARATE_ACT_REQUIREMENT_IDS = new Set(SEPARATE_ACT_RULES.map((r) => r.requirementId));
-    SEPARATE_ACT_RE = /\b(?:requires?|asks? for) a separate opt-in to the automatic renewal\b/i;
+    SEPARATE_ACT_RE = /\b(?:requires?|asks? for) a separate opt-in to the automatic renewal\b|\basks? a separate opt-in for\b/i;
     NOT_CHECKED_BY_DEFAULT_NOTE_RE = /^Open only for rules Checkbox does not check by default\b/;
     BASE_CONSENT_MISSING_RE = /need consent to the renewal terms themselves|nothing says that clicking it agrees/i;
+    CORE_CONSPICUOUS_RE = /look like the surrounding text|smaller and fainter|only far from the purchase button|hard to read|no surrounding text to show they are set apart|cannot be clear and conspicuous|no terms block was detected/i;
     VT_BOLD_RE = /bold-face type[\s\S]*2454a\(a\)\(1\)|2454a\(a\)\(1\)[\s\S]*bold-face type/i;
   }
 });
@@ -24607,7 +24610,7 @@ var init_status = __esm({
     has = (re) => (c) => re.test(c.text);
     extrasOnlyFinding = (c) => {
       const units = Array.isArray(c.data?.units) ? c.data.units : null;
-      if (!units) return true;
+      if (!units) return !(c.checkId === "signup.disclosure.conspicuous" && CORE_CONSPICUOUS_RE.test(c.text)) && !(c.checkId === "signup.consent.affirmative" && BASE_CONSENT_MISSING_RE.test(c.text));
       const open2 = units.filter((u) => u && (u.status === "fail" || u.status === "needs_review"));
       if (!open2.length) return true;
       if (c.checkId === "signup.consent.affirmative") return open2.every((u) => Array.isArray(u.separateActJurisdictions) && u.separateActJurisdictions.length > 0);
@@ -24864,6 +24867,14 @@ var init_status = __esm({
         code: "not_checked_by_default_geo_stripe",
         category: "legal_choice",
         when: (c) => c.checkId === "signup.consent.affirmative" && /post \/v1\/checks\/region/i.test(c.text) && extrasOnlyFinding(c),
+        build: () => notCheckedByDefault()
+      },
+      {
+        // Round 49 (pilot 48 core-change-guard): Stripe's required terms box is set and only its label is general; what is
+        // left is the separate opt-in Vermont / D.C. ask for (not checked by default).
+        code: "not_checked_by_default_stripe_terms_box",
+        category: "legal_choice",
+        when: (c) => c.checkId === "signup.consent.affirmative" && /required terms box is set .*agrees only to general terms/i.test(c.text) && SEPARATE_ACT_RE.test(c.text) && !BASE_CONSENT_MISSING_RE.test(c.text) && extrasOnlyFinding(c),
         build: () => notCheckedByDefault()
       },
       {
@@ -32504,7 +32515,7 @@ var init_unlisted_emails = __esm({
 
 // packages/cli/src/ci/inputs.ts
 import { execFile } from "node:child_process";
-import { existsSync as existsSync7, readFileSync as readFileSync10 } from "node:fs";
+import { existsSync as existsSync7, readFileSync as readFileSync10, statSync as statSync3 } from "node:fs";
 import { dirname as dirname4, isAbsolute as isAbsolute2, join as join9, relative as relative5, resolve as resolve6 } from "node:path";
 import { pathToFileURL as pathToFileURL2 } from "node:url";
 function readRel(dir, file) {
@@ -32897,6 +32908,8 @@ function termsJob(loaded, e, o, root) {
       if (!existsSync7(resolve6(dir, e.file))) throw new InputError(`${e.file} does not exist (paths are relative to checkbox.json). If it is build output, build it before checkbox ci: in GitHub Actions, add a build step before the Checkbox step (\`checkbox ci init\` writes one when package.json has a build script).`);
       throw err;
     }
+    const stale = staleBuild(dir, e.source, e.file);
+    if (stale) throw new InputError(stale);
     const src = e.source;
     job.locate = (needles) => {
       try {
@@ -32954,6 +32967,8 @@ function pageJob(loaded, e, o, root) {
       throw err;
     }
     if (!e.source) job.locate = (needles) => lineOfAny(html, needles);
+    const stale = staleBuild(dir, e.source, e.file);
+    if (stale) throw new InputError(stale);
     const css = builtCss(html, resolve6(dir, e.file), dir);
     if (css.files.length) {
       html = `${html}
@@ -32965,6 +32980,17 @@ ${css.files.map((f) => `<style ${BUILT_CSS_ATTR2}="${f.rel.replace(/"/g, "")}">$
     job.error = err.message;
   }
   return job;
+}
+function staleBuild(dir, source, file) {
+  if (!source) return void 0;
+  try {
+    const src = statSync3(resolve6(dir, source)).mtimeMs;
+    const built = statSync3(resolve6(dir, file)).mtimeMs;
+    if (src <= built + 2e3) return void 0;
+  } catch {
+    return void 0;
+  }
+  return `${file} is older than its source ${source}: the built page does not show your latest change. Build first (e.g. npm run build), then run checkbox ci again. Checkbox does not judge a stale build.`;
 }
 function builtCss(html, pageAbs, configDir2) {
   const hrefs = [];
@@ -35465,8 +35491,9 @@ export default defineNuxtPlugin(() => {
       "",
       "This project is connected to Checkbox (`checkbox init` set up its site; the key is CHECKBOX_SECRET_KEY). Before committing",
       "a change to sign-up, pricing, trials, renewal emails or cancellation, run `npx @checkbox-site/cli ci` (or the Checkbox",
-      "MCP tools: check_stripe_checkout_session, check_page_html, check_email) and apply the fixes it returns. Pull requests",
-      "run the same check. Its result is an automated check, not legal advice. Guide: https://checkbox.site/llms.txt",
+      "MCP tools: check_stripe_checkout_session, check_page_html, check_email) and apply the fixes it returns. When",
+      "checkbox.json reads built pages (.next, dist), build first (e.g. `npm run build && npx @checkbox-site/cli ci`). Pull",
+      "requests run the same check. Its result is an automated check, not legal advice. Guide: https://checkbox.site/llms.txt",
       ""
     ].join("\n");
     AGENTS_RULE_OFFLINE_LINE = "This project checks its subscription terms with Checkbox CI (checkbox.json, run offline: no account or";
@@ -35476,8 +35503,9 @@ export default defineNuxtPlugin(() => {
       "",
       AGENTS_RULE_OFFLINE_LINE,
       "key; it is not connected to a Checkbox site, so Stripe is not read). Before committing a change to sign-up, pricing,",
-      "trials, renewal emails or cancellation, run `npx @checkbox-site/cli ci` and apply the fixes it returns. Pull requests",
-      "run the same check. To also check Stripe and the live site, a person connects it with `npx @checkbox-site/cli init`.",
+      "trials, renewal emails or cancellation, run `npx @checkbox-site/cli ci` and apply the fixes it returns. When",
+      "checkbox.json reads built pages (.next, dist), build first (e.g. `npm run build && npx @checkbox-site/cli ci`). Pull",
+      "requests run the same check. To also check Stripe and the live site, a person connects it with `npx @checkbox-site/cli init`.",
       "Its result is an automated check, not legal advice. Guide: https://checkbox.site/llms.txt",
       ""
     ].join("\n");
@@ -35674,10 +35702,12 @@ __export(ci_exports, {
   attachSiteForCoupons: () => attachSiteForCoupons,
   baseDiff: () => baseDiff,
   baseProblem: () => baseProblem,
+  codeTermsChanged: () => codeTermsChanged,
   configChanges: () => configChanges,
   couponIdsIn: () => couponIdsIn,
   default: () => ci_default,
   diffHunks: () => diffHunks,
+  diffTouchesTerms: () => diffTouchesTerms,
   markIntroduced: () => markIntroduced,
   siteFactsFor: () => siteFactsFor,
   termsChanged: () => termsChanged,
@@ -35738,7 +35768,14 @@ function termsChanged(cwd, base, jobs) {
       return false;
     }
   }
+  return diffTouchesTerms(out);
+}
+function diffTouchesTerms(out) {
   return out.split("\n").some((l) => /^[+-](?![+-])/.test(l) && /\b(?:trial(?:_period)?_?days|trialDays|trial_end|unit_amount|interval(?:_count)?|price|amount)\b/i.test(l));
+}
+function codeTermsChanged(cwd, base) {
+  const r = baseDiff(cwd, base, ["-U0", "--no-color", ...TERMS_DIFF_EXCLUDES]);
+  return "error" in r ? true : diffTouchesTerms(r.out);
 }
 function diffHunks(cwd, base, file) {
   const r = baseDiff(cwd, base, ["-U0", "--no-color", "--no-ext-diff", "--", file]);
@@ -35808,12 +35845,14 @@ function markIntroduced(checks, o) {
     const read2 = Array.isArray(ref) ? ref : ref === void 0 || ref === "all" ? allPlans : [String(ref)];
     return !plan2 || read2.includes(plan2);
   }).flatMap((e) => ["file" in e && e.file || "", "module" in e && typeof e.module === "string" && e.module.split("#")[0] || ""].filter(Boolean).map((f) => resolve8(o.loaded.dir, f)));
+  let termsInCode;
   for (const x of checks) {
     const own = [resolve8(o.workspace, x.target.file), ...inputs.get(x.name) ?? []];
     const orig = /^(.*) \(as "/.exec(x.name)?.[1];
     if (orig) own.push(...inputs.get(orig) ?? []);
     if (x.type === "notice_schedule") own.push(...emailFiles(x.plan));
-    const touches = own.some((f) => set.has(real(f))) || !!cfg && configTouches(x, orig, cfg, o.loaded);
+    const soldChanged = !!orig && / sells it: /.test(x.name) && (termsInCode ??= codeTermsChanged(o.cwd, o.base));
+    const touches = own.some((f) => set.has(real(f))) || !!cfg && configTouches(x, orig, cfg, o.loaded) || soldChanged;
     if (x.status === "pass" || x.status === "not_applicable" || x.status === "skipped") x.touched = touches;
     else x.introduced = touches;
   }

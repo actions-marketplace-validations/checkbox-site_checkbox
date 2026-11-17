@@ -25960,10 +25960,20 @@
               "bug",
               "idea",
               "question",
-              "review"
+              "review",
+              "wrong_verdict"
             ],
             "description": "Kind of feedback.",
             "example": "bug"
+          },
+          "priority": {
+            "type": "string",
+            "enum": [
+              "P1",
+              "P3"
+            ],
+            "description": "type wrong_verdict: P1 for a reported false pass (handled first), P3 otherwise.",
+            "example": "P1"
           },
           "status": {
             "type": "string",
@@ -26005,15 +26015,16 @@
               "bug",
               "idea",
               "question",
-              "review"
+              "review",
+              "wrong_verdict"
             ],
-            "description": "bug: something is broken; idea: a missing feature or improvement; question: something unclear; review: a structured review of Checkbox the product (send only after the human said yes and saw the text; no site names, URLs, customer data, quotes of the site's pages or emails, or claims that the site broke a law). Default idea.",
+            "description": "bug: something is broken; idea: a missing feature or improvement; question: something unclear; wrong_verdict: one check result you believe is wrong (send check_id, verdict, evidence_id and context.site; a reported false pass is handled as P1, staff are alerted at once); review: a structured review of Checkbox the product (send only after the human said yes and saw the text; no site names, URLs, customer data, quotes of the site's pages or emails, or claims that the site broke a law). Default idea.",
             "example": "bug"
           },
           "message": {
             "type": "string",
             "maxLength": 5000,
-            "description": "What you tried, what happened and what you expected (at most 5000 characters). Required except for type review. Secrets, card numbers and email addresses are replaced with [redacted].",
+            "description": "What you tried, what happened and what you expected (at most 5000 characters). Required except for types review and wrong_verdict (for wrong_verdict: why the result is wrong). Secrets, card numbers and email addresses are replaced with [redacted].",
             "example": "verify_task returned needs_review for signup.consent.affirmative although the checkbox is unchecked by default."
           },
           "score": {
@@ -26070,6 +26081,66 @@
             "maxLength": 100,
             "description": "type review: framework and billing, short.",
             "example": "Next.js + Stripe Checkout"
+          },
+          "check_id": {
+            "type": "string",
+            "maxLength": 81,
+            "description": "type wrong_verdict (required): the check whose result is wrong (finding.check_id).",
+            "example": "signup.consent.affirmative"
+          },
+          "verdict": {
+            "type": "string",
+            "enum": [
+              "pass",
+              "fail",
+              "needs_review",
+              "not_applicable",
+              "compliant",
+              "needs_fix",
+              "pending_live_check",
+              "verified_live",
+              "your_call",
+              "not_set_up",
+              "not_checked"
+            ],
+            "description": "type wrong_verdict (required): the verdict Checkbox gave (finding.status, or the status label shown).",
+            "example": "pass"
+          },
+          "shown_status": {
+            "type": "string",
+            "enum": [
+              "pass",
+              "fail",
+              "needs_review",
+              "not_applicable",
+              "compliant",
+              "needs_fix",
+              "pending_live_check",
+              "verified_live",
+              "your_call",
+              "not_set_up",
+              "not_checked"
+            ],
+            "description": "type wrong_verdict: the status label shown for it (finding.compliance.status), when it differs from verdict.",
+            "example": "compliant"
+          },
+          "evidence_id": {
+            "type": "string",
+            "maxLength": 120,
+            "description": "type wrong_verdict: the evidence the verdict was based on (an id from finding.evidence_refs).",
+            "example": "cap_8d2…"
+          },
+          "finding_id": {
+            "type": "string",
+            "maxLength": 120,
+            "description": "type wrong_verdict: the finding id.",
+            "example": "fnd_1a2…"
+          },
+          "task_id": {
+            "type": "string",
+            "maxLength": 120,
+            "description": "type wrong_verdict: the plan task id.",
+            "example": "task_4b1…"
           },
           "context": {
             "type": "object",
@@ -37323,7 +37394,7 @@
       "post": {
         "operationId": "createFeedback",
         "summary": "Send feedback",
-        "description": "Report a problem or a missing feature in Checkbox. Include what you tried, what happened and what you expected, and the site / request id when there is one. With type review, send a structured review of Checkbox the product (score 0-10, liked, disliked, wrong_verdicts, would_keep_using, stack) — only after the human said yes and saw the text. A review describes what worked or did not in Checkbox: it never states that the site broke a law or had unfixed problems, and carries no site names, URLs, customer data or quotes of the site's pages or emails (URLs are removed and no site is attached). Never include secrets or customer data: anything that looks like a secret, card number or email address is replaced with [redacted]. The Checkbox team reads every message. Rate limited to 20 per key per hour.",
+        "description": "Report a problem or a missing feature in Checkbox, or a check result you believe is wrong (type wrong_verdict with check_id, verdict, evidence_id and context.site: one call; a reported false pass is P1 and the team is alerted at once). Include what you tried, what happened and what you expected, and the site / request id when there is one. With type review, send a structured review of Checkbox the product (score 0-10, liked, disliked, wrong_verdicts, would_keep_using, stack) — only after the human said yes and saw the text. A review describes what worked or did not in Checkbox: it never states that the site broke a law or had unfixed problems, and carries no site names, URLs, customer data or quotes of the site's pages or emails (URLs are removed and no site is attached). Never include secrets or customer data: anything that looks like a secret, card number or email address is replaced with [redacted]. The Checkbox team reads every message. Rate limited to 20 per key per hour.",
         "tags": [
           "Feedback"
         ],

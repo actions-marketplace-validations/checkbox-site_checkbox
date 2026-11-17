@@ -2467,10 +2467,13 @@ const sendFeedback: ToolDef = {
   name: 'send_feedback',
   title: 'Send feedback to the Checkbox team',
   description:
-    'Bug, idea or question: what you tried, happened, expected. type review: only after the human said yes and saw the text; about Checkbox, not the site: no site names, URLs, quotes, secrets, customer data or claims the site broke a law. score 0-10 (would recommend); ≤5 phrases in liked, disliked, wrong_verdicts ("check.id: why wrong"); stack e.g. "Next.js + Stripe".',
+    'Bug/idea/question: what you tried, happened, expected. type review: only after the human said yes and saw it; about Checkbox, not the site: no site names, URLs, quotes, secrets, customer data, law-breaking claims. score 0-10 (would recommend); ≤5 phrases in liked, disliked, wrong_verdicts ("check.id: why"); stack e.g. "Next.js+Stripe".',
   input: {
-    type: z.enum(['bug', 'idea', 'question', 'review']).optional(),
+    type: z.enum(['bug', 'idea', 'question', 'review', 'wrong_verdict']).optional(),
     message: z.string().optional(),
+    check_id: z.string().optional(),
+    verdict: z.string().optional(),
+    evidence_id: z.string().optional(),
     score: z.number().int().min(0).max(10).optional(),
     liked: z.array(z.string()).optional(),
     disliked: z.array(z.string()).optional(),
@@ -2489,12 +2492,14 @@ const sendFeedback: ToolDef = {
     for (const k of args.type === 'review' ? (['tool'] as const) : (['site', 'request_id', 'tool'] as const)) if (typeof args[k] === 'string' && args[k]) context[k] = String(args[k]);
     const agent = ctx.key.appName ?? ctx.clientName;
     if (agent) context.agent = String(agent).slice(0, 100);
-    if (args.type !== 'review' && !(typeof args.message === 'string' && args.message.trim())) throw new ToolError('Write a message (what you tried, what happened, what you expected).');
+    if (args.type === 'wrong_verdict' && !(args.check_id && args.verdict)) throw new ToolError('A wrong_verdict report needs check_id and verdict (and site, evidence_id) from the result.');
+    if (args.type !== 'review' && args.type !== 'wrong_verdict' && !(typeof args.message === 'string' && args.message.trim())) throw new ToolError('Write a message (what you tried, what happened, what you expected).');
     if (args.type === 'review' && typeof args.score !== 'number') throw new ToolError('A review needs score (0-10). Ask the human; never guess it.');
-    const body = { ...pick(args, ['type', 'message', 'score', 'liked', 'disliked', 'wrong_verdicts', 'would_keep_using', 'stack']), ...(Object.keys(context).length ? { context } : {}) };
-    const fb = await ctx.api.request<{ id: string; status: string; redacted?: boolean }>('POST', '/v1/feedback', { body });
+    const body = { ...pick(args, ['type', 'message', 'check_id', 'verdict', 'evidence_id', 'score', 'liked', 'disliked', 'wrong_verdicts', 'would_keep_using', 'stack']), ...(Object.keys(context).length ? { context } : {}) };
+    const fb = await ctx.api.request<{ id: string; status: string; priority?: string; redacted?: boolean }>('POST', '/v1/feedback', { body });
+    const what = args.type === 'review' ? 'Review' : args.type === 'wrong_verdict' ? `Wrong-result report${fb.priority ? ` (${fb.priority})` : ''}` : 'Feedback';
     return {
-      headline: `${args.type === 'review' ? 'Review' : 'Feedback'} ${fb.id} sent to the Checkbox team (${fb.status}).${fb.redacted ? ' Some text looked like a secret, card number or email address and was replaced with [redacted].' : ''}`,
+      headline: `${what} ${fb.id} sent to the Checkbox team (${fb.status}).${args.type === 'wrong_verdict' && fb.priority === 'P1' ? ' Until the team confirms, treat this check as not verified.' : ''}${fb.redacted ? ' Some text looked like a secret, card number or email address and was replaced with [redacted].' : ''}`,
       data: fb,
       next: { type: 'none', message: 'Nothing else to do; the team replies by email to the account owner when needed.' },
     };

@@ -8536,7 +8536,9 @@ Feedback = TypedDict(
         #: String representing the object's type. Always "feedback".
         "object": Literal["feedback"],
         #: Kind of feedback.
-        "type": Literal["bug", "idea", "question", "review"],
+        "type": Literal["bug", "idea", "question", "review", "wrong_verdict"],
+        #: type wrong_verdict: P1 for a reported false pass (handled first), P3 otherwise. (optional)
+        "priority": Literal["P1", "P3"],
         #: open until Checkbox staff reply or close it.
         "status": Literal["open", "replied", "closed"],
         #: true when text that looked like a secret, card number or email address was replaced with [redacted] before it was stored.
@@ -8568,9 +8570,9 @@ FeedbackParamsContext = TypedDict(
 FeedbackParams = TypedDict(
     "FeedbackParams",
     {
-        #: bug: something is broken; idea: a missing feature or improvement; question: something unclear; review: a structured review of Checkbox the product (send only after the human said yes and saw the text; no site names, URLs, customer data, quotes of the site's pages or emails, or claims that the site broke a law). Default idea. (optional)
-        "type": Literal["bug", "idea", "question", "review"],
-        #: What you tried, what happened and what you expected (at most 5000 characters). Required except for type review. Secrets, card numbers and email addresses are replaced with [redacted]. (optional)
+        #: bug: something is broken; idea: a missing feature or improvement; question: something unclear; wrong_verdict: one check result you believe is wrong (send check_id, verdict, evidence_id and context.site; a reported false pass is handled as P1, staff are alerted at once); review: a structured review of Checkbox the product (send only after the human said yes and saw the text; no site names, URLs, customer data, quotes of the site's pages or emails, or claims that the site broke a law). Default idea. (optional)
+        "type": Literal["bug", "idea", "question", "review", "wrong_verdict"],
+        #: What you tried, what happened and what you expected (at most 5000 characters). Required except for types review and wrong_verdict (for wrong_verdict: why the result is wrong). Secrets, card numbers and email addresses are replaced with [redacted]. (optional)
         "message": str,
         #: type review (required): how likely the human is to recommend Checkbox, 0-10. (optional)
         "score": int,
@@ -8584,6 +8586,18 @@ FeedbackParams = TypedDict(
         "would_keep_using": bool,
         #: type review: framework and billing, short. (optional)
         "stack": str,
+        #: type wrong_verdict (required): the check whose result is wrong (finding.check_id). (optional)
+        "check_id": str,
+        #: type wrong_verdict (required): the verdict Checkbox gave (finding.status, or the status label shown). (optional)
+        "verdict": Literal["pass", "fail", "needs_review", "not_applicable", "compliant", "needs_fix", "pending_live_check", "verified_live", "your_call", "not_set_up", "not_checked"],
+        #: type wrong_verdict: the status label shown for it (finding.compliance.status), when it differs from verdict. (optional)
+        "shown_status": Literal["pass", "fail", "needs_review", "not_applicable", "compliant", "needs_fix", "pending_live_check", "verified_live", "your_call", "not_set_up", "not_checked"],
+        #: type wrong_verdict: the evidence the verdict was based on (an id from finding.evidence_refs). (optional)
+        "evidence_id": str,
+        #: type wrong_verdict: the finding id. (optional)
+        "finding_id": str,
+        #: type wrong_verdict: the plan task id. (optional)
+        "task_id": str,
         #: Optional context that helps us reproduce it. For type review only agent and tool are kept (reviews never carry the site or request id). (optional)
         "context": "FeedbackParamsContext",
     },
