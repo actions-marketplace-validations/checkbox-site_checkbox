@@ -3769,7 +3769,7 @@ var SDK_VERSION;
 var init_version = __esm({
   "packages/sdk-node/src/version.ts"() {
     "use strict";
-    SDK_VERSION = "0.4.9";
+    SDK_VERSION = "0.4.10";
   }
 });
 
@@ -4547,8 +4547,10 @@ function reportError(out, err, auth) {
     return EXIT.auth;
   }
   if (err instanceof ApiError) {
+    const base = auth?.credentials?.apiBase ?? auth?.env?.CHECKBOX_API_BASE ?? "https://app.checkbox.site";
     out.error({
-      message: err.message,
+      message: isAuthError(err) ? `${err.message} (API base: ${base}; set CHECKBOX_API_BASE or --api-base for another Checkbox server)` : err.message,
+      ...isAuthError(err) ? { api_base: base } : {},
       type: err.type,
       ...err.code ? { code: err.code } : {},
       ...err.param ? { param: err.param } : {},
@@ -4671,13 +4673,17 @@ function renderReport(report, out, opts) {
   if (!report.verdict && Array.isArray(report.notices)) return renderSchedule(report, out, opts);
   return renderReportLines(forTerminal(report), out, opts);
 }
+function withPlanFlag(text) {
+  return text.replace(/\(plans: \[(?:\.\.\.|…)\]\)/g, '(--plan "<price>/<interval>,name=<plan>", once per plan)').replace(/with plans: \[every plan the page sells\]/g, 'with --plan "<price>/<interval>,name=<plan>" once for every plan the page sells');
+}
 function forTerminal(report) {
-  if (!JSON.stringify(report).includes(CANCEL_URL_PLACEHOLDER)) return report;
-  const t = withoutCancelPlaceholder;
+  if (!JSON.stringify(report).includes(CANCEL_URL_PLACEHOLDER) && !/\(plans: \[/.test(JSON.stringify(report))) return report;
+  const t = (x) => withPlanFlag(withoutCancelPlaceholder(x));
   return {
     ...report,
     ...report.checks ? { checks: report.checks.map((ch) => ({ ...ch, ...ch.explanation ? { explanation: t(ch.explanation) } : {}, ...ch.fix ? { fix: t(ch.fix) } : {} })) } : {},
     ...report.next_action ? { next_action: { ...report.next_action, message: t(report.next_action.message) } } : {},
+    ...report.warnings ? { warnings: report.warnings.map((w) => ({ ...w, message: t(w.message) })) } : {},
     ...report.replacement ? {
       replacement: {
         ...report.replacement,
@@ -4697,12 +4703,22 @@ function renderReportLines(report, out, opts) {
   const lines = [];
   const where2 = report.jurisdictions === "all" || !report.jurisdictions ? "all jurisdictions" : report.jurisdictions.join(", ");
   lines.push(`${c.bold(head)}  ${report.kind ?? "check"} \xB7 ${where2} \xB7 rules ${report.rules_version ?? "?"} \xB7 catalog ${report.catalog_version ?? "?"}${opts.offline ? " \xB7 offline" : ""}`);
-  for (const ch of report.checks ?? []) {
-    if (ch.status === "not_applicable" && !opts.verbose) continue;
-    lines.push(`  ${icon2(ch.status)} ${ch.check_id}${ch.severity ? c.dim(` (${ch.severity})`) : ""}`);
+  const shown = (report.checks ?? []).filter((ch) => !(ch.status === "not_applicable" && !opts.verbose));
+  const keyOf = (ch) => ch.status === "pass" && !opts.verbose ? null : JSON.stringify([ch.status, ch.severity ?? "", ch.explanation ?? "", ch.compliance ? ch.compliance.fix ?? "" : ch.fix ?? "", ch.compliance?.note ?? ""]);
+  const groups = [];
+  for (const ch of shown) {
+    const k = keyOf(ch);
+    const same = k ? groups.find((g) => keyOf(g.ch) === k) : void 0;
+    if (same) same.ids.push(ch.check_id);
+    else groups.push({ ch, ids: [ch.check_id] });
+  }
+  for (const { ch, ids } of groups) {
+    lines.push(`  ${icon2(ch.status)} ${ids.length > 1 ? `${wrap(ids.join(", "), 110, "    ")} ${c.dim(`(${ids.length} checks${ch.severity ? `, ${ch.severity}` : ""})`)}` : `${ch.check_id}${ch.severity ? c.dim(` (${ch.severity})`) : ""}`}`);
     if (ch.status !== "pass" || opts.verbose) {
       if (ch.explanation) lines.push(c.dim(`      ${wrap(ch.explanation, 110, "      ")}`));
-      if (ch.fix && ch.status !== "pass") lines.push(`      fix: ${wrap(ch.fix, 110, "      ")}`);
+      const fix = ch.compliance ? ch.compliance.fix : ch.fix;
+      if (fix && ch.status !== "pass") lines.push(`      fix: ${wrap(fix, 110, "      ")}`);
+      else if (ch.compliance?.note && ch.status !== "pass") lines.push(c.dim(`      ${wrap(`note (${ch.compliance.label ?? "nothing to change"}): ${ch.compliance.note}`, 110, "      ")}`));
     }
   }
   for (const w of report.warnings ?? []) lines.push(`  ${c.yellow("!")} ${w.message} ${c.dim(`(${w.code})`)}`);
@@ -5009,6 +5025,7 @@ function signupOpenOnlyOnOwnPage(findings) {
   let open2 = 0;
   let stripeOpen = 0;
   let stripePass = 0;
+  const openChecks3 = /* @__PURE__ */ new Set();
   for (const f of findings ?? []) {
     if (!f.checkId.startsWith("signup.")) continue;
     const units = Array.isArray(f.data?.units) ? f.data.units : [];
@@ -5017,10 +5034,12 @@ function signupOpenOnlyOnOwnPage(findings) {
       const stripe = onStripePage(u);
       if (u.status === "fail" || u.status === "needs_review") {
         open2 += 1;
+        openChecks3.add(f.checkId);
         if (stripe) stripeOpen += 1;
       } else if (u.status === "pass" && stripe) stripePass += 1;
     }
   }
+  if (open2 > 0 && stripeOpen === 0 && [...openChecks3].every((c) => c === "signup.disclosure.conspicuous")) return true;
   return open2 > 0 && stripeOpen === 0 && stripePass > 0;
 }
 var init_todo = __esm({
@@ -5041,11 +5060,8 @@ function restrictedKeySteps(mode = "test") {
   const write = STRIPE_KEY_PERMISSIONS.filter((p) => p.access === "Write").map((p) => p.resource);
   const read2 = STRIPE_KEY_PERMISSIONS.filter((p) => p.access === "Read").map((p) => p.resource);
   return [
-    `Open ${mode === "test" ? `${STRIPE_TEST_API_KEYS_URL} (Stripe in Test mode)` : STRIPE_API_KEYS_URL} and click \u201CCreate restricted key\u201D.`,
-    "Name it \u201CCheckbox\u201D (if Stripe first asks how you will use the key, pick the option that lets you choose the permissions yourself).",
-    `Set these ${write.length} to Write: ${write.join(", ")}.`,
-    `Set these ${read2.length} to Read: ${read2.join(", ")}.`,
-    "Leave everything else at None, then click \u201CCreate key\u201D.",
+    `Open ${mode === "test" ? `${STRIPE_TEST_API_KEYS_URL} (Stripe in Test mode)` : STRIPE_API_KEYS_URL}, click \u201CCreate restricted key\u201D and name it \u201CCheckbox\u201D (if Stripe asks how you will use the key, pick the option that lets you choose the permissions yourself).`,
+    `Set ${write.length} to Write (${write.join(", ")}) and ${read2.length} to Read (${read2.join(", ")}); leave everything else at None and click \u201CCreate key\u201D.`,
     mode === "test" ? "Copy the key (it starts with rk_test_) into your project\u2019s env file. Never paste it into a chat." : "Copy the key (it starts with rk_live_) and paste it in the Checkbox dashboard (Site \u2192 Settings \u2192 Billing). Never paste it into a chat."
   ];
 }
@@ -5242,6 +5258,123 @@ var init_site_unreachable = __esm({
   }
 });
 
+// packages/core/src/sentence.ts
+var ABBREVIATIONS;
+var init_sentence = __esm({
+  "packages/core/src/sentence.ts"() {
+    "use strict";
+    ABBREVIATIONS = new Set(
+      [
+        "Cal",
+        "Bus",
+        "Prof",
+        "Stat",
+        "Stats",
+        "Rev",
+        "Ann",
+        "Gen",
+        "Civ",
+        "Com",
+        "Comm",
+        "Reg",
+        "Regs",
+        "Sec",
+        "Secs",
+        "Ch",
+        "Chs",
+        "Art",
+        "Pub",
+        "Ins",
+        "Corp",
+        "Fin",
+        "Ct",
+        "Admin",
+        "Gov",
+        "Govt",
+        "Educ",
+        "Fam",
+        "Penal",
+        "Proc",
+        "Subd",
+        "Subds",
+        "Para",
+        "Cl",
+        "Tit",
+        "Pt",
+        "Div",
+        "Supp",
+        "Cum",
+        "Consol",
+        "Comp",
+        "Laws",
+        "Ala",
+        "Ariz",
+        "Ark",
+        "Colo",
+        "Conn",
+        "Del",
+        "Fla",
+        "Ga",
+        "Haw",
+        "Ida",
+        "Ill",
+        "Ind",
+        "Kan",
+        "Ky",
+        "La",
+        "Md",
+        "Mass",
+        "Mich",
+        "Minn",
+        "Miss",
+        "Mo",
+        "Mont",
+        "Neb",
+        "Nev",
+        "Okla",
+        "Or",
+        "Ore",
+        "Pa",
+        "Tenn",
+        "Tex",
+        "Va",
+        "Vt",
+        "Wash",
+        "Wis",
+        "Wyo",
+        "No",
+        "Nos",
+        "Vol",
+        "Inc",
+        "Ltd",
+        "Co",
+        "vs",
+        "etc",
+        "approx",
+        "St",
+        "Mr",
+        "Mrs",
+        "Ms",
+        "Dr",
+        "Jr",
+        "Sr",
+        "Jan",
+        "Feb",
+        "Mar",
+        "Apr",
+        "Jun",
+        "Jul",
+        "Aug",
+        "Sep",
+        "Sept",
+        "Oct",
+        "Nov",
+        "Dec"
+      ].map((a) => a.toLowerCase())
+    );
+  }
+});
+
 // packages/core/src/decisions.ts
 function taskKind(key) {
   return DO_THIS_TASK_KEYS.has(key) ? "do_this" : "your_call";
@@ -5294,7 +5427,1970 @@ var init_src2 = __esm({
     init_stripe_connect();
     init_secrets();
     init_site_unreachable();
+    init_sentence();
     init_decisions();
+  }
+});
+
+// packages/cli/src/commands/init/literal.ts
+function parseObjectLiteral(source, env2 = {}, consts = {}) {
+  const p = new Parser(source, env2, consts);
+  if (p.peek() !== "{") return { value: null, unresolved: ["<not an object literal>"] };
+  const v = p.object("");
+  return { value: v === UNKNOWN ? null : v, unresolved: [...new Set(p.unresolved)], ...Object.keys(p.fromEnv).length ? { fromEnv: p.fromEnv } : {}, ...p.spreads.length ? { spreads: p.spreads } : {} };
+}
+var UNKNOWN, Parser;
+var init_literal = __esm({
+  "packages/cli/src/commands/init/literal.ts"() {
+    "use strict";
+    UNKNOWN = Symbol("unknown");
+    Parser = class _Parser {
+      constructor(s2, env2, consts = {}, depth = 0) {
+        this.s = s2;
+        this.env = env2;
+        this.consts = consts;
+        this.depth = depth;
+      }
+      i = 0;
+      unresolved = [];
+      fromEnv = {};
+      spreads = [];
+      ws() {
+        for (; ; ) {
+          while (this.i < this.s.length && /\s/.test(this.s[this.i])) this.i++;
+          if (this.s.startsWith("//", this.i)) {
+            const nl = this.s.indexOf("\n", this.i);
+            this.i = nl === -1 ? this.s.length : nl + 1;
+          } else if (this.s.startsWith("/*", this.i)) {
+            const end = this.s.indexOf("*/", this.i + 2);
+            this.i = end === -1 ? this.s.length : end + 2;
+          } else return;
+        }
+      }
+      peek() {
+        this.ws();
+        return this.s[this.i] ?? "";
+      }
+      /** Skips one expression up to a top-level `,`, `}` or `]`. */
+      skipExpr() {
+        let depth = 0;
+        while (this.i < this.s.length) {
+          const ch = this.s[this.i];
+          if (ch === '"' || ch === "'" || ch === "`") {
+            this.string();
+            continue;
+          }
+          if (ch === "(" || ch === "[" || ch === "{") depth++;
+          else if (ch === ")" || ch === "]" || ch === "}") {
+            if (depth === 0) return;
+            depth--;
+          } else if (ch === "," && depth === 0) return;
+          this.i++;
+        }
+      }
+      string() {
+        const q2 = this.s[this.i];
+        this.i++;
+        let out = "";
+        let dynamic = false;
+        while (this.i < this.s.length) {
+          const ch = this.s[this.i];
+          if (ch === "\\") {
+            const n = this.s[this.i + 1] ?? "";
+            out += n === "n" ? "\n" : n === "t" ? "	" : n;
+            this.i += 2;
+            continue;
+          }
+          if (q2 === "`" && ch === "$" && this.s[this.i + 1] === "{") {
+            const from = this.i + 2;
+            let depth = 0;
+            for (; this.i < this.s.length; this.i++) {
+              if (this.s[this.i] === "{") depth++;
+              else if (this.s[this.i] === "}" && --depth === 0) break;
+            }
+            const inner = this.s.slice(from, this.i).trim();
+            const known = this.depth < 4 && /^[A-Za-z_$][\w$]*(?:\s*(?:\?\.|\.)\s*[A-Za-z_$][\w$]*)*$/.test(inner) ? new _Parser(inner, this.env, this.consts, this.depth + 1).value("") : UNKNOWN;
+            if (typeof known === "string" || typeof known === "number") out += String(known);
+            else dynamic = true;
+            this.i++;
+            continue;
+          }
+          this.i++;
+          if (ch === q2) return dynamic ? UNKNOWN : out;
+          out += ch;
+        }
+        return UNKNOWN;
+      }
+      primary(path = "") {
+        const ch = this.peek();
+        if (ch === "{") return this.object(path);
+        if (ch === "[") return this.array(path);
+        if (ch === '"' || ch === "'" || ch === "`") return this.string();
+        const num3 = /^-?(?:\d[\d_]*)(?:\.\d+)?(?:e[+-]?\d+)?/i.exec(this.s.slice(this.i));
+        if (num3) {
+          this.i += num3[0].length;
+          return Number(num3[0].replace(/_/g, ""));
+        }
+        const id = /^[A-Za-z_$][\w$]*(?:\s*(?:\?\.|\.)\s*[A-Za-z_$][\w$]*)*/.exec(this.s.slice(this.i));
+        if (id) {
+          const after = this.s.slice(this.i + id[0].length).trimStart();
+          const name = id[0].replace(/\s+/g, "").replace(/\?\./g, ".");
+          if (after.startsWith("(")) {
+            this.skipExpr();
+            return UNKNOWN;
+          }
+          this.i += id[0].length;
+          if (name === "true") return true;
+          if (name === "false") return false;
+          if (name === "null") return null;
+          if (name === "undefined") return void 0;
+          if (Object.prototype.hasOwnProperty.call(this.consts, name)) {
+            const { [name]: _self, ...others } = this.consts;
+            const sub = new _Parser(this.consts[name], this.env, this.depth < 4 ? others : {}, this.depth + 1);
+            const v = sub.value("");
+            if (v !== UNKNOWN && v !== void 0 && path) this.fromEnv[path] = name;
+            return v;
+          }
+          const env2 = /^(?:process\.env|import\.meta\.env)\.([A-Za-z_][A-Za-z0-9_]*)$/.exec(name);
+          if (env2) {
+            if (this.env[env2[1]] !== void 0 && path) this.fromEnv[path] = name;
+            return this.env[env2[1]] ?? UNKNOWN;
+          }
+          return UNKNOWN;
+        }
+        this.skipExpr();
+        return UNKNOWN;
+      }
+      /** primary (`??` | `||` primary)* — the first known, non-empty value wins. */
+      value(path) {
+        let conditional = false;
+        let v = this.primary(path);
+        for (; ; ) {
+          this.ws();
+          if (this.s.startsWith("??", this.i) || this.s.startsWith("||", this.i)) {
+            this.i += 2;
+            const alt = this.primary(path);
+            if ((v === UNKNOWN || v === void 0 || v === null || v === "") && /^custom_text\b/.test(path)) conditional = true;
+            if (v === UNKNOWN || v === void 0 || v === null || v === "") v = alt;
+            continue;
+          }
+          const cast = /^(?:as|satisfies)\s+(?:const\b|[A-Za-z_$][\w$.]*(?:<[^,}\]]*>)?(?:\[\])*)/.exec(this.s.slice(this.i));
+          if (cast) {
+            this.i += cast[0].length;
+            continue;
+          }
+          const ch = this.s[this.i];
+          if (ch && ch !== "," && ch !== "}" && ch !== "]") {
+            this.skipExpr();
+            if (path) this.unresolved.push(path);
+            return UNKNOWN;
+          }
+          if ((v === UNKNOWN || conditional) && path) this.unresolved.push(path);
+          return conditional ? UNKNOWN : v;
+        }
+      }
+      object(path) {
+        this.i++;
+        const out = {};
+        for (; ; ) {
+          const ch = this.peek();
+          if (ch === "}") {
+            this.i++;
+            return out;
+          }
+          if (!ch) return UNKNOWN;
+          if (this.s.startsWith("...", this.i)) {
+            this.i += 3;
+            const from = this.i;
+            this.skipExpr();
+            const expr = this.s.slice(from, this.i).trim();
+            const known = /^[A-Za-z_$][\w$]*$/.test(expr) && Object.prototype.hasOwnProperty.call(this.consts, expr) ? this.consts[expr].trim() : void 0;
+            if (known?.startsWith("{") && this.depth < 4) {
+              const { [expr]: _self, ...rest } = this.consts;
+              const sub = new _Parser(known, this.env, rest, this.depth + 1);
+              const v = sub.object("");
+              if (v !== UNKNOWN && !sub.unresolved.length && !sub.spreads.length) {
+                Object.assign(out, v);
+                if (this.peek() === ",") this.i++;
+                continue;
+              }
+            }
+            if (!path) this.spreads.push(expr);
+            this.unresolved.push(`${path ? `${path}.` : ""}...`);
+          } else {
+            let key = null;
+            if (ch === '"' || ch === "'") {
+              const k = this.string();
+              key = typeof k === "string" ? k : null;
+            } else if (ch === "[") {
+              this.skipExpr();
+            } else {
+              const m = /^[A-Za-z_$][\w$]*/.exec(this.s.slice(this.i));
+              if (m) {
+                key = m[0];
+                this.i += m[0].length;
+              } else {
+                this.skipExpr();
+              }
+            }
+            const p = key ? path ? `${path}.${key}` : key : `${path}[computed]`;
+            if (this.peek() === ":") {
+              this.i++;
+              const v = this.value(p);
+              if (key && v !== UNKNOWN && v !== void 0) out[key] = v;
+            } else if (key) {
+              this.unresolved.push(p);
+            }
+          }
+          const sep = this.peek();
+          if (sep === ",") this.i++;
+          else if (sep !== "}") {
+            this.skipExpr();
+            if (this.peek() === ",") this.i++;
+          }
+        }
+      }
+      array(path) {
+        this.i++;
+        const out = [];
+        for (let n = 0; ; n++) {
+          const ch = this.peek();
+          if (ch === "]") {
+            this.i++;
+            return out;
+          }
+          if (!ch) return UNKNOWN;
+          if (this.s.startsWith("...", this.i)) {
+            this.i += 3;
+            this.skipExpr();
+            this.unresolved.push(`${path}[...]`);
+          } else {
+            const v = this.value(`${path}[${n}]`);
+            out.push(v === UNKNOWN ? null : v);
+          }
+          if (this.peek() === ",") this.i++;
+        }
+      }
+    };
+  }
+});
+
+// packages/cli/src/commands/init/py-literal.ts
+function pyCallArgs(text, index) {
+  let depth = 1;
+  let i = index;
+  while (i < text.length && i - index < 2e4) {
+    const ch = text[i];
+    if (ch === "#") {
+      const nl = text.indexOf("\n", i);
+      i = nl === -1 ? text.length : nl;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      i = skipPyString(text, i);
+      continue;
+    }
+    if (ch === "(" || ch === "[" || ch === "{") depth++;
+    else if (ch === ")" || ch === "]" || ch === "}") {
+      depth--;
+      if (depth === 0) return text.slice(index, i);
+    }
+    i++;
+  }
+  return null;
+}
+function skipPyString(s2, i) {
+  const q2 = s2[i];
+  const triple = s2.startsWith(q2.repeat(3), i);
+  const end = triple ? q2.repeat(3) : q2;
+  let j = i + end.length;
+  while (j < s2.length) {
+    if (s2[j] === "\\") {
+      j += 2;
+      continue;
+    }
+    if (s2.startsWith(end, j)) return j + end.length;
+    if (!triple && s2[j] === "\n") return j;
+    j++;
+  }
+  return s2.length;
+}
+function pyArgsToObjectLiteral(args) {
+  let out = "";
+  let i = 0;
+  while (i < args.length) {
+    const ch = args[i];
+    const prefix = /^([rRbBuUfF]{1,2})(?=["'])/.exec(args.slice(i, i + 3));
+    const before = i > 0 ? args[i - 1] : " ";
+    if (ch === '"' || ch === "'" || prefix && !/[\w]/.test(before)) {
+      const p = prefix ? prefix[1].toLowerCase() : "";
+      const start = i + p.length;
+      const end = skipPyString(args, start);
+      const q2 = args[start];
+      const triple = args.startsWith(q2.repeat(3), start);
+      const body = args.slice(start + (triple ? 3 : 1), end - (triple ? 3 : 1));
+      const raw = p.includes("r") ? body : body.replace(/\\(["'\\])/g, "$1").replace(/\\n/g, "\n").replace(/\\t/g, "	");
+      if (p.includes("f")) out += `\`${raw.replace(/`/g, "\\`").replace(/\{\{/g, "\0").replace(/\}\}/g, "").replace(/\{([^{}]*)\}/g, (_, e) => `\${${e.trim()}}`).replace(/\u0000/g, "{").replace(/\u0001/g, "}")}\``;
+      else out += JSON.stringify(raw);
+      i = end;
+      continue;
+    }
+    if (ch === "#") {
+      const nl = args.indexOf("\n", i);
+      i = nl === -1 ? args.length : nl;
+      continue;
+    }
+    const word = /^[A-Za-z_][\w]*/.exec(args.slice(i));
+    if (word && !/[\w.]/.test(before)) {
+      const w = word[0];
+      out += w === "True" ? "true" : w === "False" ? "false" : w === "None" ? "null" : w;
+      i += w.length;
+      continue;
+    }
+    out += ch;
+    i++;
+  }
+  const parts = [];
+  let depth = 0;
+  let quote2 = null;
+  let cur = "";
+  for (let k = 0; k < out.length; k++) {
+    const ch = out[k];
+    if (quote2) {
+      cur += ch;
+      if (ch === "\\") {
+        cur += out[++k] ?? "";
+      } else if (ch === quote2) quote2 = null;
+      continue;
+    }
+    if (ch === '"' || ch === "`") quote2 = ch;
+    if (ch === "(" || ch === "[" || ch === "{") depth++;
+    else if (ch === ")" || ch === "]" || ch === "}") depth--;
+    if (ch === "," && depth === 0) {
+      parts.push(cur);
+      cur = "";
+      continue;
+    }
+    cur += ch;
+  }
+  parts.push(cur);
+  const entries = [];
+  for (const raw of parts) {
+    const a = raw.trim();
+    if (!a) continue;
+    if (a.startsWith("**")) entries.push(`...${a.slice(2).trim()}`);
+    else {
+      const m = /^([A-Za-z_]\w*)\s*=(?!=)\s*([\s\S]+)$/.exec(a);
+      if (m) entries.push(`${m[1]}: ${m[2]}`);
+    }
+  }
+  return `{ ${entries.join(", ")} }`;
+}
+var PY_SESSION_CREATE;
+var init_py_literal = __esm({
+  "packages/cli/src/commands/init/py-literal.ts"() {
+    "use strict";
+    PY_SESSION_CREATE = /checkout\.Session\.create\s*\(/g;
+  }
+});
+
+// packages/cli/src/commands/init/detect.ts
+import { existsSync as existsSync3, readdirSync as readdirSync2, readFileSync as readFileSync3, statSync } from "node:fs";
+import { join as join3, relative } from "node:path";
+function plansFromSessions(sessions) {
+  const out = [];
+  for (const s2 of sessions) {
+    const p = s2.params;
+    if (!p || !Array.isArray(p.line_items)) continue;
+    const trial = Number(p.subscription_data?.trial_period_days);
+    for (const li of p.line_items) {
+      const pd = li?.price_data;
+      const amount = Number(pd?.unit_amount);
+      const interval = pd?.recurring?.interval;
+      if (!pd || !Number.isInteger(amount) || amount <= 0 || !["day", "week", "month", "year"].includes(interval) || typeof pd.currency !== "string") continue;
+      const count = Number(pd.recurring.interval_count);
+      const name = pd.product_data?.name;
+      out.push({
+        ...typeof name === "string" && name.trim() ? { name: name.trim().slice(0, 100) } : {},
+        amount,
+        currency: pd.currency.toLowerCase(),
+        interval,
+        ...Number.isInteger(count) && count > 1 ? { interval_count: count } : {},
+        ...Number.isInteger(trial) && trial > 0 ? { trial_days: trial } : {},
+        source: `${s2.file}:${s2.line}`
+      });
+    }
+  }
+  const seen = /* @__PURE__ */ new Set();
+  return out.filter((x) => {
+    const k = `${x.amount}/${x.currency}/${x.interval}/${x.interval_count ?? 1}/${x.trial_days ?? 0}`;
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  }).slice(0, 20);
+}
+function codeSnippet(line2) {
+  return redactSecrets(line2.trim()).slice(0, 200);
+}
+function detectBrand(root, layoutFile, pkgName) {
+  for (const f of [layoutFile, "index.html", "public/index.html", "src/app.html"].filter((x) => !!x)) {
+    let text = "";
+    try {
+      text = readFileSync3(join3(root, f), "utf8").slice(0, 2e5);
+    } catch {
+      continue;
+    }
+    const m = /<title[^>]*>([^<]{2,120})<\/title>/i.exec(text) ?? /\btitle\s*:\s*['"`]([^'"`{}$]{2,120})['"`]/.exec(text);
+    const segments = (m?.[1] ?? "").split(/\s+[|–—·-]\s+|\s*:\s+/).map((x) => x.trim()).filter((x) => x.length >= 2);
+    const title = segments.find((x) => !/^(?:home|welcome|untitled|document|checkout|pricing|plans|sign ?up|subscribe|account|login|shop|store|my account|start)$/i.test(x));
+    if (title) return { name: title.slice(0, 100), source: `${f} <title>` };
+  }
+  const base = pkgName?.replace(/^@[^/]+\//, "").replace(/[-_](?:web|app|site|frontend|www)$/i, "");
+  if (base && !GENERIC_NAMES.test(base)) {
+    return { name: base.split(/[-_]+/).map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ").slice(0, 100), source: "package.json name" };
+  }
+  return void 0;
+}
+function detectMailer(deps, framework, hasPackageJson) {
+  const found = MAILER_PACKAGES.find((m) => m in deps);
+  if (found) return found;
+  if (!hasPackageJson && framework === "html") return "none";
+  return null;
+}
+function readJson(path) {
+  try {
+    return JSON.parse(readFileSync3(path, "utf8"));
+  } catch {
+    return null;
+  }
+}
+function readText(path) {
+  try {
+    const st = statSync(path);
+    if (!st.isFile() || st.size > MAX_FILE_BYTES) return null;
+    return readFileSync3(path, "utf8");
+  } catch {
+    return null;
+  }
+}
+function parseDotenv(text) {
+  const out = {};
+  for (const raw of text.split(/\r?\n/)) {
+    const line2 = raw.trim();
+    if (!line2 || line2.startsWith("#")) continue;
+    const m = /^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/.exec(line2);
+    if (!m) continue;
+    let v = m[2].trim();
+    if (v.startsWith('"') && v.endsWith('"') || v.startsWith("'") && v.endsWith("'")) v = v.slice(1, -1);
+    else v = v.replace(/\s+#.*$/, "");
+    out[m[1]] = v;
+  }
+  return out;
+}
+function walk(root, visit) {
+  let count = 0;
+  const stack = [root];
+  while (stack.length && count < MAX_FILES) {
+    const dir = stack.pop();
+    let entries;
+    try {
+      entries = readdirSync2(dir);
+    } catch {
+      continue;
+    }
+    for (const e of entries) {
+      if (IGNORE_DIRS.has(e) || e.startsWith(".") && e !== ".well-known") continue;
+      const abs = join3(dir, e);
+      let st;
+      try {
+        st = statSync(abs);
+      } catch {
+        continue;
+      }
+      if (st.isDirectory()) stack.push(abs);
+      else if (st.isFile() && CODE_EXT.test(e) && st.size <= MAX_FILE_BYTES) {
+        count += 1;
+        visit(abs, relative(root, abs).split("\\").join("/"));
+        if (count >= MAX_FILES) break;
+      }
+    }
+  }
+}
+function hasAppRouteFile(dir, depth = 0) {
+  if (depth > 3) return false;
+  let names = [];
+  try {
+    names = readdirSync2(dir);
+  } catch {
+    return false;
+  }
+  if (names.some((n) => /^(?:page|route|layout)\.(?:tsx|jsx|ts|js|mdx)$/.test(n))) return true;
+  return names.some((n) => !n.startsWith(".") && n !== "node_modules" && (() => {
+    try {
+      return statSync(join3(dir, n)).isDirectory();
+    } catch {
+      return false;
+    }
+  })() && hasAppRouteFile(join3(dir, n), depth + 1));
+}
+function hasTsFiles(dir, depth = 0) {
+  if (depth > 3) return false;
+  let names = [];
+  try {
+    names = readdirSync2(dir);
+  } catch {
+    return false;
+  }
+  if (names.some((n) => /\.tsx?$/.test(n))) return true;
+  return names.some((n) => !n.startsWith(".") && (() => {
+    try {
+      return statSync(join3(dir, n)).isDirectory();
+    } catch {
+      return false;
+    }
+  })() && hasTsFiles(join3(dir, n), depth + 1));
+}
+function detectFramework(root, deps) {
+  const has2 = (d) => d in deps;
+  if (existsSync3(join3(root, "layout", "theme.liquid")) && existsSync3(join3(root, "config", "settings_schema.json"))) return { framework: "shopify-theme", layoutFile: "layout/theme.liquid" };
+  if (has2("next")) {
+    const app = first(root, ["app/layout.tsx", "app/layout.jsx", "app/layout.js", "app/layout.ts", "src/app/layout.tsx", "src/app/layout.jsx", "src/app/layout.js"]);
+    if (app) return { framework: "nextjs-app", layoutFile: app };
+    const appDir = ["src/app", "app"].find((d) => existsSync3(join3(root, d)) && hasAppRouteFile(join3(root, d)));
+    const pagesExists = existsSync3(join3(root, "pages")) || existsSync3(join3(root, "src", "pages"));
+    if (appDir && !pagesExists) return { framework: "nextjs-app", layoutFile: `${appDir}/layout.${existsSync3(join3(root, "tsconfig.json")) || hasTsFiles(join3(root, appDir)) ? "tsx" : "js"}` };
+    const doc = first(root, ["pages/_document.tsx", "pages/_document.jsx", "pages/_document.js", "src/pages/_document.tsx", "src/pages/_document.jsx", "src/pages/_document.js"]);
+    const pagesDir = existsSync3(join3(root, "src", "pages")) ? "src/pages" : "pages";
+    return { framework: "nextjs-pages", layoutFile: doc ?? `${pagesDir}/_document.${existsSync3(join3(root, "tsconfig.json")) ? "tsx" : "js"}` };
+  }
+  if (has2("@remix-run/react") || has2("@remix-run/node")) return { framework: "remix", layoutFile: first(root, ["app/root.tsx", "app/root.jsx", "app/root.js"]) };
+  if (has2("react-router") && existsSync3(join3(root, "app", "root.tsx"))) return { framework: "react-router", layoutFile: "app/root.tsx" };
+  if (has2("@sveltejs/kit")) return { framework: "sveltekit", layoutFile: first(root, ["src/app.html"]) };
+  if (has2("nuxt") || has2("nuxt3")) return { framework: "nuxt", layoutFile: "plugins/checkbox.client.ts" };
+  if (has2("astro")) {
+    let layout = first(root, ["src/layouts/Layout.astro", "src/layouts/BaseLayout.astro", "src/layouts/Base.astro", "src/layouts/MainLayout.astro"]);
+    if (!layout && existsSync3(join3(root, "src", "layouts"))) {
+      const any = readdirSync2(join3(root, "src", "layouts")).find((f) => f.endsWith(".astro") && /<head[\s>]/i.test(readText(join3(root, "src", "layouts", f)) ?? ""));
+      if (any) layout = `src/layouts/${any}`;
+    }
+    return { framework: "astro", layoutFile: layout };
+  }
+  if (has2("vite") && existsSync3(join3(root, "index.html"))) return { framework: "vite", layoutFile: "index.html" };
+  if (has2("express") || has2("fastify") || has2("koa") || has2("hono")) {
+    const views = first(root, ["views/layout.ejs", "views/layouts/main.hbs", "views/layouts/main.handlebars", "views/layout.hbs", "views/partials/head.ejs", "views/index.ejs", "public/index.html", "views/index.html"]);
+    return { framework: "express", layoutFile: views };
+  }
+  const html = first(root, ["index.html", "public/index.html", "src/index.html"]);
+  if (html) return { framework: "html", layoutFile: html };
+  return { framework: "unknown", layoutFile: null };
+}
+function publicEnvPrefix(f) {
+  switch (f) {
+    case "nextjs-app":
+    case "nextjs-pages":
+      return "NEXT_PUBLIC_";
+    case "sveltekit":
+    case "astro":
+      return "PUBLIC_";
+    case "nuxt":
+      return "NUXT_PUBLIC_";
+    case "remix":
+    case "react-router":
+    case "vite":
+      return "VITE_";
+    default:
+      return "";
+  }
+}
+function publicDirOf(root, f) {
+  if (f === "sveltekit") return "static";
+  if (f === "shopify-theme") return null;
+  if (f === "html") return existsSync3(join3(root, "public")) ? "public" : ".";
+  return "public";
+}
+function isPublicSiteUrl(v) {
+  if (!v) return false;
+  try {
+    const u = new URL(v);
+    if (u.protocol !== "https:" && u.protocol !== "http:") return false;
+    const h2 = u.hostname;
+    if (h2 === "localhost" || h2.endsWith(".localhost") || h2.endsWith(".local") || h2.endsWith(".internal") || h2 === "0.0.0.0" || h2.startsWith("127.") || h2.startsWith("10.") || h2.startsWith("192.168.") || /^172\.(1[6-9]|2\d|3[01])\./.test(h2) || h2 === "[::1]") return false;
+    return h2.includes(".");
+  } catch {
+    return false;
+  }
+}
+function originOf(url) {
+  const u = new URL(url);
+  return `${u.protocol}//${u.host}`;
+}
+function detectSiteUrl(root, env2, pkg) {
+  for (const k of SITE_URL_KEYS) if (isPublicSiteUrl(env2[k])) return { url: originOf(env2[k]), source: k };
+  if (typeof pkg?.homepage === "string" && isPublicSiteUrl(pkg.homepage)) return { url: originOf(pkg.homepage), source: "package.json homepage" };
+  const cname = readText(join3(root, "CNAME")) ?? readText(join3(root, "public", "CNAME"));
+  if (cname && /^[a-z0-9.-]+\.[a-z]{2,}$/i.test(cname.trim())) return { url: `https://${cname.trim()}`, source: "CNAME" };
+  return {};
+}
+function routeOf(rel2) {
+  const patterns = [
+    /^(?:src\/)?app\/(.+)\/page\.[jt]sx?$/,
+    /^(?:src\/)?pages\/(.+?)(?:\/index)?\.(?:[jt]sx?|astro|vue|md|mdx)$/,
+    /^src\/routes\/(.+)\/\+page\.(?:svelte|md|svx)$/,
+    /^app\/routes\/(.+?)(?:\/route)?\.[jt]sx?$/,
+    /^(?:public\/)?(.+?)(?:\/index)?\.html$/
+  ];
+  for (const re of patterns) {
+    const m = re.exec(rel2);
+    if (m) return m[1].replace(/\([^)]*\)\//g, "").replace(/^\(.*\)$/, "").replace(/\./g, "/").toLowerCase();
+  }
+  return null;
+}
+function findStripeKey(env2, processEnv, envFile = {}) {
+  const sources = [];
+  const named = ["CHECKBOX_STRIPE_TEST_KEY", "STRIPE_RESTRICTED_KEY", "STRIPE_TEST_RESTRICTED_KEY", "STRIPE_SECRET_KEY", "STRIPE_TEST_SECRET_KEY", "STRIPE_API_KEY", "STRIPE_SK"];
+  const others = [.../* @__PURE__ */ new Set([...Object.keys(env2), ...Object.keys(processEnv)])].filter((k) => !named.includes(k)).sort();
+  for (const k of [...named, ...others]) {
+    sources.push([`${k} (environment)`, processEnv[k]]);
+    sources.push([`${k} (${envFile[k] ?? ".env"})`, env2[k]]);
+  }
+  const found = sources.filter((s2) => typeof s2[1] === "string" && /^(sk|rk)_(test|live)_[A-Za-z0-9]{10,}$/.test(s2[1].trim())).map(([src, v]) => [src, v.trim()]);
+  const hint = (key) => `${key.slice(0, 8)}\u2026${key.slice(-4)}`;
+  const pick2 = found.find((s2) => s2[1].startsWith("rk_test_"));
+  if (pick2) return { key: { key: pick2[1], hint: hint(pick2[1]), source: pick2[0], restricted: true } };
+  const other = found.find((s2) => s2[1].startsWith("sk_test_")) ?? found[0];
+  if (!other) return {};
+  return { refused: { hint: hint(other[1]), source: other[0], kind: /_live_/.test(other[1]) ? "live" : "secret" } };
+}
+function stripeKeyRefusedMessage(r) {
+  const what = r.kind === "live" ? `${r.hint} in ${r.source} is a LIVE Stripe key. Live keys are never stored by the CLI or an agent: a person adds them in the Checkbox dashboard.` : `${r.hint} in ${r.source} is the Stripe secret key, which can do everything in your Stripe test account, so Checkbox refuses it.`;
+  return `${what} For test runs, make a restricted TEST key instead: in Stripe, switch to Test mode, open Developers \u2192 API keys \u2192 Create restricted key, tick the permissions on https://checkbox.site/docs/guides/stripe-key, and put the key (rk_test_\u2026) in STRIPE_RESTRICTED_KEY in .env.local (never in a chat). Then run \`checkbox init\` again.`;
+}
+function sessionLiteral(text, index) {
+  const open2 = text.indexOf("{", index);
+  const paren = text.indexOf(")", index);
+  if (open2 === -1 || paren !== -1 && paren < open2) return null;
+  let depth = 0;
+  let quote2 = null;
+  for (let i = open2; i < text.length && i - open2 < 2e4; i++) {
+    const ch = text[i];
+    if (quote2) {
+      if (ch === "\\") i++;
+      else if (ch === quote2) quote2 = null;
+      continue;
+    }
+    if (ch === "/" && text[i + 1] === "/") {
+      const nl = text.indexOf("\n", i);
+      i = nl === -1 ? text.length : nl;
+    } else if (ch === "/" && text[i + 1] === "*") {
+      const end = text.indexOf("*/", i + 2);
+      i = end === -1 ? text.length : end + 1;
+    } else if (ch === '"' || ch === "'" || ch === "`") quote2 = ch;
+    else if (ch === "{") depth++;
+    else if (ch === "}") {
+      depth--;
+      if (depth === 0) return text.slice(open2, i + 1);
+    }
+  }
+  return null;
+}
+function declaredExpr(text, from) {
+  let depth = 0;
+  let quote2 = null;
+  for (let i = from; i < text.length && i - from < 2e3; i++) {
+    const ch = text[i];
+    if (quote2) {
+      if (ch === "\\") i++;
+      else if (ch === quote2) quote2 = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === "`") quote2 = ch;
+    else if (ch === "(" || ch === "[" || ch === "{") depth++;
+    else if (ch === ")" || ch === "]" || ch === "}") depth--;
+    else if ((ch === ";" || ch === "\n") && depth <= 0) return text.slice(from, i).trim();
+  }
+  return text.slice(from, from + 2e3).trim();
+}
+function constDeclarations(text, exportedOnly) {
+  const out = {};
+  const re = exportedOnly ? /(?:^|\n)[ \t]*export\s+const\s+([A-Za-z_$][\w$]*)\s*(?::[^=\n]+)?=\s*/g : /(?:^|\n)[ \t]*(?:export\s+)?const\s+([A-Za-z_$][\w$]*)\s*(?::[^=\n]+)?=\s*/g;
+  for (const m of text.matchAll(re)) if (!(m[1] in out)) out[m[1]] = declaredExpr(text, m.index + m[0].length);
+  return out;
+}
+function resolveImport(root, fromFile, spec) {
+  const dir = fromFile.includes("/") ? fromFile.slice(0, fromFile.lastIndexOf("/")) : "";
+  const bases = spec.startsWith(".") ? [join3(dir, spec)] : /^[@~]\//.test(spec) ? [spec.slice(2), join3("src", spec.slice(2))] : [];
+  for (const b of bases) {
+    const base = b.split("\\").join("/").replace(/\.(?:[cm]?js|jsx)$/, "");
+    for (const f of [b, ...[".ts", ".tsx", ".js", ".mjs", ".jsx", "/index.ts", "/index.js"].map((e) => `${base}${e}`)]) {
+      if (/\.[cm]?[jt]sx?$/.test(f) && existsSync3(join3(root, f))) return f.split("\\").join("/");
+    }
+  }
+  return void 0;
+}
+function constantsFor(root, relFile, text) {
+  const out = {};
+  for (const m of text.matchAll(/import\s*(?:type\s+)?\{([^}]*)\}\s*from\s*['"]([^'"]+)['"]/g)) {
+    const target = resolveImport(root, relFile, m[2]);
+    if (!target) continue;
+    let exported;
+    try {
+      exported = constDeclarations(readFileSync3(join3(root, target), "utf8"), true);
+    } catch {
+      continue;
+    }
+    for (const part of m[1].split(",")) {
+      const [name, alias] = part.trim().split(/\s+as\s+/).map((x) => x.trim());
+      if (name && exported[name] !== void 0) out[alias || name] = exported[name];
+    }
+  }
+  return { ...out, ...constDeclarations(text, false) };
+}
+function detectProject(root, processEnv = {}) {
+  const pkg = readJson(join3(root, "package.json"));
+  const deps = { ...pkg?.dependencies ?? {}, ...pkg?.devDependencies ?? {} };
+  const { framework, layoutFile } = detectFramework(root, deps);
+  const packageManager = existsSync3(join3(root, "pnpm-lock.yaml")) ? "pnpm" : existsSync3(join3(root, "yarn.lock")) ? "yarn" : existsSync3(join3(root, "bun.lockb")) || existsSync3(join3(root, "bun.lock")) ? "bun" : pkg ? "npm" : null;
+  const env2 = {};
+  const envFile = {};
+  for (const f of [".env", ".env.production", ".env.local", ".env.development", ".env.development.local"]) {
+    const t = readText(join3(root, f));
+    if (!t) continue;
+    const vars = parseDotenv(t);
+    Object.assign(env2, vars);
+    for (const k of Object.keys(vars)) envFile[k] = f;
+  }
+  let billingPlatform = "stripe" in deps || "@stripe/stripe-js" in deps || "@stripe/react-stripe-js" in deps ? "stripe" : framework === "shopify-theme" || "@shopify/hydrogen" in deps || "@shopify/shopify-api" in deps ? "shopify" : "@rechargeapps/storefront-client" in deps ? "recharge" : "@paddle/paddle-js" in deps ? "paddle" : "chargebee" in deps ? "chargebee" : "custom";
+  const checkoutCode = [];
+  const payButtons = [];
+  const checkoutSessions = [];
+  const policyPaths = {};
+  const linkedPolicies = {};
+  walk(root, (abs, rel2) => {
+    const route = routeOf(rel2);
+    const served = route && /\.html?$/i.test(rel2) && !/(?:^|\/)index\.html?$/i.test(rel2) ? `/${route}${/\.htm$/i.test(rel2) ? ".htm" : ".html"}` : `/${route}`;
+    if (route) {
+      for (const p of POLICY_ROUTES) if (!policyPaths[p.kind] && p.re.test(route)) policyPaths[p.kind] = served;
+    }
+    const text = readText(abs);
+    if (!text) return;
+    for (const m of text.matchAll(/\bhref=\{?\s*["'`](\/[A-Za-z0-9._~\/-]*)["'`]/g)) {
+      const path = m[1].slice(1).replace(/\/$/, "").replace(/\.html?$/i, "").toLowerCase();
+      for (const p of POLICY_ROUTES) if (!linkedPolicies[p.kind] && p.re.test(path)) linkedPolicies[p.kind] = m[1].replace(/(.)\/$/, "$1");
+    }
+    const lines = text.split("\n");
+    lines.forEach((line2, i) => {
+      for (const p of CHECKOUT_PATTERNS) {
+        if (p.re.test(line2) && checkoutCode.length < 100) checkoutCode.push({ file: rel2, line: i + 1, kind: p.kind, snippet: codeSnippet(line2) });
+      }
+      if (PAY_BUTTON.test(line2) && payButtons.length < 50) payButtons.push({ file: rel2, line: i + 1, kind: "subscribe_button", snippet: codeSnippet(line2) });
+    });
+    for (const m of text.matchAll(/checkout\.sessions\.create\s*\(/g)) {
+      const lit = sessionLiteral(text, m.index + m[0].length);
+      const line2 = text.slice(0, m.index).split("\n").length;
+      if (!lit) {
+        checkoutSessions.push({ file: rel2, line: line2, unresolved: ["<params are not an object literal>"] });
+        continue;
+      }
+      const parsed = parseObjectLiteral(lit, { ...env2, ...Object.fromEntries(Object.entries(processEnv).filter((e) => typeof e[1] === "string" && /^(STRIPE_|NEXT_PUBLIC_STRIPE_|PRICE_)/.test(e[0]))) }, constantsFor(root, rel2, text));
+      checkoutSessions.push({ file: rel2, line: line2, ...parsed.value ? { params: redactSecretsDeep(parsed.value) } : {}, unresolved: parsed.unresolved });
+    }
+    if (/\.py$/i.test(rel2)) {
+      for (const m of text.matchAll(PY_SESSION_CREATE)) {
+        const line2 = text.slice(0, m.index).split("\n").length;
+        const args = pyCallArgs(text, m.index + m[0].length);
+        const parsed = args === null ? null : parseObjectLiteral(pyArgsToObjectLiteral(args), env2);
+        if (!parsed?.value) checkoutSessions.push({ file: rel2, line: line2, unresolved: ["<params are not keyword arguments>"] });
+        else checkoutSessions.push({ file: rel2, line: line2, params: redactSecretsDeep(parsed.value), unresolved: parsed.unresolved });
+      }
+    }
+  });
+  if (billingPlatform === "custom" && checkoutCode.some((c) => c.kind.startsWith("stripe_"))) billingPlatform = "stripe";
+  Object.assign(policyPaths, linkedPolicies);
+  const site = detectSiteUrl(root, env2, pkg);
+  const stripeKey = findStripeKey(env2, processEnv, envFile);
+  const brand = detectBrand(root, layoutFile, typeof pkg?.name === "string" ? pkg.name : void 0);
+  return {
+    root,
+    ...typeof pkg?.name === "string" ? { name: pkg.name } : {},
+    framework,
+    packageManager,
+    billingPlatform,
+    layoutFile,
+    envFile: framework === "express" || framework === "html" || framework === "unknown" || framework === "shopify-theme" ? ".env" : ".env.local",
+    publicEnvPrefix: publicEnvPrefix(framework),
+    publicDir: publicDirOf(root, framework),
+    ...site.url ? { siteUrl: site.url, siteUrlSource: site.source } : {},
+    policyPaths,
+    checkoutCode,
+    payButtons,
+    checkoutSessions,
+    ...stripeKey.key ? { stripeTestKey: stripeKey.key } : {},
+    ...stripeKey.refused ? { stripeKeyRefused: stripeKey.refused } : {},
+    ...brand ? { brand } : {},
+    plans: plansFromSessions(checkoutSessions),
+    env: env2,
+    mailer: detectMailer(deps, framework, !!pkg)
+  };
+}
+var GENERIC_NAMES, MAILER_PACKAGES, IGNORE_DIRS, CODE_EXT, MAX_FILES, MAX_FILE_BYTES, first, SITE_URL_KEYS, POLICY_ROUTES, CHECKOUT_PATTERNS, PAY_BUTTON;
+var init_detect = __esm({
+  "packages/cli/src/commands/init/detect.ts"() {
+    "use strict";
+    init_src2();
+    init_literal();
+    init_py_literal();
+    GENERIC_NAMES = /^(?:web|app|site|website|frontend|client|my-app|my-site|demo|example|store|shop|starter|template|project|monorepo|root)$/i;
+    MAILER_PACKAGES = ["nodemailer", "resend", "@sendgrid/mail", "postmark", "mailgun.js", "mailgun-js", "@aws-sdk/client-ses", "@aws-sdk/client-sesv2", "@react-email/components", "react-email", "@mailchimp/mailchimp_transactional", "mailersend", "@sparkpost/node", "sparkpost", "emailjs", "@emailjs/browser", "loops", "plunk", "@plunk/node", "brevo", "@getbrevo/brevo", "sib-api-v3-sdk", "nodemailer-mailgun-transport", "@vercel/email"];
+    IGNORE_DIRS = /* @__PURE__ */ new Set(["node_modules", ".git", ".next", ".nuxt", ".svelte-kit", ".output", ".vercel", ".netlify", ".turbo", ".cache", "dist", "build", "out", "coverage", ".astro", "vendor", ".venv", "__pycache__"]);
+    CODE_EXT = /\.(?:[cm]?[jt]sx?|vue|svelte|astro|liquid|html|ejs|hbs|erb|py)$/i;
+    MAX_FILES = 4e3;
+    MAX_FILE_BYTES = 4e5;
+    first = (root, candidates) => candidates.find((c) => existsSync3(join3(root, c))) ?? null;
+    SITE_URL_KEYS = ["NEXT_PUBLIC_SITE_URL", "SITE_URL", "PUBLIC_SITE_URL", "NEXT_PUBLIC_APP_URL", "APP_URL", "NEXT_PUBLIC_BASE_URL", "BASE_URL", "PUBLIC_URL", "NUXT_PUBLIC_SITE_URL", "VITE_SITE_URL", "URL", "NEXTAUTH_URL"];
+    POLICY_ROUTES = [
+      { kind: "terms", re: /^(terms(-of-(service|use|sale))?|tos|legal\/terms|conditions|terms-and-conditions)$/ },
+      { kind: "privacy", re: /^(privacy(-policy)?|legal\/privacy)$/ },
+      { kind: "refund", re: /^(refunds?(-policy)?|returns?(-policy)?|legal\/refunds?)$/ },
+      { kind: "cancellation", re: /^(cancel(lation)?(-policy)?|legal\/cancel(lation)?)$/ }
+    ];
+    CHECKOUT_PATTERNS = [
+      { kind: "stripe_checkout_session", re: /checkout\.sessions\.create\s*\(|checkout\.Session\.create\s*\(/ },
+      { kind: "stripe_payment_link", re: /paymentLinks\.create\s*\(|https:\/\/buy\.stripe\.com\// },
+      { kind: "stripe_checkout_link", re: /https:\/\/checkout\.stripe\.com\// },
+      { kind: "stripe_pricing_table", re: /<stripe-pricing-table\b/ },
+      { kind: "stripe_subscription_api", re: /subscriptions\.create\s*\(/ },
+      { kind: "stripe_elements", re: /<(PaymentElement|CardElement|ExpressCheckoutElement)\b|elements\.create\(\s*['"]payment['"]/ },
+      { kind: "stripe_customer_portal", re: /billingPortal\.sessions\.create\s*\(/ },
+      { kind: "shopify_checkout", re: /checkoutCreate|cartCreate|\/cart\/add/ },
+      { kind: "recharge_checkout", re: /rechargeapps\.com|recharge-checkout/ }
+    ];
+    PAY_BUTTON = /<(?:button|a|Button|Link)\b[^>]*>\s*(?:\{[^}]*\}\s*)?(Subscribe(?: now)?|Start (?:your )?(?:free )?trial|Start subscription|Join now|Upgrade(?: now| to [A-Z][a-z]+)?|Get (?:started|Pro|Premium)|Buy now|Checkout|Continue to (?:payment|checkout))\b/;
+  }
+});
+
+// packages/cli/src/commands/init/device.ts
+import { spawn } from "node:child_process";
+function detectAgent(env2, flag) {
+  if (flag) return flag.slice(0, 60);
+  if (env2.CLAUDECODE === "1" || env2.CLAUDE_CODE_ENTRYPOINT) return "Claude Code";
+  if (env2.CURSOR_TRACE_ID || env2.CURSOR_AGENT) return "Cursor";
+  if (env2.WINDSURF_SESSION_ID || env2.CODEIUM_API_KEY) return "Windsurf";
+  if (env2.GITHUB_COPILOT_AGENT || env2.COPILOT_AGENT_ID) return "GitHub Copilot";
+  if (env2.CODEX_SANDBOX || env2.CODEX_HOME) return "Codex";
+  if (env2.CLINE_TASK_ID) return "Cline";
+  return void 0;
+}
+function openBrowser(url, env2) {
+  if (env2.CI || env2.CHECKBOX_NO_BROWSER === "1") return false;
+  const platform = process.platform;
+  let cmd;
+  let args;
+  if (platform === "darwin") [cmd, args] = ["open", [url]];
+  else if (platform === "win32") [cmd, args] = ["cmd", ["/c", "start", '""', url]];
+  else if (env2.DISPLAY || env2.WAYLAND_DISPLAY) [cmd, args] = ["xdg-open", [url]];
+  else return false;
+  try {
+    const child = spawn(cmd, args, { detached: true, stdio: "ignore" });
+    child.on("error", () => void 0);
+    child.unref();
+    return true;
+  } catch {
+    return false;
+  }
+}
+async function startDeviceLogin(client, body) {
+  return await client.sdk.device.authorize(body);
+}
+async function pollDeviceLogin(client, pending, waitMs, ctx) {
+  const deadline = Date.now() + waitMs;
+  let interval = Math.max(0, pending.interval) * 1e3;
+  for (; ; ) {
+    if (Date.parse(pending.expires_at) <= Date.now()) return { status: "expired", message: "The login code expired. Run `checkbox init` again for a new one." };
+    try {
+      const token = await client.sdk.device.token({ device_code: pending.device_code });
+      return { status: "approved", token };
+    } catch (err) {
+      if (!(err instanceof ApiError)) throw err;
+      if (err.code === "authorization_pending") {
+      } else if (err.code === "slow_down") {
+        interval += 5e3;
+      } else if (err.code === "access_denied") {
+        return { status: "denied", message: err.message };
+      } else if (err.code === "expired_token" || err.code === "device_code_invalid") {
+        return { status: "expired", message: err.message };
+      } else if (apiStatus(err) === 0 || apiStatus(err) >= 500) {
+        ctx.out.warn(`could not reach Checkbox (${err.message}); retrying`);
+      } else {
+        throw err;
+      }
+    }
+    if (Date.now() + interval > deadline) return { status: "timeout" };
+    await sleep2(interval);
+  }
+}
+var sleep2;
+var init_device = __esm({
+  "packages/cli/src/commands/init/device.ts"() {
+    "use strict";
+    init_http();
+    sleep2 = (ms) => new Promise((r) => setTimeout(r, ms));
+  }
+});
+
+// packages/cli/src/commands/init/patch.ts
+import { execFileSync } from "node:child_process";
+import { chmodSync as chmodSync2, existsSync as existsSync4, mkdirSync as mkdirSync2, readFileSync as readFileSync4, writeFileSync as writeFileSync2 } from "node:fs";
+import { basename, dirname as dirname3, join as join4 } from "node:path";
+function pinnedRelease(body) {
+  const b = body;
+  if (!b || typeof b.version !== "string" || !/^\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(b.version)) return void 0;
+  if (typeof b.integrity !== "string" || !/^sha384-[A-Za-z0-9+/]{64}$/.test(b.integrity)) return void 0;
+  return { version: b.version, integrity: b.integrity };
+}
+function snippetScriptTag(s2, jsx = false, attrs = "") {
+  const pin = s2.pinned ? ` integrity="${s2.pinned.integrity}" ${jsx ? "crossOrigin" : "crossorigin"}="anonymous"` : "";
+  return `<script${attrs} async src="${srcOf(s2)}"${pin} data-key="${s2.snippetKey}" data-api="${s2.apiBase.replace(/\/+$/, "")}"></script>`;
+}
+function read(root, rel2) {
+  try {
+    return readFileSync4(join4(root, rel2), "utf8");
+  } catch {
+    return null;
+  }
+}
+function srcOf(s2) {
+  const api = s2.apiBase.replace(/\/+$/, "");
+  return s2.pinned ? `${api}/s/${s2.pinned.version}.js` : `${api}/s.js`;
+}
+function jsxBlock(s2, indent) {
+  return [
+    `${indent}{/* ${MARK_START} \u2014 Checkbox subscription-compliance monitoring (https://checkbox.site/docs/snippet) */}`,
+    `${indent}${snippetScriptTag(s2, true)}`,
+    `${indent}{/* ${MARK_END} */}`
+  ];
+}
+function htmlBlock(s2, indent, attrs = "") {
+  return [
+    `${indent}<!-- ${MARK_START} \u2014 Checkbox subscription-compliance monitoring (https://checkbox.site/docs/snippet) -->`,
+    `${indent}${snippetScriptTag(s2, false, attrs)}`,
+    `${indent}<!-- ${MARK_END} -->`
+  ];
+}
+function replaceMarked(text, block) {
+  const start = text.indexOf(MARK_START);
+  if (start === -1) return null;
+  const lineStart2 = text.lastIndexOf("\n", start) + 1;
+  const endIdx = text.indexOf(MARK_END, start);
+  if (endIdx === -1) return null;
+  const lineEnd = text.indexOf("\n", endIdx);
+  return text.slice(0, lineStart2) + block.join("\n") + (lineEnd === -1 ? "" : text.slice(lineEnd));
+}
+function insertBefore(text, re, block) {
+  const m = re.exec(text);
+  if (!m) return null;
+  const lineStart2 = text.lastIndexOf("\n", m.index) + 1;
+  if (text.slice(lineStart2, m.index).trim()) return `${text.slice(0, m.index)}${block.map((l) => l.trim()).join("")}${text.slice(m.index)}`;
+  return `${text.slice(0, lineStart2)}${block.join("\n")}
+${text.slice(lineStart2)}`;
+}
+function insertAfter(text, re, block) {
+  const m = re.exec(text);
+  if (!m) return null;
+  const end = m.index + m[0].length;
+  const nl = text.indexOf("\n", end);
+  if (text.slice(end, nl === -1 ? text.length : nl).trim()) return `${text.slice(0, end)}${block.map((l) => l.trim()).join("")}${text.slice(end)}`;
+  const at = nl === -1 ? text.length : nl + 1;
+  return `${text.slice(0, at)}${block.join("\n")}
+${text.slice(at)}`;
+}
+function snippetPlacedSafely(text, jsx) {
+  const at = text.indexOf(MARK_START);
+  if (at === -1) return false;
+  const lineStart2 = text.lastIndexOf("\n", at) + 1;
+  const before = text.slice(lineStart2, at);
+  if (/\breturn\b[^]*;/.test(before)) return false;
+  if (jsx) {
+    const prev = text.slice(0, lineStart2).trimEnd();
+    const prevLine = prev.slice(prev.lastIndexOf("\n") + 1);
+    if (/^\s*return\b.*;\s*$/.test(prevLine)) return false;
+  }
+  const open2 = text.slice(0, at).search(/<head\b[^>]*>(?![^]*<head\b)/i);
+  const closeBefore = text.slice(0, at).search(/<\/head>/i);
+  const hasHead = /<head\b/i.test(text) && /<\/head>/i.test(text);
+  if (hasHead && (open2 === -1 || closeBefore !== -1 && closeBefore > open2)) return false;
+  if (open2 !== -1 && !/<\/head>/i.test(text.slice(at))) return false;
+  return true;
+}
+function indentOf(text, re, extra = "  ") {
+  const m = re.exec(text);
+  if (!m) return "    ";
+  const lineStart2 = text.lastIndexOf("\n", m.index) + 1;
+  return (/^\s*/.exec(text.slice(lineStart2))?.[0] ?? "") + extra;
+}
+function planSnippet(d, s2) {
+  const root = d.root;
+  const file = d.layoutFile;
+  const manual = `Add this tag inside <head> on every page (your root layout / template):
+  ${s2.pinned ? snippetScriptTag(s2) : s2.scriptTag}`;
+  if (!file) return { change: null, manual };
+  const existing = read(root, file);
+  const jsx = (f) => f === "nextjs-app" || f === "nextjs-pages" || f === "remix" || f === "react-router";
+  if (d.framework === "nuxt") {
+    const contents = NUXT_PLUGIN(s2);
+    if (existing === contents) return { change: { file, action: "unchanged", summary: "Nuxt plugin already installs the snippet", added: [] } };
+    return { change: { file, action: existing === null ? "create" : "modify", summary: "Nuxt client plugin that adds the snippet to every page", contents, added: contents.trim().split("\n") } };
+  }
+  if (existing === null) {
+    if (d.framework === "nextjs-app") {
+      const contents = NEXT_APP_LAYOUT(s2, /\.tsx$/.test(file));
+      return { change: { file, action: "create", summary: "Root layout with the snippet in <head>", contents, added: contents.trim().split("\n") } };
+    }
+    if (d.framework === "nextjs-pages") {
+      const contents = NEXT_DOCUMENT(s2);
+      return { change: { file, action: "create", summary: "Custom _document with the snippet in <Head>", contents, added: contents.trim().split("\n") } };
+    }
+    return { change: null, manual };
+  }
+  if (existing.includes(`data-key="${s2.snippetKey}"`) && existing.includes(MARK_START) && existing.includes(`src="${srcOf(s2)}"`) && (!s2.pinned || existing.includes(s2.pinned.integrity))) {
+    return { change: { file, action: "unchanged", summary: s2.pinned ? `Snippet already installed (pinned release ${s2.pinned.version} with SRI)` : "Snippet already installed", added: [] } };
+  }
+  const isJsx = jsx(d.framework);
+  const indentRe = isJsx ? d.framework === "nextjs-pages" ? /<Head\b[^>]*>/ : /<head\b[^>]*>/ : /<\/head>/i;
+  const indent = isJsx ? indentOf(existing, indentRe) : indentOf(existing, /<\/head>/i, "  ");
+  const block = isJsx ? jsxBlock(s2, indent) : htmlBlock(s2, indent, d.framework === "astro" ? " is:inline" : "");
+  const replaced = replaceMarked(existing, block);
+  if (replaced !== null) return { change: { file, action: "modify", summary: existing.includes(`data-key="${s2.snippetKey}"`) ? s2.pinned ? `Snippet tag pinned to release ${s2.pinned.version} with SRI` : "Snippet tag updated" : "Snippet tag updated (new site key)", contents: replaced, added: block } };
+  let next = null;
+  switch (d.framework) {
+    case "nextjs-app": {
+      next = insertAfter(existing, /<head\b[^>]*>/, block);
+      if (!next && /<html\b[^>]*>/.test(existing)) {
+        const ind = indentOf(existing, /<html\b[^>]*>/);
+        next = insertAfter(existing, /<html\b[^>]*>/, [`${ind}<head>`, ...jsxBlock(s2, `${ind}  `), `${ind}</head>`]);
+      }
+      break;
+    }
+    case "nextjs-pages":
+      next = insertAfter(existing, /<Head\b[^>]*>/, block) ?? (/<Head\s*\/>/.test(existing) ? existing.replace(/<Head\s*\/>/, `<Head>
+${block.join("\n")}
+${indentOf(existing, /<Head\s*\/>/, "")}</Head>`) : null);
+      break;
+    case "remix":
+    case "react-router":
+      next = insertAfter(existing, /<Links\s*\/>/, block) ?? insertAfter(existing, /<Meta\s*\/>/, block) ?? insertAfter(existing, /<head\b[^>]*>/, block);
+      break;
+    case "sveltekit":
+      next = insertBefore(existing, /%sveltekit\.head%/, htmlBlock(s2, indentOf(existing, /%sveltekit\.head%/, ""))) ?? insertBefore(existing, /<\/head>/i, block);
+      break;
+    case "shopify-theme":
+      next = insertBefore(existing, /\{\{\s*content_for_header\s*\}\}/, htmlBlock(s2, indentOf(existing, /\{\{\s*content_for_header\s*\}\}/, ""))) ?? insertBefore(existing, /<\/head>/i, block);
+      break;
+    default:
+      next = insertBefore(existing, /<\/head>/i, block);
+  }
+  if (!next) return { change: null, manual: `Could not find <head> in ${file}. ${manual}` };
+  if (!snippetPlacedSafely(next, isJsx)) return { change: null, manual: `Could not place the snippet safely in ${file} (its <head> is not where Checkbox can patch it without breaking the file), so ${file} was NOT changed. ${manual}` };
+  return { change: { file, action: "modify", summary: `Snippet added to <head> in ${file}${s2.pinned ? ` (pinned release ${s2.pinned.version} with SRI)` : ""}`, contents: next, added: block } };
+}
+function envVarNames(d) {
+  return {
+    secret: "CHECKBOX_SECRET_KEY",
+    publishable: `${d.publicEnvPrefix}CHECKBOX_PUBLISHABLE_KEY`,
+    liveSecret: "CHECKBOX_LIVE_SECRET_KEY",
+    livePublishable: `${d.publicEnvPrefix}CHECKBOX_LIVE_PUBLISHABLE_KEY`
+  };
+}
+function planEnv(d, v) {
+  const names = envVarNames(d);
+  const entries = [
+    [names.secret, v.secretKey],
+    [names.publishable, v.publishableKey],
+    ...v.liveSecretKey ? [[names.liveSecret, v.liveSecretKey]] : [],
+    ...v.livePublishableKey ? [[names.livePublishable, v.livePublishableKey]] : [],
+    ...v.apiBase ? [["CHECKBOX_API_BASE", v.apiBase]] : []
+  ];
+  const existing = read(d.root, d.envFile);
+  let text = existing ?? "";
+  const added = [];
+  const missing = [];
+  for (const [k, val] of entries) {
+    const re = new RegExp(`^${k}=.*$`, "m");
+    if (re.test(text)) {
+      if (!text.match(re)[0].endsWith(`=${val}`)) {
+        text = text.replace(re, `${k}=${val}`);
+        added.push(`${k}=${k === "CHECKBOX_API_BASE" ? val : mask(val)}`);
+      }
+    } else missing.push([k, val]);
+  }
+  if (missing.length) {
+    const block = ["# Checkbox (subscription compliance) \u2014 written by `checkbox init`. Secret: never commit this file.", ...missing.map(([k, val]) => `${k}=${val}`)];
+    text = `${text}${text && !text.endsWith("\n") ? "\n" : ""}${text ? "\n" : ""}${block.join("\n")}
+`;
+    added.push(...missing.map(([k, val]) => `${k}=${k === "CHECKBOX_API_BASE" ? val : mask(val)}`));
+  }
+  if (existing === text) return { file: d.envFile, action: "unchanged", summary: `${d.envFile} already has the Checkbox keys`, added: [] };
+  return { file: d.envFile, action: existing === null ? "create" : "modify", summary: `Keys written to ${d.envFile} (${entries.map(([k]) => k).join(", ")})`, contents: text, added };
+}
+function mask(v) {
+  const m = /^([a-z]{2}_(?:live|test)_)/.exec(v);
+  return `${m?.[1] ?? v.slice(0, 3)}\u2026${v.slice(-4)}`;
+}
+function isGitTracked(root, file) {
+  try {
+    execFileSync("git", ["ls-files", "--error-unmatch", "--", file], { cwd: root, stdio: "ignore", timeout: 5e3 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+function trackedEnvWarning(file) {
+  return `${file} is tracked by git, so the secret key was NOT written to it (it would go into your next commit, even with ${file} in .gitignore). Untrack it, keeping your copy: \`git rm --cached ${file}\`, commit that, then run \`checkbox init\` again to write the key. Meanwhile the key is saved in the Checkbox CLI config (\`checkbox plan\`, \`checkbox verify\` use it). If ${file} was ever pushed with other secrets in it, rotate those secrets.`;
+}
+function planGitignore(d) {
+  const existing = read(d.root, ".gitignore");
+  const env2 = d.envFile;
+  if (existing !== null) {
+    const lines = existing.split(/\r?\n/).map((l) => l.trim());
+    const covered = lines.some((l) => l === env2 || l === `/${env2}` || l === ".env*" || l === "*.env" || env2 === ".env.local" && (l === ".env*.local" || l === "*.local" || l === ".env.local*") || env2 === ".env" && l === ".env*");
+    if (covered) return null;
+  }
+  if (existing === null && !existsSync4(join4(d.root, ".git"))) return null;
+  const text = `${existing ?? ""}${existing && !existing.endsWith("\n") ? "\n" : ""}# Checkbox keys (checkbox init)
+${env2}
+`;
+  return { file: ".gitignore", action: existing === null ? "create" : "modify", summary: `${env2} added to .gitignore`, contents: text, added: [env2] };
+}
+function planWellKnown(d, token) {
+  if (!d.publicDir) return null;
+  const file = `${d.publicDir === "." ? "" : `${d.publicDir}/`}.well-known/checkbox-verify.txt`;
+  const existing = read(d.root, file);
+  if (existing?.trim() === token) return { file, action: "unchanged", summary: "Domain verification file already present", added: [] };
+  return { file, action: existing === null ? "create" : "modify", summary: `Domain verification file ${file} (deploy it, then verify)`, contents: `${token}
+`, added: [token] };
+}
+function applyChange(root, c) {
+  if (c.action === "unchanged" || c.contents === void 0) return;
+  const abs = join4(root, c.file);
+  mkdirSync2(dirname3(abs), { recursive: true });
+  const secret = /^\.env(\.|$)/.test(basename(c.file));
+  writeFileSync2(abs, c.contents, secret ? { mode: 384 } : void 0);
+  if (secret) {
+    try {
+      chmodSync2(abs, 384);
+    } catch {
+    }
+  }
+}
+function planAgentsRule(root, opts = {}) {
+  const rule2 = opts.connected ? AGENTS_RULE : AGENTS_RULE_OFFLINE;
+  const has2 = (t) => !!t && (t.includes(AGENTS_RULE_MARKER) || /^#+\s*(?:Subscription compliance \(Checkbox\)|Checkbox\b)/m.test(t));
+  const offlineBlock = (t) => t && opts.connected && t.includes(AGENTS_RULE_OFFLINE) ? t : null;
+  const upgrade = (file, t) => ({
+    file,
+    action: "modify",
+    summary: `${file}: the Checkbox rule for coding agents now says the project is connected`,
+    contents: t.replace(AGENTS_RULE_OFFLINE, AGENTS_RULE),
+    added: AGENTS_RULE.split("\n")
+  });
+  const agents = read(root, "AGENTS.md");
+  const claude = read(root, "CLAUDE.md");
+  const upgrades = [["AGENTS.md", offlineBlock(agents)], ["CLAUDE.md", offlineBlock(claude)]].filter(([, t]) => t !== null).map(([f, t]) => upgrade(f, t));
+  if (upgrades.length) return upgrades;
+  const claudeImport = () => ({ file: "CLAUDE.md", action: "create", summary: "CLAUDE.md: imports AGENTS.md, so Claude Code reads the Checkbox rule", contents: "@AGENTS.md\n", added: ["@AGENTS.md"] });
+  if (has2(agents) || has2(claude) && agents === null) return opts.claudeCode && claude === null && has2(agents) ? [claudeImport()] : [];
+  const append = (file, text) => ({
+    file,
+    action: text === null ? "create" : "modify",
+    summary: `${file}: Checkbox rule for coding agents (run \`checkbox ci\` before committing billing changes)`,
+    contents: `${text ?? ""}${text && !text.endsWith("\n") ? "\n" : ""}${text ? "\n" : ""}${rule2}`,
+    added: rule2.split("\n")
+  });
+  const out = [append("AGENTS.md", agents)];
+  if (claude !== null && !has2(claude) && !/@AGENTS\.md/.test(claude)) out.push(append("CLAUDE.md", claude));
+  if (claude === null && opts.claudeCode) out.push(claudeImport());
+  return out;
+}
+var MARK_START, MARK_END, NEXT_DOCUMENT, NEXT_APP_LAYOUT, NUXT_PLUGIN, AGENTS_RULE_MARKER, AGENTS_RULE, AGENTS_RULE_OFFLINE_LINE, AGENTS_RULE_OFFLINE;
+var init_patch = __esm({
+  "packages/cli/src/commands/init/patch.ts"() {
+    "use strict";
+    MARK_START = "checkbox:snippet:start";
+    MARK_END = "checkbox:snippet:end";
+    NEXT_DOCUMENT = (s2) => `import { Html, Head, Main, NextScript } from 'next/document';
+
+export default function Document() {
+  return (
+    <Html lang="en">
+      <Head>
+${jsxBlock(s2, "        ").join("\n")}
+      </Head>
+      <body>
+        <Main />
+        <NextScript />
+      </body>
+    </Html>
+  );
+}
+`;
+    NEXT_APP_LAYOUT = (s2, ts) => `${ts ? "import type { ReactNode } from 'react';\n\n" : ""}export default function RootLayout({ children }${ts ? ": { children: ReactNode }" : ""}) {
+  return (
+    <html lang="en">
+      <head>
+${jsxBlock(s2, "        ").join("\n")}
+      </head>
+      <body>{children}</body>
+    </html>
+  );
+}
+`;
+    NUXT_PLUGIN = (s2) => `// ${MARK_START} \u2014 Checkbox subscription-compliance monitoring (https://checkbox.site/docs/snippet)
+export default defineNuxtPlugin(() => {
+  useHead({
+    script: [{ src: '${srcOf(s2)}', async: true,${s2.pinned ? ` integrity: '${s2.pinned.integrity}', crossorigin: 'anonymous',` : ""} 'data-key': '${s2.snippetKey}', 'data-api': '${s2.apiBase.replace(/\/+$/, "")}' }],
+  });
+});
+// ${MARK_END}
+`;
+    AGENTS_RULE_MARKER = "<!-- checkbox: agent rule -->";
+    AGENTS_RULE = [
+      AGENTS_RULE_MARKER,
+      "## Subscription compliance (Checkbox)",
+      "",
+      "This project is connected to Checkbox (`checkbox init` set up its site; the key is CHECKBOX_SECRET_KEY). Before committing",
+      "a change to sign-up, pricing, trials, renewal emails or cancellation, run `npx @checkbox-site/cli ci` (or the Checkbox",
+      "MCP tools: check_stripe_checkout_session, check_page_html, check_email) and apply the fixes it returns. When",
+      "checkbox.json reads built pages (.next, dist), build first (e.g. `npm run build && npx @checkbox-site/cli ci`). Pull",
+      "requests run the same check. Its result is an automated check, not legal advice. Guide: https://checkbox.site/llms.txt",
+      ""
+    ].join("\n");
+    AGENTS_RULE_OFFLINE_LINE = "This project checks its subscription terms with Checkbox CI (checkbox.json, run offline: no account or";
+    AGENTS_RULE_OFFLINE = [
+      AGENTS_RULE_MARKER,
+      "## Subscription compliance (Checkbox)",
+      "",
+      AGENTS_RULE_OFFLINE_LINE,
+      // Round 51 (pilot 50 core-codex: "not connected to a Checkbox site" in a project an agent had connected through MCP):
+      // what is true of this repository, whatever an MCP connection did.
+      "key in this repository, so this check does not read Stripe or the live site, even when Checkbox is connected through",
+      "MCP). Before committing a change to sign-up, pricing,",
+      "trials, renewal emails or cancellation, run `npx @checkbox-site/cli ci` and apply the fixes it returns. When",
+      "checkbox.json reads built pages (.next, dist), build first (e.g. `npm run build && npx @checkbox-site/cli ci`). Pull",
+      "requests run the same check. To also check Stripe and the live site here, add the site's Checkbox key (CHECKBOX_SECRET_KEY:",
+      "`npx @checkbox-site/cli init` writes it) and run `npx @checkbox-site/cli ci --online`.",
+      "Its result is an automated check, not legal advice. Guide: https://checkbox.site/llms.txt",
+      ""
+    ].join("\n");
+  }
+});
+
+// packages/cli/src/ci/config.ts
+import { existsSync as existsSync5, readFileSync as readFileSync5 } from "node:fs";
+import { dirname as dirname4, isAbsolute, join as join5, resolve as resolve2 } from "node:path";
+function planList(config, ref) {
+  if (Array.isArray(ref)) return ref;
+  if (ref === "all" && !(config.plans ?? []).some((p) => p.name === "all")) return (config.plans ?? []).map((p) => p.name);
+  return void 0;
+}
+function findConfig(cwd, explicit) {
+  if (explicit) {
+    const p = isAbsolute(explicit) ? explicit : resolve2(cwd, explicit);
+    return existsSync5(p) ? p : void 0;
+  }
+  for (const f of CONFIG_FILES) if (existsSync5(join5(cwd, f))) return join5(cwd, f);
+  return void 0;
+}
+function loadConfig(path) {
+  let raw;
+  try {
+    raw = readFileSync5(path, "utf8");
+  } catch (err) {
+    throw new ConfigError(path, [`cannot read the file (${err.code ?? err.message})`]);
+  }
+  let value;
+  try {
+    value = JSON.parse(raw);
+  } catch (err) {
+    throw new ConfigError(path, [`is not valid JSON: ${err.message}`]);
+  }
+  normalizeKinds(value);
+  const issues = validateConfig(value);
+  if (issues.length) throw new ConfigError(path, issues);
+  return { config: value, path, dir: dirname4(path), raw };
+}
+function normalizeKinds(value) {
+  if (!isObj(value)) return;
+  const emails = isObj(value.checks) ? value.checks.emails : void 0;
+  if (Array.isArray(emails)) {
+    for (const e of emails) if (isObj(e) && typeof e.kind === "string" && KIND_ALIASES[e.kind]) e.kind = KIND_ALIASES[e.kind];
+  }
+  const sb = isObj(value.notices) ? value.notices.sent_by_checkbox : void 0;
+  if (Array.isArray(sb)) {
+    for (let i = 0; i < sb.length; i++) if (typeof sb[i] === "string" && KIND_ALIASES[sb[i]]) sb[i] = KIND_ALIASES[sb[i]];
+  }
+}
+function validateConfig(value) {
+  const is = new Issues();
+  if (!isObj(value)) return ["must be a JSON object (see https://checkbox.site/docs/guides/ci#config)"];
+  is.keys("", value, ["$schema", "merchant", "jurisdictions", "plans", "notices", "merge_tags", "env", "stripe_links_kept", "checks", "coverage"]);
+  const env2 = value.env;
+  if (env2 !== void 0 && (!isObj(env2) || !Object.entries(env2).every(([k, v]) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(k) && typeof v === "string" && v.length <= 2e3))) is.add("env", `must be an object of environment variable values like { "NEXT_PUBLIC_APP_URL": "https://example.com" } (got ${show(env2)})`);
+  const kept = value.stripe_links_kept;
+  if (kept !== void 0) {
+    if (!Array.isArray(kept)) is.add("stripe_links_kept", `must be a list like [{ "id": "plink_\u2026", "reason": "the owner keeps the 7-day link for the partner campaign" }] (got ${show(kept)})`);
+    else
+      kept.forEach((k, i) => {
+        if (!isObj(k)) return is.add(`stripe_links_kept[${i}]`, `must be an object with id and reason (got ${show(k)})`);
+        is.keys(`stripe_links_kept[${i}]`, k, ["id", "reason"]);
+        if (typeof k.id !== "string" || !/^plink_\w+$/.test(k.id)) is.add(`stripe_links_kept[${i}].id`, `must be a Payment Link id (plink_\u2026) (got ${show(k.id)})`);
+        if (typeof k.reason !== "string" || k.reason.trim().length < 3 || k.reason.length > 500) is.add(`stripe_links_kept[${i}].reason`, "must say why the owner keeps it (3 to 500 characters)");
+      });
+  }
+  const cov = value.coverage;
+  if (cov !== void 0 && cov !== false) {
+    if (!isObj(cov)) is.add("coverage", `must be false or an object like { "ignore": ["scripts/**"] } (got ${show(cov)})`);
+    else {
+      is.keys("coverage", cov, ["ignore"]);
+      if (cov.ignore !== void 0 && (!Array.isArray(cov.ignore) || !cov.ignore.every((g) => typeof g === "string" && g.trim()))) is.add("coverage.ignore", `must be a list of file globs like ["scripts/**", "admin/*.ts"] (got ${show(cov.ignore)})`);
+    }
+  }
+  if (value.$schema !== void 0 && typeof value.$schema !== "string") is.add("$schema", "must be a string");
+  const m = value.merchant;
+  if (m !== void 0) {
+    if (!isObj(m)) is.add("merchant", `must be an object (got ${show(m)})`);
+    else {
+      is.keys("merchant", m, ["name", "cancel_url", "support_contact"]);
+      is.str("merchant.name", m.name, { max: 200 });
+      is.str("merchant.cancel_url", m.cancel_url, { pattern: /^https?:\/\/\S+$/, patternHint: "an http(s) URL" });
+      is.str("merchant.support_contact", m.support_contact, { max: 300 });
+    }
+  }
+  const j = value.jurisdictions;
+  if (j !== void 0 && j !== "all") {
+    if (!Array.isArray(j) || !j.length || !j.every((x) => typeof x === "string" && /^(?:US-)?[A-Z]{2,3}$|^US-FED$|^US-NYC$/i.test(x))) {
+      is.add("jurisdictions", `must be "all" or a list of codes like ["US-CA", "US-NY"] (got ${show(j)})`);
+    }
+  }
+  const planNames = /* @__PURE__ */ new Set();
+  const plans = value.plans;
+  if (plans !== void 0) {
+    if (!Array.isArray(plans)) is.add("plans", `must be an array (got ${show(plans)})`);
+    else
+      plans.forEach((p, i) => {
+        const at = `plans[${i}]`;
+        if (!isObj(p)) return is.add(at, `must be an object (got ${show(p)})`);
+        is.keys(at, p, PLAN_KEYS);
+        if (is.str(`${at}.name`, p.name, { required: true, max: 200 })) {
+          if (planNames.has(p.name)) is.add(`${at}.name`, `duplicates another plan's name (${show(p.name)})`);
+          planNames.add(p.name);
+        }
+        if (p.price === void 0 && p.amount === void 0) is.add(at, 'needs "price" (major units, e.g. 19.99) or "amount" (minor units, e.g. 1999)');
+        if (p.price !== void 0 && p.amount !== void 0) is.add(at, 'has "price" and "amount": give only one');
+        is.money(`${at}.price`, p.price);
+        is.int(`${at}.amount`, p.amount, 0, 1e8);
+        if (p.currency !== void 0) is.str(`${at}.currency`, p.currency, { pattern: /^[A-Za-z]{3}$/, patternHint: 'a 3-letter ISO currency code like "usd"' });
+        is.oneOf(`${at}.interval`, p.interval, INTERVALS, true);
+        is.int(`${at}.interval_count`, p.interval_count, 1, 365);
+        is.int(`${at}.trial_days`, p.trial_days, 0, 730);
+        is.money(`${at}.intro_price`, p.intro_price);
+        is.int(`${at}.intro_amount`, p.intro_amount, 0, 1e8);
+        is.int(`${at}.intro_periods`, p.intro_periods, 1, 120);
+        if (p.intro_percent_off !== void 0 && !(typeof p.intro_percent_off === "number" && p.intro_percent_off > 0 && p.intro_percent_off < 100)) is.add(`${at}.intro_percent_off`, `must be a number above 0 and below 100 (got ${show(p.intro_percent_off)})`);
+        is.int(`${at}.intro_amount_off`, p.intro_amount_off, 1, 1e8);
+        if ([p.intro_price, p.intro_amount, p.intro_percent_off, p.intro_amount_off].filter((v) => v !== void 0).length > 1) is.add(at, "gives the intro terms more than one way: use one of intro_price, intro_amount, intro_percent_off, intro_amount_off");
+        is.oneOf(`${at}.cancel_timing`, p.cancel_timing, ["period_end", "immediately"]);
+        if (p.stripe_price_ids !== void 0 && !(Array.isArray(p.stripe_price_ids) && p.stripe_price_ids.length > 0 && p.stripe_price_ids.every((x) => typeof x === "string" && /^price_\w+$/.test(x)))) is.add(`${at}.stripe_price_ids`, `must be a list of Stripe Price ids like "price_1Abc\u2026" (got ${show(p.stripe_price_ids)})`);
+      });
+  }
+  const planCount = Array.isArray(plans) ? plans.length : 0;
+  const notices = value.notices;
+  if (notices !== void 0) {
+    if (!isObj(notices)) is.add("notices", `must be an object like { "sent_by_checkbox": true } (got ${show(notices)})`);
+    else {
+      is.keys("notices", notices, ["sent_by_checkbox"]);
+      const sb = notices.sent_by_checkbox;
+      if (sb !== true && !(Array.isArray(sb) && sb.length && sb.every((k) => typeof k === "string" && EMAIL_KINDS.includes(k)))) {
+        is.add("notices.sent_by_checkbox", `must be true (every email Checkbox Notices sends) or a list of kinds (${EMAIL_KINDS.join(", ")}) (got ${show(sb)})`);
+      }
+    }
+  }
+  const mergeTags = (at, m2) => {
+    if (m2 === void 0) return;
+    if (!isObj(m2) || !Object.keys(m2).length) return is.add(at, `must be an object mapping each merge tag to its value, like { "price": "plan.price", "interval": "plan.interval", "first_name": "Sam" } (got ${show(m2)})`);
+    for (const [k, v] of Object.entries(m2)) {
+      if (!/^[A-Za-z_][\w.-]{0,60}$/.test(k)) is.add(`${at}.${k}`, "is not a merge tag name (letters, digits, _ . -; the name inside {{ }})");
+      else if (typeof v !== "string" || v.length > 500) is.add(`${at}.${k}`, `must be a string: a sample value, or one of ${MERGE_TAG_FIELDS.join(", ")} (got ${show(v)})`);
+    }
+  };
+  mergeTags("merge_tags", value.merge_tags);
+  const checks = value.checks;
+  if (!isObj(checks)) {
+    is.add("checks", checks === void 0 ? "is required (an object with stripe_checkout, disclosures, pages, emails and/or notice_schedule)" : `must be an object (got ${show(checks)})`);
+    return is.list;
+  }
+  is.keys("checks", checks, ["stripe_checkout", "disclosures", "pages", "emails", "notice_schedule"]);
+  const names = /* @__PURE__ */ new Set();
+  const entries = (key, each, needsPlan, severalPlans = false) => {
+    const list2 = checks[key];
+    if (list2 === void 0) return;
+    if (!Array.isArray(list2)) return is.add(`checks.${key}`, `must be an array (got ${show(list2)})`);
+    list2.forEach((e, i) => {
+      const at = `checks.${key}[${i}]`;
+      if (!isObj(e)) return is.add(at, `must be an object (got ${show(e)})`);
+      if (is.str(`${at}.name`, e.name, { required: true, max: 120 })) {
+        if (names.has(e.name)) is.add(`${at}.name`, `duplicates another check's name (${show(e.name)}); names must be unique`);
+        names.add(e.name);
+      }
+      if (severalPlans && Array.isArray(e.plan)) {
+        if (!e.plan.length || !e.plan.every((n) => typeof n === "string")) is.add(`${at}.plan`, `must be a plan name, a list of plan names or "all" (got ${show(e.plan)})`);
+        else for (const n of e.plan) if (!planNames.has(n)) is.add(`${at}.plan`, `names no plan in "plans" (${show(n)}; plans: ${[...planNames].map((x) => JSON.stringify(x)).join(", ")})`);
+      } else if (severalPlans && e.plan === "all" && !planNames.has("all")) {
+        if (!planCount) is.add(`${at}.plan`, 'is "all", but "plans" is empty: add the plans to "plans"');
+      } else if (e.plan !== void 0) {
+        if (is.str(`${at}.plan`, e.plan) && !planNames.has(e.plan)) {
+          is.add(`${at}.plan`, planCount ? `names no plan in "plans" (${show(e.plan)}; plans: ${[...planNames].map((n) => JSON.stringify(n)).join(", ")})` : `names a plan, but "plans" is empty: add the plan to "plans"`);
+        }
+      } else if (needsPlan && planCount > 1) {
+        is.add(`${at}.plan`, `is required when "plans" has several plans (one of ${[...planNames].map((n) => JSON.stringify(n)).join(", ")})`);
+      } else if (needsPlan === "always" && !planCount) {
+        is.add(at, 'needs the plan it describes: add it to "plans" (name, price, interval, trial_days)');
+      }
+      if (e.covers !== void 0 && (!Array.isArray(e.covers) || !e.covers.every((c) => typeof c === "string" && /^[^#]+(?:#[1-9]\d*)?$/.test(c)))) {
+        is.add(`${at}.covers`, `must be a list of files, or "file#n" for the n-th call (got ${show(e.covers)})`);
+      }
+      each(at, e);
+    });
+  };
+  entries(
+    "stripe_checkout",
+    (at, e) => {
+      is.keys(at, e, ["name", "plan", "params", "file", "module", "args", "source", "call", "covers", "strict"]);
+      if (e.strict !== void 0 && typeof e.strict !== "boolean") is.add(`${at}.strict`, `must be true or false (got ${show(e.strict)})`);
+      is.exactlyOne(at, e, ["params", "file", "module", "source"]);
+      if (e.params !== void 0 && !isObj(e.params)) is.add(`${at}.params`, `must be the params object (got ${show(e.params)})`);
+      if (e.file !== void 0) is.path(`${at}.file`, e.file);
+      if (e.source !== void 0) is.path(`${at}.source`, e.source);
+      if (e.module !== void 0) is.module(`${at}.module`, e.module);
+      const sells = Array.isArray(e.plan) ? new Set(e.plan.filter((n) => typeof n === "string")) : e.plan === "all" && !planNames.has("all") ? planNames : void 0;
+      is.args(`${at}.args`, e.args, sells);
+      if (e.args !== void 0 && e.module === void 0) is.add(`${at}.args`, 'only applies with "module"');
+      is.int(`${at}.call`, e.call, 1, 100);
+      if (e.call !== void 0 && e.source === void 0) is.add(`${at}.call`, 'only applies with "source"');
+    },
+    false,
+    true
+  );
+  entries(
+    "disclosures",
+    (at, e) => {
+      is.keys(at, e, ["name", "plan", "text", "file", "button_text", "placement", "consent", "covers"]);
+      is.exactlyOne(at, e, ["text", "file"]);
+      if (e.text !== void 0) is.str(`${at}.text`, e.text, { max: 5e3 });
+      if (e.file !== void 0) is.path(`${at}.file`, e.file);
+      if (e.button_text !== void 0) is.str(`${at}.button_text`, e.button_text, { max: 200 });
+      for (const k of ["placement", "consent"]) if (e[k] !== void 0 && !isObj(e[k])) is.add(`${at}.${k}`, `must be an object (got ${show(e[k])})`);
+    },
+    "always"
+  );
+  entries(
+    "pages",
+    (at, e) => {
+      is.keys(at, e, ["name", "plan", "file", "url", "kind", "covers", "source"]);
+      is.exactlyOne(at, e, ["file", "url"]);
+      if (e.file !== void 0) is.path(`${at}.file`, e.file);
+      if (e.source !== void 0) is.path(`${at}.source`, e.source);
+      if (e.url !== void 0) is.str(`${at}.url`, e.url, { pattern: /^https?:\/\/\S+$/, patternHint: "an http(s) URL" });
+      is.oneOf(`${at}.kind`, e.kind, PAGE_KINDS);
+    },
+    // Round 21 (pilot 20, ci-pr-agent): a page with no "plan" is checked against every plan (a multi-plan pricing page).
+    false,
+    true
+  );
+  entries(
+    "emails",
+    (at, e) => {
+      is.keys(at, e, ["name", "plan", "kind", "subject", "file", "text", "html", "module", "args", "previous_price", "merge_tags"]);
+      mergeTags(`${at}.merge_tags`, e.merge_tags);
+      is.oneOf(`${at}.kind`, e.kind, EMAIL_KINDS, true);
+      is.exactlyOne(at, e, ["file", "text", "html", "module"], [["text", "html"]]);
+      if (e.file !== void 0) {
+        is.path(`${at}.file`, e.file);
+        if (typeof e.file === "string" && !/\.(?:html?|txt|md|text|eml)$/i.test(e.file)) {
+          is.add(`${at}.file`, `must be a .html, .txt or .md file (got ${show(e.file)}); for React Email / MJML components use "module" with an export that returns { subject, html }`);
+        }
+      }
+      if (e.subject !== void 0) is.str(`${at}.subject`, e.subject, { max: 500 });
+      if (e.text !== void 0) is.str(`${at}.text`, e.text);
+      if (e.html !== void 0) is.str(`${at}.html`, e.html);
+      if (e.module !== void 0) is.module(`${at}.module`, e.module);
+      is.args(`${at}.args`, e.args);
+      if ((e.text !== void 0 || e.html !== void 0) && e.subject === void 0) is.add(`${at}.subject`, 'is required with inline "text" / "html"');
+      is.money(`${at}.previous_price`, e.previous_price);
+    },
+    "always",
+    true
+  );
+  const ns = checks.notice_schedule;
+  if (ns !== void 0 && typeof ns !== "boolean") is.add("checks.notice_schedule", `must be true or false (got ${show(ns)})`);
+  if (ns === true && !planCount) is.add("checks.notice_schedule", 'needs at least one plan in "plans" (the schedule depends on the price, interval and trial)');
+  const total = ["stripe_checkout", "disclosures", "pages", "emails"].reduce((n, k) => n + (Array.isArray(checks[k]) ? checks[k].length : 0), 0) + (ns === true ? 1 : 0);
+  if (!total && !is.list.length) is.add("checks", 'lists nothing to check: add stripe_checkout, disclosures, pages or emails entries (or "notice_schedule": true)');
+  return is.list;
+}
+function entryLine(raw, name) {
+  const needle = new RegExp(`"name"\\s*:\\s*${JSON.stringify(name).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`);
+  const lines = raw.split("\n");
+  const i = lines.findIndex((l) => needle.test(l));
+  return i >= 0 ? i + 1 : 1;
+}
+var CONFIG_FILES, SCHEMA_URL, INTERVALS, EMAIL_KINDS, PAGE_KINDS, MERGE_TAG_FIELDS, ConfigError, KIND_ALIASES, isObj, show, TODO, Issues, PLAN_KEYS;
+var init_config2 = __esm({
+  "packages/cli/src/ci/config.ts"() {
+    "use strict";
+    CONFIG_FILES = ["checkbox.json", ".checkbox.json"];
+    SCHEMA_URL = "https://checkbox.site/schemas/checkbox.json";
+    INTERVALS = ["day", "week", "month", "year"];
+    EMAIL_KINDS = ["acknowledgment", "trial_reminder", "renewal_reminder", "price_change", "annual_terms", "charge_notice", "cancellation_confirmation"];
+    PAGE_KINDS = ["checkout", "pricing", "terms"];
+    MERGE_TAG_FIELDS = ["plan.price", "plan.amount", "plan.interval", "plan.name", "plan.trial_days", "plan.currency", "merchant.name", "merchant.cancel_url", "merchant.support_contact"];
+    ConfigError = class extends Error {
+      constructor(file, issues) {
+        super(`${file}: ${issues.length === 1 ? issues[0] : `${issues.length} problems:
+  - ${issues.join("\n  - ")}`}`);
+        this.file = file;
+        this.issues = issues;
+        this.name = "ConfigError";
+      }
+    };
+    KIND_ALIASES = { trial_ending: "trial_reminder" };
+    isObj = (v) => !!v && typeof v === "object" && !Array.isArray(v);
+    show = (v) => typeof v === "string" ? JSON.stringify(v) : Array.isArray(v) ? "an array" : v === null ? "null" : typeof v === "object" ? "an object" : String(v);
+    TODO = /\bTODO\b/;
+    Issues = class {
+      list = [];
+      add(path, msg2) {
+        this.list.push(`${path} ${msg2}`);
+      }
+      keys(path, o, allowed) {
+        for (const k of Object.keys(o)) {
+          if (k === "$comment" || allowed.includes(k)) continue;
+          const near2 = allowed.find((a) => a.replace(/_/g, "") === k.toLowerCase().replace(/[-_]/g, "") || a.startsWith(k) || k.startsWith(a));
+          this.add(`${path ? `${path}.` : ""}${k}`, `is not a known key${near2 ? ` (did you mean "${near2}"?)` : ""}; allowed: ${allowed.join(", ")}`);
+        }
+      }
+      str(path, v, opts = {}) {
+        if (v === void 0) {
+          if (opts.required) this.add(path, "is required");
+          return false;
+        }
+        if (typeof v !== "string" || !v.trim()) {
+          this.add(path, `must be a non-empty string (got ${show(v)})`);
+          return false;
+        }
+        if (TODO.test(v)) {
+          this.add(path, `still has a TODO placeholder (${show(v)}): fill it in`);
+          return false;
+        }
+        if (opts.max && v.length > opts.max) this.add(path, `must be at most ${opts.max} characters`);
+        if (opts.pattern && !opts.pattern.test(v)) this.add(path, `must be ${opts.patternHint} (got ${show(v)})`);
+        return true;
+      }
+      int(path, v, min, max) {
+        if (v === void 0) return;
+        if (typeof v !== "number" || !Number.isInteger(v) || v < min || v > max) this.add(path, `must be an integer from ${min} to ${max} (got ${show(v)})`);
+      }
+      money(path, v) {
+        if (v === void 0) return;
+        if (typeof v === "string" && TODO.test(v)) return this.add(path, `still has a TODO placeholder (${show(v)}): fill it in`);
+        const n = typeof v === "string" ? /^\s*[$€£]?\s*\d+(?:\.\d+)?\s*$/.test(v) ? Number(v.replace(/[^\d.]/g, "")) : NaN : v;
+        if (typeof n !== "number" || !Number.isFinite(n) || n < 0) this.add(path, `must be a price in major units, e.g. 19.99 (got ${show(v)})`);
+      }
+      oneOf(path, v, values, required = false) {
+        if (v === void 0) {
+          if (required) this.add(path, `is required: one of ${values.join(", ")}`);
+          return;
+        }
+        if (typeof v !== "string" || !values.includes(v)) this.add(path, `must be one of ${values.join(", ")} (got ${show(v)})`);
+      }
+      exactlyOne(path, o, keys, allowTogether = []) {
+        const given = keys.filter((k) => o[k] !== void 0);
+        if (!given.length) return this.add(path, `needs one of: ${keys.map((k) => `"${k}"`).join(", ")}`);
+        if (given.length > 1 && !allowTogether.some((set) => given.every((g) => set.includes(g)))) this.add(path, `has ${given.map((k) => `"${k}"`).join(" and ")}: give only one`);
+      }
+      path(path, v) {
+        if (!this.str(path, v)) return;
+        if (/^[a-z][a-z0-9+.-]*:\/\//i.test(v)) this.add(path, `must be a path relative to the config file (got a URL${path.endsWith(".file") ? '; use "url" for pages' : ""})`);
+      }
+      module(path, v) {
+        if (!this.str(path, v)) return;
+        if (!/^[^#]+\.(?:[cm]?[jt]s|[jt]sx)(?:#[A-Za-z_$][\w$]*)?$/.test(v)) this.add(path, `must be "path/to/file.(js|mjs|ts|tsx)#exportName" (got ${show(v)})`);
+      }
+      args(path, v, plans) {
+        if (v === void 0 || Array.isArray(v)) return;
+        if (plans && isObj(v)) {
+          for (const [k, a] of Object.entries(v)) {
+            if (!plans.has(k)) this.add(`${path}.${k}`, `names no plan this entry sells (plans: ${[...plans].map((n) => JSON.stringify(n)).join(", ")})`);
+            else if (!Array.isArray(a)) this.add(`${path}.${k}`, `must be an array of arguments for the exported function (got ${show(a)})`);
+          }
+          return;
+        }
+        this.add(path, `must be an array of arguments for the exported function${plans ? ", or an object of plan name \u2192 arguments" : ""} (got ${show(v)})`);
+      }
+    };
+    PLAN_KEYS = ["name", "price", "amount", "currency", "interval", "interval_count", "trial_days", "intro_price", "intro_amount", "intro_percent_off", "intro_amount_off", "intro_periods", "cancel_timing", "stripe_price_ids"];
+  }
+});
+
+// packages/cli/src/ci/render-entry.ts
+import { existsSync as existsSync6, readFileSync as readFileSync6 } from "node:fs";
+import { join as join6, posix } from "node:path";
+function balanced(text, open2) {
+  const pairs = { "(": ")", "{": "}", "[": "]" };
+  const stack = [];
+  for (let i = open2; i < text.length; i++) {
+    const c = text[i];
+    if (c === '"' || c === "'" || c === "`") {
+      i = skipString(text, i);
+      continue;
+    }
+    if (c === "/" && text[i + 1] === "/") {
+      const nl = text.indexOf("\n", i);
+      i = nl < 0 ? text.length : nl;
+      continue;
+    }
+    if (c === "/" && text[i + 1] === "*") {
+      const e = text.indexOf("*/", i + 2);
+      i = e < 0 ? text.length : e + 1;
+      continue;
+    }
+    if (pairs[c]) stack.push(pairs[c]);
+    else if (c === ")" || c === "}" || c === "]") {
+      if (stack.pop() !== c) return void 0;
+      if (!stack.length) return { inner: text.slice(open2 + 1, i), end: i };
+    }
+  }
+  return void 0;
+}
+function skipString(text, i) {
+  const q2 = text[i];
+  for (let j = i + 1; j < text.length; j++) {
+    const c = text[j];
+    if (c === "\\") j++;
+    else if (q2 === "`" && c === "$" && text[j + 1] === "{") {
+      const b = balanced(text, j + 1);
+      if (!b) return text.length;
+      j = b.end;
+    } else if (c === q2) return j;
+    else if (q2 !== "`" && c === "\n") return j;
+  }
+  return text.length;
+}
+function splitTop(text, sep = ",") {
+  const out = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (c === '"' || c === "'" || c === "`") i = skipString(text, i);
+    else if (c === "(" || c === "{" || c === "[") depth++;
+    else if (c === ")" || c === "}" || c === "]") depth--;
+    else if (c === sep && depth === 0) {
+      out.push(text.slice(start, i));
+      start = i + 1;
+    }
+  }
+  out.push(text.slice(start));
+  return out.map((s2) => s2.trim()).filter(Boolean);
+}
+function importsOf(root, file, text) {
+  const out = /* @__PURE__ */ new Map();
+  for (const m of text.matchAll(/(?:^|\n)\s*import\s+(?!type\s)([\s\S]*?)\s+from\s*['"]([^'"]+)['"]/g)) {
+    const clause = m[1].trim();
+    const spec = m[2];
+    const target = resolveImport(root, file, spec);
+    const add = (local, imported) => out.set(local, { spec, imported, ...target ? { file: target } : {} });
+    const ns = /\*\s+as\s+([A-Za-z_$][\w$]*)/.exec(clause);
+    if (ns) add(ns[1], "*");
+    const def = /^([A-Za-z_$][\w$]*)\s*(?:,|$)/.exec(clause);
+    if (def) add(def[1], "default");
+    const named = /\{([^}]*)\}/.exec(clause);
+    if (named) {
+      for (const part of named[1].split(",")) {
+        const p = part.trim();
+        if (!p || /^type\s/.test(p)) continue;
+        const am = /^([A-Za-z_$][\w$]*)(?:\s+as\s+([A-Za-z_$][\w$]*))?$/.exec(p);
+        if (am) add(am[2] ?? am[1], am[1]);
+      }
+    }
+  }
+  return out;
+}
+function exprFrom(text, i) {
+  let depth = 0;
+  for (let j = i; j < text.length; j++) {
+    const c = text[j];
+    if (c === '"' || c === "'" || c === "`") j = skipString(text, j);
+    else if (c === "(" || c === "{" || c === "[") depth++;
+    else if (c === ")" || c === "}" || c === "]") {
+      if (depth === 0) return text.slice(i, j).trim();
+      depth--;
+    } else if ((c === ";" || c === "\n") && depth === 0) {
+      const before = text.slice(i, j).trimEnd();
+      if (c === "\n" && /[?:|&+\-*/,=(]$/.test(before)) continue;
+      if (c === "\n" && /^\s*[?:.|&]/.test(text.slice(j + 1, j + 40))) continue;
+      return text.slice(i, j).trim();
+    }
+  }
+  return text.slice(i).trim();
+}
+function localsBefore(text, before) {
+  const out = /* @__PURE__ */ new Map();
+  for (const m of text.slice(0, before).matchAll(/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::[^=\n]+?)?=(?!=)\s*/g)) out.set(m[1], exprFrom(text, m.index + m[0].length));
+  return out;
+}
+function rewrite(expr, ctx, depth = 0) {
+  const e = expr.trim();
+  if (depth > 4 || /\bawait\b|=>|\bfunction\b|\bthis\b/.test(e)) return void 0;
+  if (e.startsWith("{") && balanced(e, 0)?.end === e.length - 1) return rewriteObject(balanced(e, 0).inner, ctx, depth);
+  let out = "";
+  let ok = true;
+  for (let i = 0; i < e.length; ) {
+    const c = e[i];
+    if (c === '"' || c === "'" || c === "`") {
+      const end = skipString(e, i);
+      const str3 = e.slice(i, end + 1);
+      if (c === "`" && str3.includes("${")) {
+        let t = "";
+        for (let j = 0; j < str3.length; j++) {
+          if (str3[j] === "\\") {
+            t += str3.slice(j, j + 2);
+            j++;
+          } else if (str3[j] === "$" && str3[j + 1] === "{") {
+            const b = balanced(str3, j + 1);
+            const inner = rewrite(b.inner, ctx, depth + 1);
+            if (inner === void 0) ok = false;
+            t += `\${${inner ?? "undefined"}}`;
+            j = b.end;
+          } else t += str3[j];
+        }
+        out += t;
+      } else out += str3;
+      i = end + 1;
+      continue;
+    }
+    IDENT.lastIndex = i;
+    const m = /[A-Za-z_$]/.test(c) && !/[\w$]/.test(e[i - 1] ?? "") ? IDENT.exec(e) : null;
+    if (!m) {
+      out += c;
+      i++;
+      continue;
+    }
+    const name = m[0];
+    i += name.length;
+    const prev = out.trimEnd().slice(-1);
+    if (prev === "." || out.trimEnd().endsWith("?.")) {
+      out += name;
+      continue;
+    }
+    if (/^\s*:/.test(e.slice(i)) && /[{,]$/.test(out.trimEnd())) {
+      out += name;
+      continue;
+    }
+    const v = valueOf(name, ctx, depth);
+    if (v === void 0) {
+      ok = false;
+      out += "undefined";
+    } else out += v;
+  }
+  return ok ? out : void 0;
+}
+function valueOf(name, ctx, depth) {
+  if (name === ctx.planVar) return "plan(name)";
+  if (GLOBALS.has(name)) return name;
+  if (ctx.imports.has(name)) return name;
+  const init = ctx.locals.get(name);
+  if (init !== void 0) {
+    const saved = ctx.runtime;
+    ctx.runtime = /* @__PURE__ */ new Set();
+    const v = rewrite(init, ctx, depth + 1);
+    ctx.runtime = saved;
+    if (v !== void 0) return /^[\w$.]+(?:\([^()]*\))?$|^'[^']*'$|^"[^"]*"$|^\d+$/.test(v) ? v : `(${v})`;
+  }
+  ctx.runtime.add(name);
+  return void 0;
+}
+function rewriteObject(body, ctx, depth) {
+  const props = [];
+  for (const p of splitTop(body)) {
+    if (p.startsWith("...")) {
+      const v2 = rewrite(p.slice(3), ctx, depth + 1);
+      if (v2 !== void 0) props.push(`...${v2}`);
+      continue;
+    }
+    const kv = /^((?:[A-Za-z_$][\w$]*|'[^']*'|"[^"]*"|\[[^\]]+\]))\s*:\s*([\s\S]+)$/.exec(p);
+    if (kv) {
+      const v2 = rewrite(kv[2], ctx, depth + 1);
+      if (v2 !== void 0) props.push(`${kv[1]}: ${v2}`);
+      continue;
+    }
+    if (/^[A-Za-z_$][\w$]*$/.test(p)) {
+      const v2 = valueOf(p, ctx, depth);
+      if (v2 !== void 0) props.push(v2 === p ? p : `${p}: ${v2}`);
+      continue;
+    }
+    const v = rewrite(p, ctx, depth + 1);
+    if (v !== void 0) props.push(v);
+  }
+  return props.length ? `{ ${props.join(", ")} }` : "{}";
+}
+function renderCallFor(root, file, line2, planNames, planFile) {
+  let text;
+  try {
+    text = readFileSync6(join6(root, file), "utf8");
+  } catch {
+    return void 0;
+  }
+  const lineStart2 = text.split("\n").slice(0, line2 - 1).join("\n").length;
+  const at = text.slice(lineStart2).search(/checkout\s*\.\s*sessions\s*\.\s*create\s*\(/);
+  if (at < 0) return void 0;
+  const open2 = text.indexOf("(", lineStart2 + at);
+  const outer = balanced(text, open2);
+  if (!outer) return void 0;
+  const call = /^\s*(?:await\s+)?([A-Za-z_$][\w$]*)\s*\(/.exec(outer.inner);
+  if (!call) return void 0;
+  const fn = call[1];
+  const innerOpen = open2 + 1 + call[0].length - 1;
+  const args = balanced(text, innerOpen);
+  if (!args || text.slice(args.end + 1, outer.end).trim()) return void 0;
+  const imports = importsOf(root, file, text);
+  const fnImport = imports.get(fn);
+  const fnFile = fnImport?.file ?? (new RegExp(`export\\s+(?:async\\s+)?function\\s+${fn}\\b|export\\s+const\\s+${fn}\\b`).test(text) ? file : void 0);
+  if (!fnFile) return void 0;
+  const locals = localsBefore(text, open2);
+  const planImports = [...imports.entries()].filter(([, v]) => v.file && planFile.test(v.file));
+  if (!planImports.length) return void 0;
+  const usesPlans = (expr) => planImports.find(([local]) => new RegExp(`(?<![\\w$.])${local.replace(/\$/g, "\\$")}(?![\\w$])`).test(expr));
+  const parts = splitTop(args.inner);
+  let planVar;
+  let plansFile;
+  let planArgIndex = -1;
+  parts.forEach((p, i) => {
+    const init = /^[A-Za-z_$][\w$]*$/.test(p) ? locals.get(p) : void 0;
+    const hit = init !== void 0 ? usesPlans(init) : usesPlans(p);
+    if (!hit || planArgIndex >= 0) return;
+    planArgIndex = i;
+    plansFile = hit[1].file;
+    if (init !== void 0) planVar = p;
+  });
+  if (planArgIndex < 0 || !plansFile) return void 0;
+  let plansText = "";
+  try {
+    plansText = readFileSync6(join6(root, plansFile), "utf8");
+  } catch {
+    return void 0;
+  }
+  if (!planNames.length || !planNames.every((n) => new RegExp(`\\bname\\s*:\\s*(['"\`])${n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\1`).test(plansText))) return void 0;
+  const ctx = { imports, locals, ...planVar ? { planVar } : {}, runtime: /* @__PURE__ */ new Set() };
+  const rendered = parts.map((p, i) => i === planArgIndex ? "plan(name)" : rewrite(p, ctx) ?? "undefined");
+  const expression = `${fn}(${rendered.join(", ")})`;
+  const reads = (local) => new RegExp(`(?<![\\w$.])${local.replace(/\$/g, "\\$")}(?![\\w$])`).test(expression.replace(/(['"])(?:\\.|(?!\1).)*\1/g, "''"));
+  const used = new Map([...imports.entries()].filter(([local]) => local === fn || reads(local)));
+  if (!fnImport) used.set(fn, { spec: `./${posix.basename(file)}`, imported: fn, file });
+  return { exportName: "checkoutParams", expression, imports: used, plansFile, runtime: [...ctx.runtime], fn, fnFile };
+}
+function renderFilePath(root, fnFile) {
+  const dir = posix.dirname(fnFile.split("\\").join("/"));
+  const ext = /\.(?:[cm]?js|jsx)$/.test(fnFile) ? ".mjs" : ".ts";
+  for (const name of ["checkbox-ci", "checkbox-ci-checkout", "checkbox-ci-render"]) {
+    const rel2 = dir === "." ? `${name}${ext}` : `${dir}/${name}${ext}`;
+    if (!existsSync6(join6(root, rel2))) return rel2;
+    try {
+      if (readFileSync6(join6(root, rel2), "utf8").includes(RENDER_MARKER)) return rel2;
+    } catch {
+    }
+  }
+  return `${dir === "." ? "" : `${dir}/`}checkbox-ci-${Date.now().toString(36)}${ext}`;
+}
+function specFrom(fromFile, imp) {
+  if (!imp.file) return imp.spec;
+  let rel2 = posix.relative(posix.dirname(fromFile), imp.file);
+  if (!rel2.startsWith(".")) rel2 = `./${rel2}`;
+  return /\.[cm]?js$/.test(imp.spec) ? rel2.replace(/\.[cm]?tsx?$/, ".js") : rel2.replace(/\.(?:[cm]?[jt]sx?)$/, "").replace(/\/index$/, "");
+}
+function renderFile(path, calls) {
+  const ts = path.endsWith(".ts");
+  const byFile = /* @__PURE__ */ new Map();
+  const plansFile = calls[0].plansFile;
+  const plansSpec = specFrom(path, { spec: plansFile, imported: "*", file: plansFile });
+  const refs2 = [];
+  const bodies = [];
+  const exports = /* @__PURE__ */ new Set();
+  const taken = /* @__PURE__ */ new Set(["plan", "plansModule", ...calls.flatMap((c) => [...c.imports.keys()])]);
+  for (const c of calls) {
+    for (const [local, imp] of c.imports) {
+      const spec = specFrom(path, imp);
+      const entry = byFile.get(spec) ?? { names: /* @__PURE__ */ new Set() };
+      if (imp.imported === "*") entry.ns = local;
+      else if (imp.imported === "default") entry.def = local;
+      else entry.names.add(imp.imported === local ? local : `${imp.imported} as ${local}`);
+      byFile.set(spec, entry);
+    }
+    let name = c.exportName;
+    for (let i = 2; exports.has(name) || taken.has(name); i++) name = `${taken.has(c.exportName) ? "checkboxCheckoutParams" : c.exportName}${i}`;
+    exports.add(name);
+    refs2.push(`${path}#${name}`);
+    const left = c.runtime.length ? `
+ * ${c.runtime.join(", ")} ${c.runtime.length === 1 ? "is" : "are"} read from the request there, so ${c.runtime.length === 1 ? "it is" : "they are"} left out here.` : "";
+    bodies.push(`/**
+ * The params ${c.source} passes to stripe.checkout.sessions.create, for the plan named \`name\`.${left}
+ */
+export function ${name}(name${ts ? ": string" : ""}) {
+  return ${c.expression};
+}`);
+  }
+  const imports = [`import * as plansModule from '${plansSpec}';`];
+  for (const [spec, e] of byFile) {
+    if (e.ns) imports.push(`import * as ${e.ns} from '${spec}';`);
+    const named = [...e.names].sort();
+    if (e.def || named.length) imports.push(`import ${[e.def, named.length ? `{ ${named.join(", ")} }` : void 0].filter(Boolean).join(", ")} from '${spec}';`);
+  }
+  const fns = [...new Set(calls.map((c) => `${c.fn} (${c.fnFile})`))].join(", ");
+  const content = `// ${RENDER_MARKER}. \`checkbox ci\` imports this file (checkbox.json "module" entries) to render the exact
+// Stripe Checkout Session params your app sends, one plan at a time, with the app's own params function:
+// ${fns}.
+// It runs offline on every check: nothing is sent to Stripe. If the Checkout route changes how it builds the params,
+// change this file to match (\`checkbox ci init\` keeps it unless you pass --force).
+${imports.join("\n")}
+
+/** The plan named \`name\` in ${plansFile} (checkbox.json uses the same plan names). */
+${ts ? "// eslint-disable-next-line @typescript-eslint/no-explicit-any\n" : ""}function plan(name${ts ? ": string" : ""})${ts ? ": any" : ""} {
+  const seen = new Set${ts ? "<unknown>" : ""}();
+  const find = (v${ts ? ": unknown" : ""})${ts ? ": unknown" : ""} => {
+    if (!v || typeof v !== 'object' || seen.has(v)) return undefined;
+    seen.add(v);
+    if (${ts ? "(v as { name?: unknown })" : "v"}.name === name) return v;
+    for (const x of Object.values(v)) {
+      const hit = find(x);
+      if (hit) return hit;
+    }
+    return undefined;
+  };
+  const hit = find(plansModule);
+  if (!hit) throw new Error(\`${plansFile} has no plan named "\${name}" (checkbox.json names it)\`);
+  return hit;
+}
+
+${bodies.join("\n\n")}
+`;
+  return { content, refs: refs2 };
+}
+var RENDER_MARKER, GLOBALS, IDENT;
+var init_render_entry = __esm({
+  "packages/cli/src/ci/render-entry.ts"() {
+    "use strict";
+    init_detect();
+    RENDER_MARKER = "Written by `checkbox ci init`";
+    GLOBALS = /* @__PURE__ */ new Set(["undefined", "null", "true", "false", "String", "Number", "Boolean", "Date", "Math", "JSON", "Object", "Array", "URL", "encodeURIComponent", "decodeURIComponent", "process", "new", "typeof", "void", "in", "of", "instanceof", "Intl", "NaN", "Infinity"]);
+    IDENT = /[A-Za-z_$][\w$]*/y;
   }
 });
 
@@ -5798,7 +7894,10 @@ var init_federal = __esm({
         title: "Written authorization for recurring debits from a consumer bank/debit account, with a copy to the consumer",
         summary: "Preauthorized (recurring) electronic fund transfers from a consumer's account \u2014 e.g. a subscription billed to a debit card, prepaid card or bank account (ACH) \u2014 may be authorized only by a writing signed or similarly authenticated by the consumer, and the merchant that obtains the authorization must give the consumer a copy of it.",
         appliesWhen: { paymentMethods: ["debit", "ach"] },
-        checkIds: ["signup.consent.affirmative", "confirmation.email.sent", "confirmation.email.terms"],
+        // Catalog 2026.11.17.1 (round 51, lawyer visitor): not confirmation.email.terms. § 1005.10(b) asks for a copy of the
+        // authorization (confirmation.email.sent), not that an acknowledgment restate the automatic-renewal terms; that duty
+        // is the state acknowledgment rules' (Cal. § 17602(a)(3), N.Y. § 527-a(1)(c) and others).
+        checkIds: ["signup.consent.affirmative", "confirmation.email.sent"],
         severity: "high",
         notes: notes(
           `Applies only when the recurring charge debits a consumer asset account (debit card, prepaid card, ACH); not to credit-card billing. Applied when the site's payment methods include debit or ACH, or are unknown (unknown facts never exclude a requirement). Card acceptance through Stripe and similar processors normally includes debit and prepaid cards, so such merchants should list "debit" among their payment methods.`,
@@ -10417,7 +12516,7 @@ var init_catalog = __esm({
     init_states();
     init_terms();
     init_types3();
-    CATALOG_VERSION = "2026.11.09.3";
+    CATALOG_VERSION = "2026.11.17.1";
     CATALOG = [
       ...FEDERAL_REQUIREMENTS,
       ...CALIFORNIA_REQUIREMENTS,
@@ -10814,6 +12913,13 @@ function sentences(text) {
 function questionRanges(text) {
   return sentences(text).filter((s2) => s2.text.endsWith("?")).map((s2) => [s2.index, s2.index + s2.text.length]);
 }
+function annualDiscountSpan(text, s2) {
+  if (s2.index < 0 || /\btrial\b/i.test(s2.text) || !/\b(?:months?|weeks?)\b/i.test(s2.text) || !/\bfree\b/i.test(s2.text)) return false;
+  const after = text.slice(s2.index + s2.text.length, s2.index + s2.text.length + 60);
+  const before = text.slice(Math.max(0, s2.index - 50), s2.index);
+  if (/\btrial\b/i.test(after.split(/[.\n!?]/)[0] ?? "")) return false;
+  return DISCOUNT_AFTER_RE.test(after) || DISCOUNT_BEFORE_RE.test(before);
+}
 function analyzeTerms(input) {
   const text = normalizeText(input);
   const questions = questionRanges(text);
@@ -10825,7 +12931,8 @@ function analyzeTerms(input) {
   const amounts = findAmounts(text);
   const frequencies = findFrequencies(text);
   const notGuarantee = (spans) => spans.filter((s2) => !/\brisk[\s-]?$/i.test(text.slice(Math.max(0, s2.index - 6), s2.index)));
-  const trialMentions = notGuarantee(stated(splitNegated(text, collect(text, TRIAL_MENTION_PATTERNS)).kept));
+  const notDiscount = (spans) => spans.filter((s2) => !annualDiscountSpan(text, s2));
+  const trialMentions = notDiscount(notGuarantee(stated(splitNegated(text, collect(text, TRIAL_MENTION_PATTERNS)).kept)));
   return {
     text,
     autoRenew: auto.kept,
@@ -10837,7 +12944,7 @@ function analyzeTerms(input) {
     cancelPolicy: stated(collect(text, CANCEL_POLICY_PATTERNS)),
     cancelMethod: stated(collect(text, CANCEL_METHOD_PATTERNS)),
     trialMentions,
-    trialLengths: notGuarantee(stated(findTrialLengths(text))),
+    trialLengths: notDiscount(notGuarantee(stated(findTrialLengths(text)))),
     postTrialCharge: stated(findPostTrialCharges(text, trialMentions)),
     termLengths: findTermLengths(text),
     minimumObligation: collect(text, MINIMUM_OBLIGATION_PATTERNS)
@@ -10906,7 +13013,7 @@ function findDates(input, ref) {
   }
   return out.sort((a, b) => a.index - b.index);
 }
-var ENTITIES, MAX_HTML_CHARS, NUMBER_WORDS, NUM, NUM_OR_A, NOT_FREQ, CURRENCY_PREFIX, AMOUNT, MONEY_PREFIX_RE, MONEY_SUFFIX_RE, FREQ_PER_RE, FREQ_SLASH_RE, FREQ_EACH_RE, FREQ_A_RE, FREQ_EVERY_N_RE, FREQ_ADVERB_RE, FREQ_ANOTHER_RE, FREQ_CYCLE_RE, QUOTA_NOUN_BEFORE_RE, A_FREQ_CONTEXT_RE, brandNameSource, URL_SPAN_RE, BARE_DOMAIN_RE, escapeRe, NEXT_PERIOD_RE, SENTENCE_BREAK_RE, AUTO_RENEW_PATTERNS, UNTIL_CANCELED_PATTERNS, CANCEL_POLICY_PATTERNS, ACCOUNT_PATH, CANCEL_METHOD_PATTERNS, TRIAL_MENTION_PATTERNS, TRIAL_LENGTH_PATTERNS, TRIAL_FIRST_FREE_RE, MONTH_WORD, TRIAL_END_DATE_RE, POST_TRIAL_PATTERNS, TERM_LENGTH_PATTERNS, MINIMUM_OBLIGATION_PATTERNS, MONTHS, MONTH_RE_SRC, DATE_MDY_RE, DATE_DMY_RE, DATE_ISO_RE, DATE_US_RE, RELATIVE_DAYS_RE;
+var ENTITIES, MAX_HTML_CHARS, NUMBER_WORDS, NUM, NUM_OR_A, NOT_FREQ, CURRENCY_PREFIX, AMOUNT, MONEY_PREFIX_RE, MONEY_SUFFIX_RE, FREQ_PER_RE, FREQ_SLASH_RE, FREQ_EACH_RE, FREQ_A_RE, FREQ_EVERY_N_RE, FREQ_ADVERB_RE, FREQ_ANOTHER_RE, FREQ_CYCLE_RE, QUOTA_NOUN_BEFORE_RE, A_FREQ_CONTEXT_RE, brandNameSource, URL_SPAN_RE, BARE_DOMAIN_RE, escapeRe, NEXT_PERIOD_RE, SENTENCE_BREAK_RE, AUTO_RENEW_PATTERNS, UNTIL_CANCELED_PATTERNS, CANCEL_POLICY_PATTERNS, ACCOUNT_PATH, CANCEL_METHOD_PATTERNS, TRIAL_MENTION_PATTERNS, TRIAL_LENGTH_PATTERNS, TRIAL_FIRST_FREE_RE, MONTH_WORD, TRIAL_END_DATE_RE, POST_TRIAL_PATTERNS, TERM_LENGTH_PATTERNS, MINIMUM_OBLIGATION_PATTERNS, ANNUAL_WORD, DISCOUNT_AFTER_RE, DISCOUNT_BEFORE_RE, MONTHS, MONTH_RE_SRC, DATE_MDY_RE, DATE_DMY_RE, DATE_ISO_RE, DATE_US_RE, RELATIVE_DAYS_RE;
 var init_text = __esm({
   "packages/rules/src/text.ts"() {
     "use strict";
@@ -11130,6 +13237,9 @@ var init_text = __esm({
       /\bno\s+(?:minimum|commitment|long-term\s+commitment|contract|obligation)s?\b/gi,
       /\b(?:commit(?:ment)?\s+to|required\s+to\s+(?:purchase|buy|pay\s+for))\b/gi
     ];
+    ANNUAL_WORD = String.raw`(?:yearly|annual(?:ly)?|a\s+year|per\s+year|every\s+year|12[\s-]months?)`;
+    DISCOUNT_AFTER_RE = new RegExp(String.raw`^[^\S\n]*(?:free[^\S\n]+)?(?:with|on|when[^\S\n]+you|if[^\S\n]+you|by|for)[^\S\n]+(?:[\w-]+[^\S\n]+){0,3}?${ANNUAL_WORD}`, "i");
+    DISCOUNT_BEFORE_RE = new RegExp(String.raw`(?:\b${ANNUAL_WORD}\b|/\s*y(?:ea)?r\b)[^.\n!?]{0,40}$`, "i");
     MONTHS = {
       jan: 0,
       feb: 1,
@@ -11254,9 +13364,10 @@ function analyzePolicyText(input) {
     const noCancel = NO_CANCEL.some((r) => r.test(s2));
     if (noCancel && (SUBSCRIPTION_WORDS.test(s2) || /\bno cancell?ations?\b|\bnon-?cancell?able\b/i.test(s2))) push("no_cancellation");
     const byContact = CONTACT_TO_CANCEL.some((r) => r.test(s2));
-    if (OFFLINE_ONLY.some((r) => r.test(s2))) push("cancel_offline_only");
+    const merchantEnds = MERCHANT_ENDS.test(s2);
+    if (OFFLINE_ONLY.some((r) => r.test(s2)) || !merchantEnds && !CANCEL_ONLINE_STRONG.test(s2) && WRITTEN_TO_END.some((r) => r.test(s2))) push("cancel_offline_only");
     else if (byContact) push("cancel_by_contact");
-    for (const r of NOTICE_PERIOD) {
+    for (const r of [...NOTICE_PERIOD, ...merchantEnds ? [] : NOTICE_TO_END]) {
       const d = firstDays(r, s2);
       if (d !== void 0 || r.test(s2)) {
         push("cancel_notice_period", d);
@@ -11286,7 +13397,7 @@ function analyzePolicyText(input) {
 function clausesOf(clauses, code2) {
   return clauses.filter((c) => c.code === code2);
 }
-var POLICY_KINDS, POLICY_FRAGMENT, POLICY_FETCHER_USER_AGENT, SUBSCRIPTION_WORDS, NO_CANCEL, OFFLINE_ONLY, STOP_SUBSCRIPTION, CONTACT_TO_CANCEL, ACCOUNT_NOT_PLACE, CANCEL_ONLINE_STRONG, NOTICE_PERIOD, ALL_SALES_FINAL, CANCEL_ONLINE, AUTO_RENEWAL, HOW_TO_CANCEL, NO_REFUNDS, REFUND_WINDOW, GUARANTEE, REFUND_EXCEPTION;
+var POLICY_KINDS, POLICY_FRAGMENT, POLICY_FETCHER_USER_AGENT, SUBSCRIPTION_WORDS, NO_CANCEL, OFFLINE_ONLY, STOP_SUBSCRIPTION, CONTACT_TO_CANCEL, ACCOUNT_NOT_PLACE, CANCEL_ONLINE_STRONG, NOTICE_PERIOD, SUBSCRIBER_ENDS, WRITTEN_TO_END, NOTICE_TO_END, MERCHANT_ENDS, ALL_SALES_FINAL, CANCEL_ONLINE, AUTO_RENEWAL, HOW_TO_CANCEL, NO_REFUNDS, REFUND_WINDOW, GUARANTEE, REFUND_EXCEPTION;
 var init_policy_docs = __esm({
   "packages/rules/src/policy-docs.ts"() {
     "use strict";
@@ -11330,6 +13441,16 @@ var init_policy_docs = __esm({
       /\bcancel\w*\b[^.]{0,80}\b(\d{1,3})\s*(?:calendar |business )?days?'?\s*(?:prior |advance |in advance )?(?:written )?notice\b/i,
       /\bcancel\w*\b[^.]{0,80}\bat least (\d{1,3})\s*(?:calendar |business )?days?\b[^.]{0,30}\b(?:before|prior)\b/i
     ];
+    SUBSCRIBER_ENDS = `(?:cancell?(?:ation|ing|ed)?s?|account closures?|(?:requests?|request) to close|clos(?:e|ing) (?:your |the |my |an )?account|terminat(?:e|ing|ion of)\\s+(?:your |the |my |this |an? )?(?:paid )?(?:subscription|account|membership|plan|service)s?|termination requests?|${STOP_SUBSCRIPTION})`;
+    WRITTEN_TO_END = [
+      new RegExp(`\\b${SUBSCRIBER_ENDS}\\b[^.]{0,80}\\b(?:in writing|written (?:notice|request|letter|notification)|by (?:certified |registered )?(?:mail|post|letter))\\b`, "i"),
+      new RegExp(`\\b(?:in writing|written (?:notice|request|letter|notification))\\b[^.]{0,60}\\bto ${SUBSCRIBER_ENDS}\\b`, "i")
+    ];
+    NOTICE_TO_END = [
+      new RegExp(`\\b${SUBSCRIBER_ENDS}\\b[^.]{0,80}\\b(\\d{1,3})\\s*(?:calendar |business )?days?'?\\s*(?:in advance|ahead of time|(?:prior |advance )?(?:written )?notice)\\b`, "i"),
+      new RegExp(`\\b(\\d{1,3})\\s*(?:calendar |business )?days?'?\\s*(?:prior |advance )?(?:written )?notice\\b[^.]{0,80}\\b${SUBSCRIBER_ENDS}\\b`, "i")
+    ];
+    MERCHANT_ENDS = /\b(?:we|us|the company)\s+(?:may|can|will|shall|might|reserve)\b|\bat our (?:sole )?discretion\b/i;
     ALL_SALES_FINAL = /\ball sales (?:are )?final\b/i;
     CANCEL_ONLINE = [
       new RegExp(
@@ -12169,7 +14290,7 @@ function paymentLinkPlans(links, prices = []) {
       const known = li.price ? prices.find((p) => p.id === li.price) : void 0;
       const amount = typeof li.amount === "number" ? li.amount : known?.amount;
       const interval = li.interval ?? known?.interval;
-      if (!(typeof amount === "number" && amount > 0) || !interval || !INTERVALS.includes(interval)) continue;
+      if (!(typeof amount === "number" && amount > 0) || !interval || !INTERVALS2.includes(interval)) continue;
       const product = li.productName?.trim();
       out.push({
         id: li.price ?? `payment_link:${link.id}`,
@@ -12297,12 +14418,12 @@ function offerName(o) {
   const amount = o.currency === "usd" ? `$${shown}` : `${shown} ${o.currency.toUpperCase()}`;
   return o.name ? `${o.name} (${amount} ${every})` : `${amount} ${every}`;
 }
-var INTERVALS, termsKey;
+var INTERVALS2, termsKey;
 var init_offer = __esm({
   "packages/rules/src/offer.ts"() {
     "use strict";
     init_plan_terms();
-    INTERVALS = ["day", "week", "month", "year"];
+    INTERVALS2 = ["day", "week", "month", "year"];
     termsKey = (p) => `${p.amount}|${(p.currency || "usd").toLowerCase()}|${p.interval}|${p.intervalCount || 1}`;
   }
 });
@@ -12393,7 +14514,7 @@ function resolveTerms(input) {
   const unknownHow = plans.length ? "choose a plan above or enter" : "connect your billing platform or enter";
   const mustPick = plans.length > 1 && !plan2 && m.amount === void 0;
   if (!mustPick && (amount === void 0 || !Number.isInteger(amount) || amount <= 0)) problems.push(`The recurring price is unknown: ${unknownHow} the price.`);
-  if (!mustPick && (!interval || !INTERVALS2.includes(interval))) problems.push(`The billing interval is unknown: ${unknownHow} the interval.`);
+  if (!mustPick && (!interval || !INTERVALS3.includes(interval))) problems.push(`The billing interval is unknown: ${unknownHow} the interval.`);
   if (!Number.isInteger(intervalCount) || intervalCount < 1 || intervalCount > 36) problems.push("The interval count must be between 1 and 36.");
   if (!/^[a-z]{3}$/.test(currency)) problems.push("The currency must be a three-letter ISO code.");
   if (trialDays !== void 0 && (!Number.isInteger(trialDays) || trialDays < 0 || trialDays > 730)) problems.push("The trial length must be between 0 and 730 days.");
@@ -12427,7 +14548,7 @@ function resolveTerms(input) {
     }
   };
 }
-var STRIPE_CUSTOM_TEXT_MAX, MAX_NAME, INTERVALS2;
+var STRIPE_CUSTOM_TEXT_MAX, MAX_NAME, INTERVALS3;
 var init_terms2 = __esm({
   "packages/rules/src/fixes/terms.ts"() {
     "use strict";
@@ -12435,7 +14556,7 @@ var init_terms2 = __esm({
     init_offer();
     STRIPE_CUSTOM_TEXT_MAX = 1200;
     MAX_NAME = 80;
-    INTERVALS2 = ["day", "week", "month", "year"];
+    INTERVALS3 = ["day", "week", "month", "year"];
   }
 });
 
@@ -13215,11 +15336,11 @@ function textOf(n, visibleOnly = true) {
 ${inner}
 `;
 }
-function walk(n, f) {
+function walk2(n, f) {
   for (const c of n.children) {
     if (typeof c === "string") continue;
     f(c);
-    if (!SKIP.has(c.tag)) walk(c, f);
+    if (!SKIP.has(c.tag)) walk2(c, f);
   }
 }
 function scriptSrcs(n, out = []) {
@@ -13311,7 +15432,7 @@ function staticCheckboxGeo(root) {
   const script = scriptSrcs(root).some((src) => /\/g\.js(?:[?#]|$)/.test(src));
   const boldIn = /* @__PURE__ */ new Set();
   const consentIn = /* @__PURE__ */ new Set();
-  walk(root, (n) => {
+  walk2(root, (n) => {
     if (!script && !(GEO_APPLIED_ATTR in n.attrs)) return;
     for (const r of parseGeoRegions(n.attrs[GEO_BOLD_ATTR], GEO_BOLD_REGIONS)) boldIn.add(r);
     for (const r of parseGeoRegions(n.attrs[GEO_CONSENT_ATTR], GEO_CONSENT_REGIONS)) consentIn.add(r);
@@ -13400,7 +15521,7 @@ function extractStaticPage0(html, opts) {
   };
   const descendants = (n) => {
     const out = [];
-    walk(n, (d) => out.push(d));
+    walk2(n, (d) => out.push(d));
     return out;
   };
   layout(body);
@@ -13561,7 +15682,7 @@ function extractStaticPage0(html, opts) {
     );
   }
   const uncertain = {};
-  walk(root, (n) => {
+  walk2(root, (n) => {
     if (n.tag === "details" && !("open" in n.attrs) && !uncertain.collapsedTerms) {
       const t = line(textOf(n, false));
       if (DISCLOSURE_RE.test(t)) uncertain.collapsedTerms = t.slice(0, 200);
@@ -13581,7 +15702,7 @@ function extractStaticPage0(html, opts) {
     const classesOf = (n) => (n.attrs.class ?? "").split(/\s+/).filter(Boolean);
     const ruleClasses = new Set(stylesheetOf(root).flatMap((r) => r.selectors.flat().flatMap((sel2) => (sel2.match(/\.[\w-]+/g) ?? []).map((c) => c.slice(1)))));
     const plain = [];
-    walk(root, (n) => {
+    walk2(root, (n) => {
       if (n.tag === "#root" || computed(n).hidden) return;
       const own = line(n.children.filter((c) => typeof c === "string").join(" "));
       if (!own || !RENEWAL_LINE_RE.test(own) || own.length < 25) return;
@@ -14631,25 +16752,25 @@ function paymentLinkCancelRemediation(portalUrl, loginPageOn) {
 function hostedCheckoutRemediation(checkId, kind, platform, opts = {}) {
   if (!checkId.startsWith("signup.")) return null;
   const hostedName = kind === "payment_link" ? "Payment Link" : "Stripe Checkout";
-  const button = kind === "payment_link" ? "your Join button" : "the button that opens Stripe Checkout";
+  const button = kind === "payment_link" ? "your sign-up button" : "the button that opens Stripe Checkout";
   const ownStep = `Paste the renewal line directly above ${button} (Ready-made fixes has the line, generated from your price, billing period and cancellation page). It ends with \u201CBy subscribing, you agree to these renewal terms.\u201D, so your own page needs no checkbox.`;
   if (opts.ownPageOnly) {
     return {
-      summary: `Add the renewal line back above ${button}; your ${hostedName} still shows it.`,
+      summary: `Add the renewal line above ${button}; your ${hostedName} still shows it.`,
       steps: [`Your ${hostedName} still shows the renewal terms (Checkbox read it): only your own page changed. ${ownStep}`, VERIFY],
       ...platform ? { platform } : {}
     };
   }
   const steps = kind === "payment_link" ? [
-    `Your Join button opens a Stripe Payment Link${opts.consentOn ? ", and Stripe asks for consent there" : ""}. ${ownStep}`,
-    opts.consentOn ? "Your Payment Link already has Stripe\u2019s terms checkbox; put the renewal terms next to its pay button too, in one click (Ready-made fixes \u2192 Payment Link) or in the Stripe Dashboard (Payment Links \u2192 Edit \u2192 custom text; for developers: custom_text.submit.message)." : "Put the same renewal line next to the pay button on your Payment Link, in one click (Ready-made fixes \u2192 Payment Link) or in the Stripe Dashboard (Payment Links \u2192 Edit \u2192 custom text; for developers: custom_text.submit.message). Same link, same URL: no new link and no terms checkbox are needed.",
+    `Your sign-up button opens a Stripe Payment Link${opts.consentOn || opts.consentPasses ? ", and Stripe asks for consent there" : ""}. ${ownStep}`,
+    opts.consentOn ? "Your Payment Link already has Stripe\u2019s terms checkbox; put the renewal terms next to its pay button too, in one click (Ready-made fixes \u2192 Payment Link) or in the Stripe Dashboard (Payment Links \u2192 Edit \u2192 custom text; for developers: custom_text.submit.message)." : opts.consentPasses ? "Your Payment Link already asks for consent with the renewal sentence next to its pay button (Checkbox read it): keep that text as it is. No terms checkbox and no new link are needed." : "Put the same renewal line next to the pay button on your Payment Link, in one click (Ready-made fixes \u2192 Payment Link) or in the Stripe Dashboard (Payment Links \u2192 Edit \u2192 custom text; for developers: custom_text.submit.message). Same link, same URL: no new link and no terms checkbox are needed.",
     VERIFY
   ] : [
     `Your button opens Stripe Checkout. ${ownStep}`,
     "Show the same renewal line next to the pay button on the Checkout Session your code creates (custom_text.submit.message). No consent checkbox is needed. Ready-made fixes \u2192 Stripe has the exact parameters.",
     VERIFY
   ];
-  const summary = kind === "payment_link" ? opts.consentOn ? "Add the renewal line above your Join button; your Stripe Payment Link already asks for consent." : "Add the renewal line above your Join button and next to the pay button on your Payment Link (same link, no checkbox)." : "Add the renewal line above the button that opens Stripe Checkout and next to Stripe\u2019s pay button.";
+  const summary = kind === "payment_link" ? opts.consentOn || opts.consentPasses ? "Add the renewal line above your sign-up button; your Stripe Payment Link already asks for consent." : "Add the renewal line above your sign-up button and next to the pay button on your Payment Link (same link, no checkbox)." : "Add the renewal line above the button that opens Stripe Checkout and next to Stripe\u2019s pay button.";
   return { summary, steps, ...platform ? { platform } : {} };
 }
 function hostedCheckoutKind(declared, consentData) {
@@ -16691,6 +18812,17 @@ var init_cancellation = __esm({
               { portalLinked: true, portalLinkUrl: portalLink.url, configOnly: true }
             );
           }
+          const wayIn = portalWayIn(input);
+          if (wayIn) {
+            return makeResult(
+              id,
+              "needs_review",
+              `Cancellation is on in your Stripe customer portal (read from Stripe), and ${wayIn.url} shows the way to it (\u201C${quote(wayIn.text) ?? "portal link"}\u201D); a test cancellation through the portal has not been observed yet`,
+              [...captureRefs(wayIn.capture), ...configRefs],
+              0.6,
+              { portalLinked: true, portalLinkUrl: wayIn.url, portalWayInKind: wayIn.kind, configOnly: true }
+            );
+          }
           return makeResult(
             id,
             "needs_review",
@@ -17010,7 +19142,7 @@ function refs(input) {
   return input.data.configRef ? [input.data.configRef] : [];
 }
 var NO_CONFIG_MESSAGE, PLATFORM_NAMES2, portalCancelEnabled, trialReminderEnabled, CONFIG_CHECKS;
-var init_config2 = __esm({
+var init_config3 = __esm({
   "packages/rules/src/checks/config.ts"() {
     "use strict";
     init_result();
@@ -22788,7 +24920,7 @@ var init_checks2 = __esm({
     "use strict";
     init_src2();
     init_cancellation();
-    init_config2();
+    init_config3();
     init_confirmation();
     init_notices();
     init_reminder();
@@ -23909,8 +26041,11 @@ function rule(id, result, input, results) {
     }
     case "terms.cancellation_policy_consistent": {
       for (const { text } of policyTexts(input)) {
-        const m = RESTRICTED_OFFLINE_RE.exec(text);
-        if (m) return { status: "fail", reason: "your Terms restrict some subscribers to offline cancellation (a call, letter or written notice)", quote: sentenceAround(text, m.index, m[0].length) };
+        for (const m of text.matchAll(new RegExp(RESTRICTED_OFFLINE_RE.source, "gi"))) {
+          const quote2 = sentenceAround(text, m.index, m[0].length);
+          if (MERCHANT_ACTS_RE.test(quote2)) continue;
+          return { status: "fail", reason: "your Terms restrict some subscribers to offline cancellation (a call, letter or written notice)", quote: quote2 };
+        }
       }
       return void 0;
     }
@@ -23961,7 +26096,7 @@ function screenInput(text) {
   if (lock) return { quote: clip3(lock, 160), reason: "adds a lock-in (notice period, minimum term, fee or non-cancellable period)" };
   return void 0;
 }
-var WORDS, LANGUAGE_NAMES, clip3, NEGATION_BEFORE_RE, money4, near, OFFLINE_CANCEL_RES, LOCK_IN_RES, COMMITMENT_RE, URL_RE, OFFLINE_HREF_RE, ADJACENT_PRICES_RE, FREE_RE, CONVERTS_RE, FOREIGN_MERGE_RE, ANY_MERGE_RE, VALUE_MERGE_TAG_RE, AMOUNT_SRC, NEW_PRICE_RES, PRICE_TOPIC_RE, ALTERNATIVE_BEFORE_RE, FLOW_PAUSE_RE, FLOW_DOWNGRADE_RE, FLOW_PENDING_RE, FLOW_CHARGE_RE, NOT_SUBSCRIPTION_SUBJECT_RE, RESTRICTED_OFFLINE_RE, SIGNUP_TEXT_CHECKS;
+var WORDS, LANGUAGE_NAMES, clip3, NEGATION_BEFORE_RE, money4, near, OFFLINE_CANCEL_RES, LOCK_IN_RES, COMMITMENT_RE, URL_RE, OFFLINE_HREF_RE, ADJACENT_PRICES_RE, FREE_RE, CONVERTS_RE, FOREIGN_MERGE_RE, ANY_MERGE_RE, VALUE_MERGE_TAG_RE, AMOUNT_SRC, NEW_PRICE_RES, PRICE_TOPIC_RE, ALTERNATIVE_BEFORE_RE, FLOW_PAUSE_RE, FLOW_DOWNGRADE_RE, FLOW_PENDING_RE, FLOW_CHARGE_RE, NOT_SUBSCRIPTION_SUBJECT_RE, RESTRICTED_OFFLINE_RE, MERCHANT_ACTS_RE, SIGNUP_TEXT_CHECKS;
 var init_skeptic = __esm({
   "packages/rules/src/skeptic.ts"() {
     "use strict";
@@ -24031,6 +26166,7 @@ var init_skeptic = __esm({
     FLOW_CHARGE_RE = /\b(?:billed|charged)\s+(?:one\s+)?(?:final|last|more|another)\s+time\b|\bone\s+(?:final|last|more)\s+(?:charge|payment|bill|invoice)\b|\bfinal\s+(?:charge|payment|invoice|bill)\b|\bwill\s+(?:still\s+)?be\s+(?:billed|charged)\b/i;
     NOT_SUBSCRIPTION_SUBJECT_RE = /\b(?:delivery|order|box|shipment|trial)\s+(?:for\s+[\w\s,]+\s+)?(?:has\s+been|was|is)\s+(?:cancell?ed|skipped)\b/i;
     RESTRICTED_OFFLINE_RE = /\b(?:may|can|must)\s+only\s+be\s+cancell?ed\s+by\s+(?:calling|phone|telephone|e-?mail(?:ing)?|mail|writing|written\s+notice|contacting)\b|\bonly\s+by\s+(?:calling|phone|telephone|written\s+notice|mail)\b|\b(?:require|requires|required)\s+\d+\s+days?['’]?\s+written\s+notice\b|\bwritten\s+notice\b/i;
+    MERCHANT_ACTS_RE = /\b(?:we|the company)\s+(?:may|can|will|shall|might|reserve)\b|\bat our (?:sole )?discretion\b/i;
     SIGNUP_TEXT_CHECKS = /* @__PURE__ */ new Set([
       "signup.disclosure.autorenew_language",
       "signup.disclosure.price",
@@ -24711,7 +26847,7 @@ var init_status = __esm({
           fix: "Add the renewal terms (and a consent checkbox) to the Payment Link, or deactivate it in Stripe (Payment Links \u2192 the link \u2192 Deactivate) if it is no longer used.",
           // Round 37 (pilot 36 item 8, core-payment-links: "Is it still used to sell?" with the answers confirmed /
           // needs_change, which do not fit a yes/no about use): the question is put so that those two answers fit it.
-          question: ask("An active Payment Link in your Stripe account states no renewal terms, and no page of your site links to it. Confirm that nothing sells through it any more, or say it needs a change?", "Confirm only if it is no longer used, and deactivate it in Stripe (Payment Links \u2192 the link \u2192 Deactivate). If it still sells, answer needs_change: your agent then gets the replacement link with the renewal terms and a consent checkbox.", "Anyone with its URL can still subscribe through it, whether or not your site links to it.")
+          question: ask("An active Payment Link in your Stripe account states no renewal terms, and no page of your site that Checkbox has read so far links to it. Confirm that nothing sells through it any more, or say it needs a change?", "Confirm only if it is no longer used, and deactivate it in Stripe (Payment Links \u2192 the link \u2192 Deactivate). If it still sells, answer needs_change: your agent then gets the replacement link with the renewal terms and a consent checkbox.", "Anyone with its URL can still subscribe through it, whether or not your site links to it.")
         })
       },
       {
@@ -26025,11 +28161,11 @@ function unseenPlanPages(raw) {
   const ctx = sanitizeContext(raw);
   const seen = new Set(ctx.captures.map((c) => pageKey(c.url ?? "")));
   const declared = new Set((ctx.signupUrls ?? []).map((u) => pageKey(u)));
-  const site = ctx.captures.map((c) => originOf(c.url)).find((o) => o && !/stripe\.com$/i.test(new URL(o).hostname));
+  const site = ctx.captures.map((c) => originOf2(c.url)).find((o) => o && !/stripe\.com$/i.test(new URL(o).hostname));
   const out = /* @__PURE__ */ new Map();
   for (const cc of ctx.checkoutConfigs ?? []) {
     if (!cc.returnUrl || cc.kind === "payment_link") continue;
-    const origin = originOf(cc.returnUrl);
+    const origin = originOf2(cc.returnUrl);
     if (!origin || site && origin !== site || /stripe\.com$/i.test(new URL(origin).hostname)) continue;
     const key = pageKey(cc.returnUrl);
     if (seen.has(key) || declared.has(key)) continue;
@@ -26038,7 +28174,7 @@ function unseenPlanPages(raw) {
   }
   return [...out].slice(0, 4).map(([url, plan2]) => ({ url, ...plan2 ? { plan: plan2 } : {} }));
 }
-function originOf(u) {
+function originOf2(u) {
   try {
     return u ? new URL(u).origin : void 0;
   } catch {
@@ -26397,6 +28533,8 @@ async function runEvaluationInScope(input, opts) {
   // Payment Element / "before redirecting to Stripe Checkout" list): sign-up units judged on a Payment Link, and none
   // on Stripe Checkout, make it a Payment Link sign-up (the same signal the dashboard's one-click button uses).
   (!ctx.facts?.checkoutType ? signupCheckoutKindOfUnits(results) : void 0);
+  const activeLinks = paymentLinksOf(ctx.config).filter((l) => l.active !== false);
+  const hostedConsentOn = hostedKind === "payment_link" ? activeLinks.length > 0 && activeLinks.every((l) => l.consentTermsOfService === "required") : results.get("signup.consent.affirmative")?.status === "pass";
   const findings = [];
   for (const id of CHECK_IDS) {
     const result = results.get(id);
@@ -26421,7 +28559,7 @@ async function runEvaluationInScope(input, opts) {
       evidenceRefs: result.evidenceRefs,
       remediation: (
         // Round 38: the site's own cancel control was pressed in a test run and did not work (deps.ts guardStaleInputs).
-        result.status === "fail" && result.data?.ownCancelFailed ? { ...ownCancelRemediation(result.data.ownCancelFailed), ...platform ? { platform } : {} } : id === "cancel.flow_friction" && result.data?.offerPermissionMissing === true ? { ...OFFER_PERMISSION_REMEDIATION, ...platform ? { platform } : {} } : platform === "stripe" && result.status === "fail" && (id === "cancel.online_available" && result.data?.billingContradicts === true || id === "config.portal_cancel_enabled" && result.data?.cancelPath === "in_app_broken") ? CANCEL_HANDLER_REMEDIATION : paymentLinkCancel ? paymentLinkCancelRemediation(ctx.config?.cancellation?.portalUrl, ctx.config?.raw?.portal?.loginPageEnabled) : withContentFix(personalizeRemediation(hostedKind && hostedCheckoutRemediation(id, hostedKind, platform, { consentOn: results.get("signup.consent.affirmative")?.status === "pass", ownPageOnly: signupOpenOnlyOnOwnPage([{ checkId: id, data: result.data ?? null }]) }) || siteRemediation(id, platform, ctx.facts), values), contentFixLine(id, result.data))
+        result.status === "fail" && result.data?.ownCancelFailed ? { ...ownCancelRemediation(result.data.ownCancelFailed), ...platform ? { platform } : {} } : id === "cancel.flow_friction" && result.data?.offerPermissionMissing === true ? { ...OFFER_PERMISSION_REMEDIATION, ...platform ? { platform } : {} } : platform === "stripe" && result.status === "fail" && (id === "cancel.online_available" && result.data?.billingContradicts === true || id === "config.portal_cancel_enabled" && result.data?.cancelPath === "in_app_broken") ? CANCEL_HANDLER_REMEDIATION : paymentLinkCancel ? paymentLinkCancelRemediation(ctx.config?.cancellation?.portalUrl, ctx.config?.raw?.portal?.loginPageEnabled) : withContentFix(personalizeRemediation(hostedKind && hostedCheckoutRemediation(id, hostedKind, platform, { consentOn: hostedConsentOn, consentPasses: results.get("signup.consent.affirmative")?.status === "pass", ownPageOnly: signupOpenOnlyOnOwnPage([{ checkId: id, data: result.data ?? null }]) }) || siteRemediation(id, platform, ctx.facts), values), contentFixLine(id, result.data))
       ),
       confidence: result.confidence,
       firstSeenAt: evaluatedAt,
@@ -26551,7 +28689,7 @@ function parseJurisdictionList(input, param = "jurisdictions") {
 function parseInterval(v, param = "interval") {
   const s2 = typeof v === "string" ? v.trim().toLowerCase().replace(/ly$/, "") : "";
   const map = { dai: "day", day: "day", week: "week", month: "month", year: "year", annual: "year", annually: "year", "year-": "year" };
-  const out = map[s2] ?? (INTERVALS3.includes(s2) ? s2 : void 0);
+  const out = map[s2] ?? (INTERVALS4.includes(s2) ? s2 : void 0);
   if (!out) throw new PreflightInputError(`${param} must be one of day, week, month, year`, param);
   return out;
 }
@@ -26783,7 +28921,7 @@ function modelContext(jurisdictions, asOf, facts, extra = {}) {
 function clockFor(asOf) {
   return /* @__PURE__ */ new Date(`${asOf}T12:00:00.000Z`);
 }
-var PREFLIGHT_DISCLAIMER, PREFLIGHT_DOCS_URL, PreflightInputError, INTERVALS3, REQ_BY_ID, RANK, HOSTED_PLACEMENT_REASON, CHECKS_PASS_LABEL, NOT_REQUIRED_LABEL, NOT_CHECKED_BY_DEFAULT_WARNING, NOT_CHECKED_REQ_IDS, SYNTHETIC, SYNTHETIC_URL, HOSTED_TITLES, OPEN_STATUS_WORDS;
+var PREFLIGHT_DISCLAIMER, PREFLIGHT_DOCS_URL, PreflightInputError, INTERVALS4, REQ_BY_ID, RANK, HOSTED_PLACEMENT_REASON, CHECKS_PASS_LABEL, NOT_REQUIRED_LABEL, NOT_CHECKED_BY_DEFAULT_WARNING, NOT_CHECKED_REQ_IDS, SYNTHETIC, SYNTHETIC_URL, HOSTED_TITLES, OPEN_STATUS_WORDS;
 var init_common = __esm({
   "packages/rules/src/preflight/common.ts"() {
     "use strict";
@@ -26802,7 +28940,7 @@ var init_common = __esm({
         this.name = "PreflightInputError";
       }
     };
-    INTERVALS3 = ["day", "week", "month", "year"];
+    INTERVALS4 = ["day", "week", "month", "year"];
     REQ_BY_ID = new Map(CATALOG.map((r) => [r.id, r]));
     RANK = { fail: 3, needs_review: 2, pass: 1, not_applicable: 0 };
     HOSTED_PLACEMENT_REASON = "hosted_checkout_placement";
@@ -27877,40 +30015,40 @@ function readParams(params, merchant, kind, asOf) {
   const warnings = [];
   const caveats = [];
   const recurringItems = [];
-  const lineItems = Array.isArray(params.line_items) ? params.line_items : isObj(params.line_items) && Array.isArray(params.line_items.data) ? params.line_items.data : [];
+  const lineItems = Array.isArray(params.line_items) ? params.line_items : isObj2(params.line_items) && Array.isArray(params.line_items.data) ? params.line_items.data : [];
   const priceIds = [];
   let fromData;
   let productName;
   let description;
   for (const li of lineItems) {
-    if (!isObj(li)) continue;
+    if (!isObj2(li)) continue;
     if (typeof li.price === "string") priceIds.push(li.price);
-    else if (isObj(li.price) && typeof li.price.id === "string") priceIds.push(li.price.id);
-    const pd = isObj(li.price_data) ? li.price_data : isObj(li.price) ? li.price : void 0;
-    if (pd && isObj(pd.recurring)) {
+    else if (isObj2(li.price) && typeof li.price.id === "string") priceIds.push(li.price.id);
+    const pd = isObj2(li.price_data) ? li.price_data : isObj2(li.price) ? li.price : void 0;
+    if (pd && isObj2(pd.recurring)) {
       recurringItems.push({
         ...typeof pd.unit_amount === "number" ? { amount: pd.unit_amount } : {},
         ...typeof pd.currency === "string" ? { currency: pd.currency } : {},
         ...typeof pd.recurring.interval === "string" ? { interval: pd.recurring.interval } : {},
         count: typeof pd.recurring.interval_count === "number" ? pd.recurring.interval_count : 1,
         quantity: typeof li.quantity === "number" && li.quantity > 0 ? li.quantity : 1,
-        ...isObj(pd.product_data) && typeof pd.product_data.name === "string" ? { name: pd.product_data.name } : {},
-        adjustable: isObj(li.adjustable_quantity) && li.adjustable_quantity.enabled === true
+        ...isObj2(pd.product_data) && typeof pd.product_data.name === "string" ? { name: pd.product_data.name } : {},
+        adjustable: isObj2(li.adjustable_quantity) && li.adjustable_quantity.enabled === true
       });
     }
-    if (pd && isObj(pd.recurring) && !fromData) {
+    if (pd && isObj2(pd.recurring) && !fromData) {
       fromData = {
         ...typeof pd.unit_amount === "number" ? { amount: pd.unit_amount } : {},
         ...typeof pd.currency === "string" ? { currency: pd.currency } : {},
         ...typeof pd.recurring.interval === "string" ? { interval: pd.recurring.interval } : {},
         ...typeof pd.recurring.interval_count === "number" ? { interval_count: pd.recurring.interval_count } : {}
       };
-      const prod = isObj(pd.product_data) ? pd.product_data : void 0;
+      const prod = isObj2(pd.product_data) ? pd.product_data : void 0;
       if (prod && typeof prod.name === "string") productName = prod.name;
       if (prod && typeof prod.description === "string") description = prod.description;
     }
   }
-  const sub = isObj(params.subscription_data) ? params.subscription_data : {};
+  const sub = isObj2(params.subscription_data) ? params.subscription_data : {};
   let trial = typeof sub.trial_period_days === "number" ? sub.trial_period_days : void 0;
   if (trial === void 0 && typeof sub.trial_end === "number") {
     const start = asOf ? Date.parse(`${asOf}T12:00:00Z`) : NaN;
@@ -27939,16 +30077,16 @@ function readParams(params, merchant, kind, asOf) {
       caveats.push({ checks: ["signup.disclosure.price"], status: "needs_review", reason: "adjustable_quantity lets the shopper choose a quantity, so the stated unit price is not necessarily the recurring total; state the per-unit price and that the total is per seat", param: "params.line_items.adjustable_quantity" });
     }
   }
-  if (sub.billing_cycle_anchor !== void 0 || isObj(sub.billing_cycle_anchor_config)) {
+  if (sub.billing_cycle_anchor !== void 0 || isObj2(sub.billing_cycle_anchor_config)) {
     caveats.push({ checks: ["signup.disclosure.price"], status: "needs_review", reason: "subscription_data.billing_cycle_anchor makes the first charge a prorated amount, not the recurring price; the text must not say the full price is charged today", param: "params.subscription_data.billing_cycle_anchor" });
   }
-  const custom = msg((isObj(params.custom_text) ? params.custom_text : {}).submit) ?? "";
+  const custom = msg((isObj2(params.custom_text) ? params.custom_text : {}).submit) ?? "";
   if (Array.isArray(params.discounts) && params.discounts.length && !INTRO_PROMISE_RE.test(custom) && !/\b(?:off|discount\w*|coupon|promo\w*|introductory|first\s+\d+\s+(?:months?|weeks?|years?))\b/i.test(custom)) {
     caveats.push({ checks: ["signup.disclosure.price"], status: "needs_review", reason: "discounts apply a coupon: the first charges differ from the recurring price and the text does not say so", param: "params.discounts" });
   }
-  const ctAll = isObj(params.custom_text) ? params.custom_text : {};
+  const ctAll = isObj2(params.custom_text) ? params.custom_text : {};
   const promised = [msg(ctAll.submit), msg(ctAll.terms_of_service_acceptance), description].filter((t) => !!t).map((t) => INTRO_PROMISE_RE.exec(t)?.[0]).find(Boolean);
-  const hasDiscount = Array.isArray(params.discounts) && params.discounts.some((d) => isObj(d) && (typeof d.coupon === "string" || typeof d.promotion_code === "string" || isObj(d.coupon)));
+  const hasDiscount = Array.isArray(params.discounts) && params.discounts.some((d) => isObj2(d) && (typeof d.coupon === "string" || typeof d.promotion_code === "string" || isObj2(d.coupon)));
   if (promised && !hasDiscount) {
     const codes = params.allow_promotion_codes === true;
     caveats.push({
@@ -27961,7 +30099,7 @@ function readParams(params, merchant, kind, asOf) {
   if (trial !== void 0 && trial > 0 && custom && /[$€£]\s?\d|\b(?:charged?|billed)\b/i.test(custom) && !/\b(?:trial|free|days?)\b/i.test(custom)) {
     caveats.push({ checks: ["signup.disclosure.trial_terms"], status: "fail", reason: `there is a ${trial}-day free trial, but your custom_text.submit states the charge without mentioning it, so a shopper reads it as charged today (Stripe's summary alone shows the trial) \u2014 state the ${trial}-day free trial and what is charged when it ends`, param: "params.custom_text.submit" });
   }
-  const promisedTrial = trialPromise([["custom_text.submit", msg(ctAll.submit)], ["custom_text.terms_of_service_acceptance", isObj(params.consent_collection) && params.consent_collection.terms_of_service === "required" ? msg(ctAll.terms_of_service_acceptance) : void 0], ["product description", description]]);
+  const promisedTrial = trialPromise([["custom_text.submit", msg(ctAll.submit)], ["custom_text.terms_of_service_acceptance", isObj2(params.consent_collection) && params.consent_collection.terms_of_service === "required" ? msg(ctAll.terms_of_service_acceptance) : void 0], ["product description", description]]);
   if (promisedTrial && !(trial !== void 0 && trial > 0)) {
     caveats.push({
       checks: ["signup.disclosure.trial_terms"],
@@ -28004,7 +30142,7 @@ function readParams(params, merchant, kind, asOf) {
       param: "merchant.trial_days"
     });
   }
-  const coupon = (Array.isArray(params.discounts) ? params.discounts : []).map((d) => isObj(d) && isObj(d.coupon) ? d.coupon : void 0).find(Boolean);
+  const coupon = (Array.isArray(params.discounts) ? params.discounts : []).map((d) => isObj2(d) && isObj2(d.coupon) ? d.coupon : void 0).find(Boolean);
   const merchantIntro = ["intro_price", "intro_amount", "intro_percent_off", "intro_amount_off"].some((k) => m[k] !== void 0 && m[k] !== null);
   let couponIntro = {};
   if (coupon && !merchantIntro) {
@@ -28021,7 +30159,7 @@ function readParams(params, merchant, kind, asOf) {
     }
   }
   const couponIds = (Array.isArray(params.discounts) ? params.discounts : []).flatMap(
-    (d) => isObj(d) && typeof d.coupon === "string" ? [`coupon ${d.coupon}`] : isObj(d) && typeof d.promotion_code === "string" ? [`promotion code ${d.promotion_code}`] : []
+    (d) => isObj2(d) && typeof d.coupon === "string" ? [`coupon ${d.coupon}`] : isObj2(d) && typeof d.promotion_code === "string" ? [`promotion code ${d.promotion_code}`] : []
   );
   if (couponIds.length && !coupon) {
     warnings.push({
@@ -28074,8 +30212,8 @@ function readParams(params, merchant, kind, asOf) {
       });
     }
   }
-  const ct = isObj(params.custom_text) ? params.custom_text : {};
-  const cc = isObj(params.consent_collection) ? params.consent_collection : {};
+  const ct = isObj2(params.custom_text) ? params.custom_text : {};
+  const cc = isObj2(params.consent_collection) ? params.consent_collection : {};
   const submit = msg(ct.submit);
   const tosAcceptance = msg(ct.terms_of_service_acceptance);
   const consentRequired = cc.terms_of_service === "required";
@@ -28253,7 +30391,7 @@ function correct(params, shape, checks, forLink, style2 = "full", consentBox = t
   const patch = [];
   const out = clone(params);
   if (needConsent) {
-    const cc = isObj(out.consent_collection) ? out.consent_collection : void 0;
+    const cc = isObj2(out.consent_collection) ? out.consent_collection : void 0;
     if (!cc) {
       patch.push({ op: "add", path: "/consent_collection", value: { terms_of_service: "required" } });
       out.consent_collection = { terms_of_service: "required" };
@@ -28263,12 +30401,12 @@ function correct(params, shape, checks, forLink, style2 = "full", consentBox = t
     }
   }
   if (needText || needConsent) {
-    const ct = isObj(out.custom_text) ? out.custom_text : void 0;
+    const ct = isObj2(out.custom_text) ? out.custom_text : void 0;
     const set = {};
     if (needText) set.submit = { message: texts.disclosure };
     if (needConsent || shape.consentRequired) {
       const tosa = ct?.terms_of_service_acceptance;
-      const had = isObj(tosa) ? tosa.message : void 0;
+      const had = isObj2(tosa) ? tosa.message : void 0;
       const keep = style2 !== "full" && typeof had === "string" && had === previousStripeConsent(terms2);
       set.terms_of_service_acceptance = { message: keep ? had : texts.consentLabel };
     }
@@ -28283,24 +30421,24 @@ function correct(params, shape, checks, forLink, style2 = "full", consentBox = t
       }
     }
   }
-  const ccOut = isObj(out.consent_collection) ? out.consent_collection : void 0;
-  const ctOut = isObj(out.custom_text) ? out.custom_text : void 0;
+  const ccOut = isObj2(out.consent_collection) ? out.consent_collection : void 0;
+  const ctOut = isObj2(out.custom_text) ? out.custom_text : void 0;
   if (ctOut && ctOut.terms_of_service_acceptance != null && ccOut?.terms_of_service !== "required") {
     patch.push({ op: "remove", path: "/custom_text/terms_of_service_acceptance" });
     delete ctOut.terms_of_service_acceptance;
   }
   if (patch.length && Array.isArray(out.discounts)) {
     out.discounts = out.discounts.map((d, i) => {
-      if (!isObj(d) || !isObj(d.coupon) || typeof d.coupon.id !== "string") return d;
+      if (!isObj2(d) || !isObj2(d.coupon) || typeof d.coupon.id !== "string") return d;
       patch.push({ op: "replace", path: `/discounts/${i}/coupon`, value: d.coupon.id });
       return { ...d, coupon: d.coupon.id };
     });
   }
   if (forLink && "id" in out) {
     for (const k of ["id", "object", "url", "livemode", "active"]) delete out[k];
-    if (isObj(out.line_items) && Array.isArray(out.line_items.data)) {
-      out.line_items = out.line_items.data.filter(isObj).map((li) => ({
-        price: isObj(li.price) && typeof li.price.id === "string" ? li.price.id : li.price,
+    if (isObj2(out.line_items) && Array.isArray(out.line_items.data)) {
+      out.line_items = out.line_items.data.filter(isObj2).map((li) => ({
+        price: isObj2(li.price) && typeof li.price.id === "string" ? li.price.id : li.price,
         quantity: typeof li.quantity === "number" ? li.quantity : 1
       }));
     }
@@ -28351,8 +30489,8 @@ function nextAction(kind, checks, correction, extra = "") {
 }
 function common(input, now0) {
   if (!input || typeof input !== "object") throw new PreflightInputError("Request body must be an object");
-  if (!isObj(input.params)) throw new PreflightInputError("params must be the object your code passes to Stripe", "params");
-  if (input.merchant !== void 0 && !isObj(input.merchant)) throw new PreflightInputError("merchant must be an object", "merchant");
+  if (!isObj2(input.params)) throw new PreflightInputError("params must be the object your code passes to Stripe", "params");
+  if (input.merchant !== void 0 && !isObj2(input.merchant)) throw new PreflightInputError("merchant must be an object", "merchant");
   const jurisdictions = parseJurisdictionList(input.jurisdictions);
   const asOf = parseAsOf(input.as_of, now0 ?? /* @__PURE__ */ new Date());
   const now = now0 ?? clockFor(asOf);
@@ -28383,9 +30521,9 @@ function withResolvedPrices(input, knownPrices, amountSource = "merchant.price")
     const m = input.merchant ?? {};
     const stated = typeof m.amount === "number" ? m.amount : typeof m.price === "number" ? Math.round(m.price * 10 ** currencyDigitsOf(r.resolved.currency)) : void 0;
     const warnings = [];
-    const sd = isObj(input.params.subscription_data) ? input.params.subscription_data : {};
+    const sd = isObj2(input.params.subscription_data) ? input.params.subscription_data : {};
     const paramsTrial = typeof sd.trial_period_days === "number" ? sd.trial_period_days : void 0;
-    const priceTrial = r.resolved.trialDays && r.resolved.trialDays > 0 ? r.resolved.trialDays : void 0;
+    const priceTrial = r.resolved.trialSource === "price" && r.resolved.trialDays && r.resolved.trialDays > 0 ? r.resolved.trialDays : void 0;
     const trialNote = priceTrial ? paramsTrial !== void 0 ? paramsTrial === priceTrial ? `, with a ${priceTrial}-day trial on the Price (the same as subscription_data.trial_period_days)` : `, with a ${priceTrial}-day trial on the Price; these params set subscription_data.trial_period_days to ${paramsTrial}, which is the trial this Checkout gives` : `, with a ${priceTrial}-day trial on the Price (trial_period_days); these params set no trial of their own` : "";
     warnings.push({ code: "price_read", message: `Stripe Price ${r.resolved.id} was read from your connected Stripe account: ${formatMoney(r.resolved.amount, r.resolved.currency)} per ${intervalPhrase(r.resolved.interval, r.resolved.intervalCount)}${trialNote}.`, param: "params.line_items" });
     if (stated !== void 0 && stated !== r.resolved.amount) {
@@ -28505,7 +30643,7 @@ async function checkStripePaymentLink(input0, opts = {}) {
   const resolvedPrices = withResolvedPrices(input0, opts.knownPrices, opts.amountSource);
   const input = { ...input0, ...resolvedPrices.merchant ? { merchant: resolvedPrices.merchant } : {} };
   const params = input.params;
-  const recurring = JSON.stringify(params.line_items ?? "").includes('"recurring"') || isObj(params.subscription_data) || input.merchant?.interval !== void 0;
+  const recurring = JSON.stringify(params.line_items ?? "").includes('"recurring"') || isObj2(params.subscription_data) || input.merchant?.interval !== void 0;
   if (!recurring) {
     return notSubscription("stripe_payment_link", "No recurring price or subscription_data found and no merchant.interval given: this Payment Link does not appear to sell a subscription.", jurisdictions, asOf, params);
   }
@@ -28526,7 +30664,7 @@ async function checkStripePaymentLink(input0, opts = {}) {
   let update_params;
   let needsNew = false;
   if (id && fix.patch.length) {
-    const ct = isObj(params.custom_text) ? params.custom_text : {};
+    const ct = isObj2(params.custom_text) ? params.custom_text : {};
     const state = {
       id,
       url,
@@ -28565,12 +30703,12 @@ async function checkStripePaymentLink(input0, opts = {}) {
   };
 }
 function lineItemPriceIds(params) {
-  const items = Array.isArray(params.line_items) ? params.line_items : isObj(params.line_items) && Array.isArray(params.line_items.data) ? params.line_items.data : [];
+  const items = Array.isArray(params.line_items) ? params.line_items : isObj2(params.line_items) && Array.isArray(params.line_items.data) ? params.line_items.data : [];
   const out = [];
   for (const li of items) {
-    if (!isObj(li)) continue;
+    if (!isObj2(li)) continue;
     if (typeof li.price === "string") out.push(li.price);
-    else if (isObj(li.price) && typeof li.price.id === "string") out.push(li.price.id);
+    else if (isObj2(li.price) && typeof li.price.id === "string") out.push(li.price.id);
   }
   return out;
 }
@@ -28591,7 +30729,7 @@ function resolvePriceIds(params, plans) {
   };
 }
 function modelCheckoutConfig(params, opts) {
-  const consentRequired = isObj(params.consent_collection) && params.consent_collection.terms_of_service === "required";
+  const consentRequired = isObj2(params.consent_collection) && params.consent_collection.terms_of_service === "required";
   if (params.mode !== void 0 && params.mode !== "subscription" && !JSON.stringify(params.line_items ?? "").includes('"recurring"')) {
     return { consentRequired, problem: 'not a subscription (mode is not "subscription")' };
   }
@@ -28628,20 +30766,20 @@ function modelCheckoutConfig(params, opts) {
 function noticeChannelField(params) {
   const fields = Array.isArray(params.custom_fields) ? params.custom_fields : [];
   const i = fields.findIndex((f2) => {
-    if (!isObj(f2) || f2.type !== "dropdown") return false;
-    const label = isObj(f2.label) && typeof f2.label.custom === "string" ? f2.label.custom : "";
+    if (!isObj2(f2) || f2.type !== "dropdown") return false;
+    const label = isObj2(f2.label) && typeof f2.label.custom === "string" ? f2.label.custom : "";
     return /notice|channel/i.test(`${String(f2.key ?? "")} ${label}`);
   });
   if (i < 0) return null;
   const f = fields[i];
-  const options = isObj(f.dropdown) && Array.isArray(f.dropdown.options) ? f.dropdown.options.filter(isObj).map((o) => String(o.label ?? o.value ?? "")).filter(Boolean) : [];
+  const options = isObj2(f.dropdown) && Array.isArray(f.dropdown.options) ? f.dropdown.options.filter(isObj2).map((o) => String(o.label ?? o.value ?? "")).filter(Boolean) : [];
   return {
     code: "notice_channel_field",
     message: `custom_fields[${i}] ("${String(f.key ?? "")}") asks how the customer wants account notices${options.length ? ` (${options.join(", ")})` : ""}: this is the New York notice-channel choice. Store each answer (custom_fields[].dropdown.value on the session) and send renewal, trial-ending and price-change notices that way; once it is live, the person answers "yes" to the New York task. It does not change these checks.`,
     param: `params.custom_fields[${i}]`
   };
 }
-var TEXT_CHECKS, CONSENT_CHECKS2, HOSTED_STYLING_NOTE, INTRO_PROMISE_RE, isObj, msg, CUSTOM_TEXT_FIELDS, STRIPE_GREY, DAY_MS3, open, LONG_CANCEL_URL_CHARS, PAIRING_ACTION, STRIPE_HOSTED_STYLING_NOTE;
+var TEXT_CHECKS, CONSENT_CHECKS2, HOSTED_STYLING_NOTE, INTRO_PROMISE_RE, isObj2, msg, CUSTOM_TEXT_FIELDS, STRIPE_GREY, DAY_MS3, open, LONG_CANCEL_URL_CHARS, PAIRING_ACTION, STRIPE_HOSTED_STYLING_NOTE;
 var init_stripe2 = __esm({
   "packages/rules/src/preflight/stripe.ts"() {
     "use strict";
@@ -28671,8 +30809,8 @@ var init_stripe2 = __esm({
     CONSENT_CHECKS2 = ["signup.consent.affirmative", "signup.consent.not_prechecked"];
     HOSTED_STYLING_NOTE = 'Stripe renders custom_text in its own small grey style next to the button; that styling cannot be changed, so "clear and conspicuous" (and placement) stay a note on any Stripe-hosted checkout: the check reads needs_review with that note, and it never holds the verdict back. Also state the renewal terms on your own page before redirecting to Stripe (check it with /v1/checks/disclosure) and in the product description.';
     INTRO_PROMISE_RE = /\b\d{1,3}(?:\.\d+)?\s?%\s*off\b|\b(?:introductory|intro)\s+(?:price|rate|offer|discount)\b|\b(?:discounted|promotional|promo)\s+(?:price|rate)\b|(?:US\$|\$|€|£)\s?\d[\d,]*(?:\.\d{1,2})?\s+(?:for\s+(?:your|the)\s+)?first\s+(?:\d+\s+)?(?:months?|years?|weeks?|box(?:es)?|orders?|deliver(?:y|ies)|shipments?)\b|\bfirst\s+(?:\d+\s+)?(?:months?|years?|weeks?|box(?:es)?|orders?)\s+(?:for|at|just|only)\s+(?:US\$|\$|€|£)\s?\d/i;
-    isObj = (v) => typeof v === "object" && v !== null && !Array.isArray(v);
-    msg = (v) => isObj(v) && typeof v.message === "string" && v.message.trim() ? v.message : void 0;
+    isObj2 = (v) => typeof v === "object" && v !== null && !Array.isArray(v);
+    msg = (v) => isObj2(v) && typeof v.message === "string" && v.message.trim() ? v.message : void 0;
     CUSTOM_TEXT_FIELDS = ["submit", "terms_of_service_acceptance", "after_submit", "shipping_address"];
     STRIPE_GREY = { fontSizePx: 13, fontWeight: 400, color: "rgba(26, 26, 26, 0.7)", backgroundColor: "rgb(255, 255, 255)" };
     DAY_MS3 = 864e5;
@@ -29047,7 +31185,7 @@ function nextAction2(kind, checks, requiredBy, tpl, unresolved = []) {
 }
 async function checkEmail(input, opts = {}) {
   if (!input || typeof input !== "object") throw new PreflightInputError("Request body must be an object");
-  if (!EMAIL_KINDS.includes(input.kind)) throw new PreflightInputError(`kind must be one of ${EMAIL_KINDS.join(", ")}`, "kind");
+  if (!EMAIL_KINDS2.includes(input.kind)) throw new PreflightInputError(`kind must be one of ${EMAIL_KINDS2.join(", ")}`, "kind");
   if (typeof input.subject !== "string" || !input.subject.trim()) throw new PreflightInputError("subject is required", "subject");
   if (input.subject.length > 1e3) throw new PreflightInputError("subject must be at most 1000 characters", "subject");
   const text = typeof input.text === "string" ? input.text : "";
@@ -29123,7 +31261,7 @@ ${html ? visibleHtmlToText(html) : ""}`
     template
   };
 }
-var EMAIL_KINDS, EMAIL_KIND_CHECKS, CAPTURE_KIND, MAX_EMAIL_CHARS, DAY_MS4, OPEN2, TRIAL_UNKNOWN_NOTE, esc2, SUPPORT_CONTACT_PLACEHOLDER, FRAME_CHARS_RE, GREETING_RE, SIGN_OFF_RE, DATE_TAGS, RECIPIENT_TAG_RE, OWN_DATE_TAG_RE;
+var EMAIL_KINDS2, EMAIL_KIND_CHECKS, CAPTURE_KIND, MAX_EMAIL_CHARS, DAY_MS4, OPEN2, TRIAL_UNKNOWN_NOTE, esc2, SUPPORT_CONTACT_PLACEHOLDER, FRAME_CHARS_RE, GREETING_RE, SIGN_OFF_RE, DATE_TAGS, RECIPIENT_TAG_RE, OWN_DATE_TAG_RE;
 var init_email = __esm({
   "packages/rules/src/preflight/email.ts"() {
     "use strict";
@@ -29134,7 +31272,7 @@ var init_email = __esm({
     init_terms2();
     init_common();
     init_disclosure();
-    EMAIL_KINDS = ["acknowledgment", "trial_reminder", "renewal_reminder", "price_change", "annual_terms", "charge_notice", "cancellation_confirmation"];
+    EMAIL_KINDS2 = ["acknowledgment", "trial_reminder", "renewal_reminder", "price_change", "annual_terms", "charge_notice", "cancellation_confirmation"];
     EMAIL_KIND_CHECKS = {
       acknowledgment: ["confirmation.email.terms", "confirmation.email.cancellation_instructions", "confirmation.email.trial_terms"],
       trial_reminder: ["reminder.trial_ending"],
@@ -29250,6 +31388,12 @@ function pagePriceDiffers(findings) {
   const quotes = units.filter((u) => u.priceMismatch === true && u.otherPlanCard !== true && u.equivalentPrice !== true && u.status !== "pass" && u.status !== "not_applicable").map((u) => typeof u.quote === "string" && u.quote ? u.quote : "a different price");
   return [...new Set(quotes)];
 }
+function withPlansPartial(next, checks, cards) {
+  if (!cards || next.type === "provide_input") return next;
+  const fails = checks.filter((c) => c.status === "fail");
+  const again = `The page shows ${cards} plan cards but terms describe one plan (warning plans_partial): call this check again with plans: [every plan the page sells], so each card is checked against its own price.`;
+  return fails.length ? { ...next, message: `${again} Then: ${next.message}` } : { type: "provide_input", message: `${again} The open items on the other cards are not judged until then; nothing to paste yet.` };
+}
 function withPriceDiffers(next, differs) {
   if (!differs.length) return next;
   return { ...next, message: `The price on the page differs from the plan terms you passed (warning page_price_differs): confirm which price subscribers are charged first. ${next.message}` };
@@ -29288,7 +31432,7 @@ async function checkPageHtml(input, opts = {}) {
   if (typeof input.html !== "string" || !input.html.trim()) throw new PreflightInputError("html is required", "html");
   if (input.html.length > MAX_HTML_BYTES) throw new PreflightInputError(`html must be at most ${MAX_HTML_BYTES} characters`, "html");
   const pageKind = input.page_kind ?? "checkout";
-  if (!PAGE_KINDS.includes(pageKind)) throw new PreflightInputError('page_kind must be "checkout" or "pricing"', "page_kind");
+  if (!PAGE_KINDS2.includes(pageKind)) throw new PreflightInputError('page_kind must be "checkout" or "pricing"', "page_kind");
   let url = "https://merchant.example/checkout";
   if (input.url !== void 0) {
     try {
@@ -29410,7 +31554,7 @@ async function checkPageHtml(input, opts = {}) {
   } : built;
   const planReplacements = multi ? await Promise.all(plans.map(async (p, i) => ({ plan: planDisplay(p, i), ...await buildReplacement(p, jurisdictions, asOf, now, repOpts) }))) : void 0;
   return {
-    ...baseReport("page", checks, jurisdictions, asOf, warnings, withPriceDiffers(nextAction3(checks, replacement ?? planReplacements?.[0], capture.ctas.length, !!planReplacements, onStripe), differs), capture.text, multi ? void 0 : plan2),
+    ...baseReport("page", checks, jurisdictions, asOf, warnings, withPriceDiffers(withPlansPartial(nextAction3(checks, replacement ?? planReplacements?.[0], capture.ctas.length, !!planReplacements, onStripe), checks, partial ? capture.offers?.length : void 0), differs), capture.text, multi ? void 0 : plan2),
     kind: "page",
     source: opts.source ?? "html",
     extraction: {
@@ -29426,7 +31570,7 @@ async function checkPageHtml(input, opts = {}) {
     ...planReplacements ? { plan_replacements: planReplacements } : {}
   };
 }
-var LAYOUT_CHECKS, PAGE_KINDS, CHECKOUT_TYPES, MAX_PLANS, sameTerms2, TEXT_CHECKS2, CONSENT_CHECKS3;
+var LAYOUT_CHECKS, PAGE_KINDS2, CHECKOUT_TYPES, MAX_PLANS, sameTerms2, TEXT_CHECKS2, CONSENT_CHECKS3;
 var init_page = __esm({
   "packages/rules/src/preflight/page.ts"() {
     "use strict";
@@ -29439,7 +31583,7 @@ var init_page = __esm({
     init_disclosure();
     init_html_page();
     LAYOUT_CHECKS = /* @__PURE__ */ new Set(["signup.disclosure.proximity", "signup.disclosure.conspicuous"]);
-    PAGE_KINDS = ["checkout", "pricing"];
+    PAGE_KINDS2 = ["checkout", "pricing"];
     CHECKOUT_TYPES = ["own_page", "stripe_checkout", "payment_link"];
     MAX_PLANS = 20;
     sameTerms2 = (a, b) => a.amount === b.amount && a.currency === b.currency && a.interval === b.interval && a.intervalCount === b.intervalCount;
@@ -29724,7 +31868,7 @@ var preflight_exports = {};
 __export(preflight_exports, {
   CANCEL_URL_PLACEHOLDER: () => CANCEL_URL_PLACEHOLDER2,
   DEFAULT_CONSENT_LABEL: () => DEFAULT_CONSENT_LABEL,
-  EMAIL_KINDS: () => EMAIL_KINDS,
+  EMAIL_KINDS: () => EMAIL_KINDS2,
   EMAIL_KIND_CHECKS: () => EMAIL_KIND_CHECKS,
   LONG_CANCEL_URL_CHARS: () => LONG_CANCEL_URL_CHARS,
   MAX_DISCLOSURE_CHARS: () => MAX_DISCLOSURE_CHARS,
@@ -29789,1789 +31933,9 @@ var init_preflight = __esm({
   }
 });
 
-// packages/cli/src/commands/check/index.ts
-var check_exports = {};
-__export(check_exports, {
-  default: () => check_default
-});
-import { readFileSync as readFileSync3 } from "node:fs";
-import { resolve as resolve2 } from "node:path";
-function operationFor(endpoint) {
-  const op = Object.values(OPERATIONS).find((o) => o.httpMethod === "POST" && o.path === endpoint);
-  if (!op) throw new Error(`No API operation for POST ${endpoint}`);
-  return op.operationId;
-}
-async function readInput(ctx, file) {
-  if (file === "-") return ctx.readStdin();
-  try {
-    return readFileSync3(resolve2(ctx.cwd, file), "utf8");
-  } catch (err) {
-    throw new UsageError(`Cannot read ${file}: ${err.code ?? err.message}`);
-  }
-}
-function parseJson(text, what) {
-  try {
-    const v = JSON.parse(text);
-    if (!v || typeof v !== "object" || Array.isArray(v)) throw new Error("not an object");
-    return v;
-  } catch (err) {
-    throw new UsageError(`${what} must be a JSON object (${err.message})`);
-  }
-}
-function planFrom(f) {
-  const out = {};
-  const s2 = (flag, key) => {
-    const v = str(f, flag);
-    if (v !== void 0) out[key] = v;
-  };
-  const n = (flag, key) => {
-    const v = num(f, flag);
-    if (v !== void 0) out[key] = v;
-  };
-  s2("merchant-name", "merchant_name");
-  s2("plan-name", "plan_name");
-  const price3 = str(f, "price");
-  if (price3 !== void 0) out.price = /^[\d.]+$/.test(price3) ? Number(price3) : price3;
-  n("amount", "amount");
-  s2("currency", "currency");
-  s2("interval", "interval");
-  n("interval-count", "interval_count");
-  n("trial-days", "trial_days");
-  s2("cancel-url", "cancel_url");
-  s2("cancel-timing", "cancel_timing");
-  return out;
-}
-function common2(f) {
-  const j = list(f, "jurisdictions");
-  const asOf = str(f, "as-of");
-  return { ...j ? { jurisdictions: j.length === 1 && j[0].toLowerCase() === "all" ? "all" : j } : {}, ...asOf ? { as_of: asOf } : {} };
-}
-async function preflight() {
-  return Promise.resolve().then(() => (init_preflight(), preflight_exports));
-}
-var PLAN_FLAGS, COMMON_STRING, SUBS, HELP, check_default;
-var init_check = __esm({
-  "packages/cli/src/commands/check/index.ts"() {
-    "use strict";
-    init_args();
-    init_types2();
-    init_render();
-    init_src();
-    PLAN_FLAGS = ["merchant-name", "plan-name", "price", "amount", "currency", "interval", "interval-count", "trial-days", "cancel-url", "cancel-timing"];
-    COMMON_STRING = ["as-of", "body"];
-    SUBS = {
-      disclosure: {
-        endpoint: "/v1/checks/disclosure",
-        offline: true,
-        summary: "Checkout disclosure text + placement + consent checkbox",
-        flags: {
-          string: ["text", "file", "button-text", "order-summary", "font-size", "contrast", "body-font-size", "consent-label"],
-          boolean: ["above-button", "same-page", "bold", "boxed", "consent-checkbox", "prechecked", "consent-required"]
-        },
-        async build(p, ctx) {
-          const f = p.flags;
-          const file = str(f, "file");
-          const text = str(f, "text") ?? (file ? (await readInput(ctx, file)).trim() : void 0);
-          if (!text) throw new UsageError('Give the disclosure with --text "\u2026" or --file <path> (- for stdin)');
-          const placement = {};
-          const pb = (flag, key) => {
-            const v = bool(f, flag);
-            if (v !== void 0) placement[key] = v;
-          };
-          pb("above-button", "above_button");
-          pb("same-page", "same_page_as_payment");
-          pb("bold", "bold");
-          pb("boxed", "boxed");
-          const fs = num(f, "font-size");
-          if (fs !== void 0) placement.font_size_px = fs;
-          const cr = num(f, "contrast");
-          if (cr !== void 0) placement.contrast_ratio = cr;
-          const bfs = num(f, "body-font-size");
-          if (bfs !== void 0) placement.body_font_size_px = bfs;
-          const cb = bool(f, "consent-checkbox");
-          const consent = cb !== void 0 || bool(f, "prechecked") !== void 0 || str(f, "consent-label") ? {
-            checkbox: cb ?? true,
-            prechecked: bool(f, "prechecked") ?? false,
-            ...str(f, "consent-label") ? { label: str(f, "consent-label") } : {},
-            ...bool(f, "consent-required") !== void 0 ? { required: bool(f, "consent-required") } : {}
-          } : void 0;
-          return {
-            text,
-            ...planFrom(f),
-            ...str(f, "button-text") ? { button_text: str(f, "button-text") } : {},
-            ...str(f, "order-summary") ? { order_summary: str(f, "order-summary") } : {},
-            ...Object.keys(placement).length ? { placement } : {},
-            ...consent ? { consent } : {},
-            ...common2(f)
-          };
-        },
-        async runOffline(body) {
-          return (await preflight()).checkDisclosure(body);
-        }
-      },
-      "stripe-session": {
-        endpoint: "/v1/checks/stripe_checkout_session",
-        offline: true,
-        summary: "Params passed to stripe.checkout.sessions.create",
-        flags: { string: ["file", "params"] },
-        async build(p, ctx) {
-          const raw = str(p.flags, "params") ?? (str(p.flags, "file") ? await readInput(ctx, str(p.flags, "file")) : void 0);
-          if (!raw) throw new UsageError("Give the Checkout Session params with --file <params.json> (- for stdin) or --params '{\u2026}'");
-          const merchant = planFrom(p.flags);
-          return { params: parseJson(raw, "The Checkout Session params"), ...Object.keys(merchant).length ? { merchant } : {}, ...common2(p.flags) };
-        },
-        async runOffline(body) {
-          return (await preflight()).checkStripeCheckoutSession(body);
-        }
-      },
-      "payment-link": {
-        endpoint: "/v1/checks/stripe_payment_link",
-        offline: true,
-        summary: "Payment Link create params or a retrieved link object",
-        flags: { string: ["file", "params"] },
-        async build(p, ctx) {
-          const raw = str(p.flags, "params") ?? (str(p.flags, "file") ? await readInput(ctx, str(p.flags, "file")) : void 0);
-          if (!raw) throw new UsageError("Give the Payment Link params with --file <link.json> (- for stdin) or --params '{\u2026}'");
-          const merchant = planFrom(p.flags);
-          return { params: parseJson(raw, "The Payment Link params"), ...Object.keys(merchant).length ? { merchant } : {}, ...common2(p.flags) };
-        },
-        async runOffline(body) {
-          return (await preflight()).checkStripePaymentLink(body);
-        }
-      },
-      email: {
-        endpoint: "/v1/checks/email",
-        offline: true,
-        summary: "Lifecycle email (acknowledgment, reminders, price change, cancellation confirmation)",
-        flags: { string: ["kind", "subject", "text", "file", "html-file", "previous-price", "support-contact"] },
-        async build(p, ctx) {
-          const f = p.flags;
-          const kind = str(f, "kind");
-          if (!kind) throw new UsageError("--kind is required: acknowledgment, trial_reminder, renewal_reminder, price_change, annual_terms or cancellation_confirmation");
-          let subject = str(f, "subject");
-          let text = str(f, "text");
-          let html;
-          const file = str(f, "file");
-          if (file) {
-            let content = await readInput(ctx, file);
-            const m = /^subject:\s*(.+)\r?\n/i.exec(content);
-            if (m) {
-              subject ??= m[1].trim();
-              content = content.slice(m[0].length);
-            }
-            if (/\.html?$/i.test(file) || /^\s*</.test(content)) html = content;
-            else text = content;
-          }
-          const hf = str(f, "html-file");
-          if (hf) html = await readInput(ctx, hf);
-          if (!subject && html) subject = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(html)?.[1]?.replace(/\s+/g, " ").trim() || void 0;
-          if (!subject) throw new UsageError('--subject is required (or a "Subject: \u2026" first line in --file, or an HTML <title>)');
-          if (!text && !html) throw new UsageError("Give the email body with --text, --file or --html-file");
-          const terms2 = planFrom(f);
-          const pp = str(f, "previous-price");
-          if (pp) terms2.previous_price = /^[\d.]+$/.test(pp) ? Number(pp) : pp;
-          if (str(f, "support-contact")) terms2.support_contact = str(f, "support-contact");
-          return { kind: kind.replace(/-/g, "_"), subject, ...text ? { text } : {}, ...html ? { html } : {}, terms: terms2, ...common2(f) };
-        },
-        async runOffline(body) {
-          return (await preflight()).checkEmail(body);
-        }
-      },
-      page: {
-        endpoint: "/v1/checks/page",
-        offline: true,
-        summary: "Checkout page HTML (--file) or a live URL (--url, activated live accounts)",
-        flags: { string: ["file", "url", "page-kind"] },
-        async build(p, ctx) {
-          const f = p.flags;
-          const file = str(f, "file");
-          const url = str(f, "url");
-          if (!file && !url) throw new UsageError("Give the page with --file <page.html> (- for stdin) or --url <https://\u2026>");
-          const terms2 = planFrom(f);
-          return {
-            ...file ? { html: await readInput(ctx, file) } : {},
-            ...url ? { url } : {},
-            ...str(f, "page-kind") ? { page_kind: str(f, "page-kind") } : {},
-            ...Object.keys(terms2).length ? { terms: terms2 } : {},
-            ...common2(f)
-          };
-        },
-        async runOffline(body) {
-          if (typeof body.html !== "string") throw new UsageError("--offline needs --file (fetching --url is done by the API)");
-          return (await preflight()).checkPageHtml(body);
-        }
-      },
-      "notice-schedule": {
-        endpoint: "/v1/checks/notice_schedule",
-        offline: false,
-        summary: "Exact dates each legally required notice must be sent",
-        flags: { string: ["start-date", "price-change-date", "new-price", "cycles"] },
-        async build(p) {
-          const f = p.flags;
-          const terms2 = planFrom(f);
-          const pcd = str(f, "price-change-date");
-          const np = str(f, "new-price");
-          return {
-            terms: terms2,
-            ...str(f, "start-date") ? { start_date: str(f, "start-date") } : {},
-            ...pcd || np ? { price_change: { ...pcd ? { effective_date: pcd } : {}, ...np ? { new_price: Number(np) } : {} } } : {},
-            ...num(f, "cycles") !== void 0 ? { cycles: num(f, "cycles") } : {},
-            ...common2(f)
-          };
-        }
-      }
-    };
-    HELP = [
-      "Sub-commands:",
-      ...Object.entries(SUBS).map(([k, s2]) => `  ${k.padEnd(16)} ${s2.summary}${s2.offline ? "" : " (online only)"}`),
-      "",
-      "Plan flags (the subscription the checkout sells):",
-      "  --price <19.99> | --amount <1999>   recurring price (major units | minor units)",
-      "  --currency usd  --interval month|year|week|day  --interval-count 1  --trial-days 14",
-      '  --merchant-name "Joybox"  --plan-name "Pro"  --cancel-url https://\u2026  --cancel-timing period_end|immediately',
-      "",
-      'disclosure:     --text "\u2026" | --file terms.txt   [--button-text Subscribe] [--no-above-button] [--no-same-page]',
-      '                [--font-size 14] [--contrast 7] [--bold] [--boxed] [--consent-checkbox] [--prechecked] [--consent-label "\u2026"]',
-      "stripe-session: --file params.json (the object passed to stripe.checkout.sessions.create; - for stdin)",
-      "payment-link:   --file link.json (paymentLinks.create params, or a retrieved link incl. its id)",
-      'email:          --kind trial_reminder --subject "\u2026" (--text "\u2026" | --file email.txt|email.html) [--previous-price 14.99]',
-      "page:           --file checkout.html | --url https://\u2026 (url: online, activated live accounts) [--page-kind checkout|pricing]",
-      "notice-schedule: plan flags + [--start-date YYYY-MM-DD] [--price-change-date YYYY-MM-DD --new-price 24.99] [--cycles 2]",
-      "",
-      "Common: --jurisdictions US-CA,US-NY (default all) \xB7 --as-of YYYY-MM-DD \xB7 --body request.json (send a full request body)",
-      "        --offline (run the rules engine locally; no key or network) \xB7 --strict (needs_review exits 2) \xB7 --verbose \xB7 --json",
-      "",
-      "Exit: 0 pass (or needs_review without --strict) \xB7 1 fail \xB7 2 needs_review with --strict \xB7 3 usage \xB7 4 auth \xB7 5 error",
-      "",
-      "Examples:",
-      '  checkbox check disclosure --text "Renews monthly at $19.99 until you cancel." --price 19.99 --interval month --consent-checkbox',
-      "  checkbox check stripe-session --file session.json --merchant-name Joybox --cancel-url https://joybox.com/cancel --json",
-      "  checkbox check email --kind acknowledgment --file emails/welcome.html --price 19.99 --interval month --offline"
-    ].join("\n");
-    check_default = defineCommand({
-      name: "check",
-      summary: "Preflight compliance checks: disclosure text, Stripe params, emails, checkout HTML",
-      usage: "checkbox check <disclosure|stripe-session|payment-link|email|page|notice-schedule> [flags]",
-      help: HELP,
-      async run(ctx) {
-        const [subName, ...rest] = ctx.argv;
-        const sub = subName ? SUBS[subName] ?? SUBS[subName.replace(/_/g, "-")] : void 0;
-        if (!sub) {
-          throw new UsageError(subName ? `Unknown check "${subName}". Choose one of: ${Object.keys(SUBS).join(", ")}` : `Which check? ${Object.keys(SUBS).join(", ")} (see checkbox check --help)`);
-        }
-        const p = parseArgs(rest, {
-          string: [...sub.flags.string ?? [], ...PLAN_FLAGS, ...COMMON_STRING],
-          boolean: [...sub.flags.boolean ?? [], "offline", "strict", "verbose"],
-          multiple: ["jurisdictions"]
-        });
-        if (p.positionals.length) throw new UsageError(`Unexpected argument "${p.positionals[0]}"`);
-        const bodyFile = str(p.flags, "body");
-        const body = bodyFile ? parseJson(await readInput(ctx, bodyFile), "--body") : await sub.build(p, ctx);
-        const offline = bool(p.flags, "offline") === true;
-        let report;
-        if (offline) {
-          if (!sub.runOffline) throw new UsageError(`checkbox check ${subName} needs the API (no --offline mode)`);
-          try {
-            report = { ...await sub.runOffline(body), mode: "offline" };
-          } catch (err) {
-            if (err instanceof Error && err.name === "PreflightInputError") {
-              const param = err.param;
-              ctx.out.error({ message: err.message, code: "parameter_invalid", type: "invalid_request_error", ...param ? { param } : {} });
-              return EXIT.usage;
-            }
-            throw err;
-          }
-        } else {
-          report = await ctx.client().sdk.call(operationFor(sub.endpoint), body);
-        }
-        ctx.out.result(report, () => renderReport(report, ctx.out, { offline, verbose: bool(p.flags, "verbose") === true }));
-        return exitCodeFor(report, bool(p.flags, "strict") === true);
-      }
-    });
-  }
-});
-
-// packages/cli/src/commands/init/device.ts
-import { spawn } from "node:child_process";
-function detectAgent(env2, flag) {
-  if (flag) return flag.slice(0, 60);
-  if (env2.CLAUDECODE === "1" || env2.CLAUDE_CODE_ENTRYPOINT) return "Claude Code";
-  if (env2.CURSOR_TRACE_ID || env2.CURSOR_AGENT) return "Cursor";
-  if (env2.WINDSURF_SESSION_ID || env2.CODEIUM_API_KEY) return "Windsurf";
-  if (env2.GITHUB_COPILOT_AGENT || env2.COPILOT_AGENT_ID) return "GitHub Copilot";
-  if (env2.CODEX_SANDBOX || env2.CODEX_HOME) return "Codex";
-  if (env2.CLINE_TASK_ID) return "Cline";
-  return void 0;
-}
-function openBrowser(url, env2) {
-  if (env2.CI || env2.CHECKBOX_NO_BROWSER === "1") return false;
-  const platform = process.platform;
-  let cmd;
-  let args;
-  if (platform === "darwin") [cmd, args] = ["open", [url]];
-  else if (platform === "win32") [cmd, args] = ["cmd", ["/c", "start", '""', url]];
-  else if (env2.DISPLAY || env2.WAYLAND_DISPLAY) [cmd, args] = ["xdg-open", [url]];
-  else return false;
-  try {
-    const child = spawn(cmd, args, { detached: true, stdio: "ignore" });
-    child.on("error", () => void 0);
-    child.unref();
-    return true;
-  } catch {
-    return false;
-  }
-}
-async function startDeviceLogin(client, body) {
-  return await client.sdk.device.authorize(body);
-}
-async function pollDeviceLogin(client, pending, waitMs, ctx) {
-  const deadline = Date.now() + waitMs;
-  let interval = Math.max(0, pending.interval) * 1e3;
-  for (; ; ) {
-    if (Date.parse(pending.expires_at) <= Date.now()) return { status: "expired", message: "The login code expired. Run `checkbox init` again for a new one." };
-    try {
-      const token = await client.sdk.device.token({ device_code: pending.device_code });
-      return { status: "approved", token };
-    } catch (err) {
-      if (!(err instanceof ApiError)) throw err;
-      if (err.code === "authorization_pending") {
-      } else if (err.code === "slow_down") {
-        interval += 5e3;
-      } else if (err.code === "access_denied") {
-        return { status: "denied", message: err.message };
-      } else if (err.code === "expired_token" || err.code === "device_code_invalid") {
-        return { status: "expired", message: err.message };
-      } else if (apiStatus(err) === 0 || apiStatus(err) >= 500) {
-        ctx.out.warn(`could not reach Checkbox (${err.message}); retrying`);
-      } else {
-        throw err;
-      }
-    }
-    if (Date.now() + interval > deadline) return { status: "timeout" };
-    await sleep2(interval);
-  }
-}
-var sleep2;
-var init_device = __esm({
-  "packages/cli/src/commands/init/device.ts"() {
-    "use strict";
-    init_http();
-    sleep2 = (ms) => new Promise((r) => setTimeout(r, ms));
-  }
-});
-
-// packages/cli/src/ci/config.ts
-import { existsSync as existsSync3, readFileSync as readFileSync4 } from "node:fs";
-import { dirname as dirname3, isAbsolute, join as join3, resolve as resolve3 } from "node:path";
-function planList(config, ref) {
-  if (Array.isArray(ref)) return ref;
-  if (ref === "all" && !(config.plans ?? []).some((p) => p.name === "all")) return (config.plans ?? []).map((p) => p.name);
-  return void 0;
-}
-function findConfig(cwd, explicit) {
-  if (explicit) {
-    const p = isAbsolute(explicit) ? explicit : resolve3(cwd, explicit);
-    return existsSync3(p) ? p : void 0;
-  }
-  for (const f of CONFIG_FILES) if (existsSync3(join3(cwd, f))) return join3(cwd, f);
-  return void 0;
-}
-function loadConfig(path) {
-  let raw;
-  try {
-    raw = readFileSync4(path, "utf8");
-  } catch (err) {
-    throw new ConfigError(path, [`cannot read the file (${err.code ?? err.message})`]);
-  }
-  let value;
-  try {
-    value = JSON.parse(raw);
-  } catch (err) {
-    throw new ConfigError(path, [`is not valid JSON: ${err.message}`]);
-  }
-  normalizeKinds(value);
-  const issues = validateConfig(value);
-  if (issues.length) throw new ConfigError(path, issues);
-  return { config: value, path, dir: dirname3(path), raw };
-}
-function normalizeKinds(value) {
-  if (!isObj2(value)) return;
-  const emails = isObj2(value.checks) ? value.checks.emails : void 0;
-  if (Array.isArray(emails)) {
-    for (const e of emails) if (isObj2(e) && typeof e.kind === "string" && KIND_ALIASES[e.kind]) e.kind = KIND_ALIASES[e.kind];
-  }
-  const sb = isObj2(value.notices) ? value.notices.sent_by_checkbox : void 0;
-  if (Array.isArray(sb)) {
-    for (let i = 0; i < sb.length; i++) if (typeof sb[i] === "string" && KIND_ALIASES[sb[i]]) sb[i] = KIND_ALIASES[sb[i]];
-  }
-}
-function validateConfig(value) {
-  const is = new Issues();
-  if (!isObj2(value)) return ["must be a JSON object (see https://checkbox.site/docs/guides/ci#config)"];
-  is.keys("", value, ["$schema", "merchant", "jurisdictions", "plans", "notices", "merge_tags", "stripe_links_kept", "checks", "coverage"]);
-  const kept = value.stripe_links_kept;
-  if (kept !== void 0) {
-    if (!Array.isArray(kept)) is.add("stripe_links_kept", `must be a list like [{ "id": "plink_\u2026", "reason": "the owner keeps the 7-day link for the partner campaign" }] (got ${show(kept)})`);
-    else
-      kept.forEach((k, i) => {
-        if (!isObj2(k)) return is.add(`stripe_links_kept[${i}]`, `must be an object with id and reason (got ${show(k)})`);
-        is.keys(`stripe_links_kept[${i}]`, k, ["id", "reason"]);
-        if (typeof k.id !== "string" || !/^plink_\w+$/.test(k.id)) is.add(`stripe_links_kept[${i}].id`, `must be a Payment Link id (plink_\u2026) (got ${show(k.id)})`);
-        if (typeof k.reason !== "string" || k.reason.trim().length < 3 || k.reason.length > 500) is.add(`stripe_links_kept[${i}].reason`, "must say why the owner keeps it (3 to 500 characters)");
-      });
-  }
-  const cov = value.coverage;
-  if (cov !== void 0 && cov !== false) {
-    if (!isObj2(cov)) is.add("coverage", `must be false or an object like { "ignore": ["scripts/**"] } (got ${show(cov)})`);
-    else {
-      is.keys("coverage", cov, ["ignore"]);
-      if (cov.ignore !== void 0 && (!Array.isArray(cov.ignore) || !cov.ignore.every((g) => typeof g === "string" && g.trim()))) is.add("coverage.ignore", `must be a list of file globs like ["scripts/**", "admin/*.ts"] (got ${show(cov.ignore)})`);
-    }
-  }
-  if (value.$schema !== void 0 && typeof value.$schema !== "string") is.add("$schema", "must be a string");
-  const m = value.merchant;
-  if (m !== void 0) {
-    if (!isObj2(m)) is.add("merchant", `must be an object (got ${show(m)})`);
-    else {
-      is.keys("merchant", m, ["name", "cancel_url", "support_contact"]);
-      is.str("merchant.name", m.name, { max: 200 });
-      is.str("merchant.cancel_url", m.cancel_url, { pattern: /^https?:\/\/\S+$/, patternHint: "an http(s) URL" });
-      is.str("merchant.support_contact", m.support_contact, { max: 300 });
-    }
-  }
-  const j = value.jurisdictions;
-  if (j !== void 0 && j !== "all") {
-    if (!Array.isArray(j) || !j.length || !j.every((x) => typeof x === "string" && /^(?:US-)?[A-Z]{2,3}$|^US-FED$|^US-NYC$/i.test(x))) {
-      is.add("jurisdictions", `must be "all" or a list of codes like ["US-CA", "US-NY"] (got ${show(j)})`);
-    }
-  }
-  const planNames = /* @__PURE__ */ new Set();
-  const plans = value.plans;
-  if (plans !== void 0) {
-    if (!Array.isArray(plans)) is.add("plans", `must be an array (got ${show(plans)})`);
-    else
-      plans.forEach((p, i) => {
-        const at = `plans[${i}]`;
-        if (!isObj2(p)) return is.add(at, `must be an object (got ${show(p)})`);
-        is.keys(at, p, PLAN_KEYS);
-        if (is.str(`${at}.name`, p.name, { required: true, max: 200 })) {
-          if (planNames.has(p.name)) is.add(`${at}.name`, `duplicates another plan's name (${show(p.name)})`);
-          planNames.add(p.name);
-        }
-        if (p.price === void 0 && p.amount === void 0) is.add(at, 'needs "price" (major units, e.g. 19.99) or "amount" (minor units, e.g. 1999)');
-        if (p.price !== void 0 && p.amount !== void 0) is.add(at, 'has "price" and "amount": give only one');
-        is.money(`${at}.price`, p.price);
-        is.int(`${at}.amount`, p.amount, 0, 1e8);
-        if (p.currency !== void 0) is.str(`${at}.currency`, p.currency, { pattern: /^[A-Za-z]{3}$/, patternHint: 'a 3-letter ISO currency code like "usd"' });
-        is.oneOf(`${at}.interval`, p.interval, INTERVALS4, true);
-        is.int(`${at}.interval_count`, p.interval_count, 1, 365);
-        is.int(`${at}.trial_days`, p.trial_days, 0, 730);
-        is.money(`${at}.intro_price`, p.intro_price);
-        is.int(`${at}.intro_amount`, p.intro_amount, 0, 1e8);
-        is.int(`${at}.intro_periods`, p.intro_periods, 1, 120);
-        if (p.intro_percent_off !== void 0 && !(typeof p.intro_percent_off === "number" && p.intro_percent_off > 0 && p.intro_percent_off < 100)) is.add(`${at}.intro_percent_off`, `must be a number above 0 and below 100 (got ${show(p.intro_percent_off)})`);
-        is.int(`${at}.intro_amount_off`, p.intro_amount_off, 1, 1e8);
-        if ([p.intro_price, p.intro_amount, p.intro_percent_off, p.intro_amount_off].filter((v) => v !== void 0).length > 1) is.add(at, "gives the intro terms more than one way: use one of intro_price, intro_amount, intro_percent_off, intro_amount_off");
-        is.oneOf(`${at}.cancel_timing`, p.cancel_timing, ["period_end", "immediately"]);
-      });
-  }
-  const planCount = Array.isArray(plans) ? plans.length : 0;
-  const notices = value.notices;
-  if (notices !== void 0) {
-    if (!isObj2(notices)) is.add("notices", `must be an object like { "sent_by_checkbox": true } (got ${show(notices)})`);
-    else {
-      is.keys("notices", notices, ["sent_by_checkbox"]);
-      const sb = notices.sent_by_checkbox;
-      if (sb !== true && !(Array.isArray(sb) && sb.length && sb.every((k) => typeof k === "string" && EMAIL_KINDS2.includes(k)))) {
-        is.add("notices.sent_by_checkbox", `must be true (every email Checkbox Notices sends) or a list of kinds (${EMAIL_KINDS2.join(", ")}) (got ${show(sb)})`);
-      }
-    }
-  }
-  const mergeTags = (at, m2) => {
-    if (m2 === void 0) return;
-    if (!isObj2(m2) || !Object.keys(m2).length) return is.add(at, `must be an object mapping each merge tag to its value, like { "price": "plan.price", "interval": "plan.interval", "first_name": "Sam" } (got ${show(m2)})`);
-    for (const [k, v] of Object.entries(m2)) {
-      if (!/^[A-Za-z_][\w.-]{0,60}$/.test(k)) is.add(`${at}.${k}`, "is not a merge tag name (letters, digits, _ . -; the name inside {{ }})");
-      else if (typeof v !== "string" || v.length > 500) is.add(`${at}.${k}`, `must be a string: a sample value, or one of ${MERGE_TAG_FIELDS.join(", ")} (got ${show(v)})`);
-    }
-  };
-  mergeTags("merge_tags", value.merge_tags);
-  const checks = value.checks;
-  if (!isObj2(checks)) {
-    is.add("checks", checks === void 0 ? "is required (an object with stripe_checkout, disclosures, pages, emails and/or notice_schedule)" : `must be an object (got ${show(checks)})`);
-    return is.list;
-  }
-  is.keys("checks", checks, ["stripe_checkout", "disclosures", "pages", "emails", "notice_schedule"]);
-  const names = /* @__PURE__ */ new Set();
-  const entries = (key, each, needsPlan, severalPlans = false) => {
-    const list2 = checks[key];
-    if (list2 === void 0) return;
-    if (!Array.isArray(list2)) return is.add(`checks.${key}`, `must be an array (got ${show(list2)})`);
-    list2.forEach((e, i) => {
-      const at = `checks.${key}[${i}]`;
-      if (!isObj2(e)) return is.add(at, `must be an object (got ${show(e)})`);
-      if (is.str(`${at}.name`, e.name, { required: true, max: 120 })) {
-        if (names.has(e.name)) is.add(`${at}.name`, `duplicates another check's name (${show(e.name)}); names must be unique`);
-        names.add(e.name);
-      }
-      if (severalPlans && Array.isArray(e.plan)) {
-        if (!e.plan.length || !e.plan.every((n) => typeof n === "string")) is.add(`${at}.plan`, `must be a plan name, a list of plan names or "all" (got ${show(e.plan)})`);
-        else for (const n of e.plan) if (!planNames.has(n)) is.add(`${at}.plan`, `names no plan in "plans" (${show(n)}; plans: ${[...planNames].map((x) => JSON.stringify(x)).join(", ")})`);
-      } else if (severalPlans && e.plan === "all" && !planNames.has("all")) {
-        if (!planCount) is.add(`${at}.plan`, 'is "all", but "plans" is empty: add the plans to "plans"');
-      } else if (e.plan !== void 0) {
-        if (is.str(`${at}.plan`, e.plan) && !planNames.has(e.plan)) {
-          is.add(`${at}.plan`, planCount ? `names no plan in "plans" (${show(e.plan)}; plans: ${[...planNames].map((n) => JSON.stringify(n)).join(", ")})` : `names a plan, but "plans" is empty: add the plan to "plans"`);
-        }
-      } else if (needsPlan && planCount > 1) {
-        is.add(`${at}.plan`, `is required when "plans" has several plans (one of ${[...planNames].map((n) => JSON.stringify(n)).join(", ")})`);
-      } else if (needsPlan === "always" && !planCount) {
-        is.add(at, 'needs the plan it describes: add it to "plans" (name, price, interval, trial_days)');
-      }
-      if (e.covers !== void 0 && (!Array.isArray(e.covers) || !e.covers.every((c) => typeof c === "string" && /^[^#]+(?:#[1-9]\d*)?$/.test(c)))) {
-        is.add(`${at}.covers`, `must be a list of files, or "file#n" for the n-th call (got ${show(e.covers)})`);
-      }
-      each(at, e);
-    });
-  };
-  entries(
-    "stripe_checkout",
-    (at, e) => {
-      is.keys(at, e, ["name", "plan", "params", "file", "module", "args", "source", "call", "covers", "strict"]);
-      if (e.strict !== void 0 && typeof e.strict !== "boolean") is.add(`${at}.strict`, `must be true or false (got ${show(e.strict)})`);
-      is.exactlyOne(at, e, ["params", "file", "module", "source"]);
-      if (e.params !== void 0 && !isObj2(e.params)) is.add(`${at}.params`, `must be the params object (got ${show(e.params)})`);
-      if (e.file !== void 0) is.path(`${at}.file`, e.file);
-      if (e.source !== void 0) is.path(`${at}.source`, e.source);
-      if (e.module !== void 0) is.module(`${at}.module`, e.module);
-      const sells = Array.isArray(e.plan) ? new Set(e.plan.filter((n) => typeof n === "string")) : e.plan === "all" && !planNames.has("all") ? planNames : void 0;
-      is.args(`${at}.args`, e.args, sells);
-      if (e.args !== void 0 && e.module === void 0) is.add(`${at}.args`, 'only applies with "module"');
-      is.int(`${at}.call`, e.call, 1, 100);
-      if (e.call !== void 0 && e.source === void 0) is.add(`${at}.call`, 'only applies with "source"');
-    },
-    false,
-    true
-  );
-  entries(
-    "disclosures",
-    (at, e) => {
-      is.keys(at, e, ["name", "plan", "text", "file", "button_text", "placement", "consent", "covers"]);
-      is.exactlyOne(at, e, ["text", "file"]);
-      if (e.text !== void 0) is.str(`${at}.text`, e.text, { max: 5e3 });
-      if (e.file !== void 0) is.path(`${at}.file`, e.file);
-      if (e.button_text !== void 0) is.str(`${at}.button_text`, e.button_text, { max: 200 });
-      for (const k of ["placement", "consent"]) if (e[k] !== void 0 && !isObj2(e[k])) is.add(`${at}.${k}`, `must be an object (got ${show(e[k])})`);
-    },
-    "always"
-  );
-  entries(
-    "pages",
-    (at, e) => {
-      is.keys(at, e, ["name", "plan", "file", "url", "kind", "covers", "source"]);
-      is.exactlyOne(at, e, ["file", "url"]);
-      if (e.file !== void 0) is.path(`${at}.file`, e.file);
-      if (e.source !== void 0) is.path(`${at}.source`, e.source);
-      if (e.url !== void 0) is.str(`${at}.url`, e.url, { pattern: /^https?:\/\/\S+$/, patternHint: "an http(s) URL" });
-      is.oneOf(`${at}.kind`, e.kind, PAGE_KINDS2);
-    },
-    // Round 21 (pilot 20, ci-pr-agent): a page with no "plan" is checked against every plan (a multi-plan pricing page).
-    false,
-    true
-  );
-  entries(
-    "emails",
-    (at, e) => {
-      is.keys(at, e, ["name", "plan", "kind", "subject", "file", "text", "html", "module", "args", "previous_price", "merge_tags"]);
-      mergeTags(`${at}.merge_tags`, e.merge_tags);
-      is.oneOf(`${at}.kind`, e.kind, EMAIL_KINDS2, true);
-      is.exactlyOne(at, e, ["file", "text", "html", "module"], [["text", "html"]]);
-      if (e.file !== void 0) {
-        is.path(`${at}.file`, e.file);
-        if (typeof e.file === "string" && !/\.(?:html?|txt|md|text|eml)$/i.test(e.file)) {
-          is.add(`${at}.file`, `must be a .html, .txt or .md file (got ${show(e.file)}); for React Email / MJML components use "module" with an export that returns { subject, html }`);
-        }
-      }
-      if (e.subject !== void 0) is.str(`${at}.subject`, e.subject, { max: 500 });
-      if (e.text !== void 0) is.str(`${at}.text`, e.text);
-      if (e.html !== void 0) is.str(`${at}.html`, e.html);
-      if (e.module !== void 0) is.module(`${at}.module`, e.module);
-      is.args(`${at}.args`, e.args);
-      if ((e.text !== void 0 || e.html !== void 0) && e.subject === void 0) is.add(`${at}.subject`, 'is required with inline "text" / "html"');
-      is.money(`${at}.previous_price`, e.previous_price);
-    },
-    "always",
-    true
-  );
-  const ns = checks.notice_schedule;
-  if (ns !== void 0 && typeof ns !== "boolean") is.add("checks.notice_schedule", `must be true or false (got ${show(ns)})`);
-  if (ns === true && !planCount) is.add("checks.notice_schedule", 'needs at least one plan in "plans" (the schedule depends on the price, interval and trial)');
-  const total = ["stripe_checkout", "disclosures", "pages", "emails"].reduce((n, k) => n + (Array.isArray(checks[k]) ? checks[k].length : 0), 0) + (ns === true ? 1 : 0);
-  if (!total && !is.list.length) is.add("checks", 'lists nothing to check: add stripe_checkout, disclosures, pages or emails entries (or "notice_schedule": true)');
-  return is.list;
-}
-function entryLine(raw, name) {
-  const needle = new RegExp(`"name"\\s*:\\s*${JSON.stringify(name).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`);
-  const lines = raw.split("\n");
-  const i = lines.findIndex((l) => needle.test(l));
-  return i >= 0 ? i + 1 : 1;
-}
-var CONFIG_FILES, SCHEMA_URL, INTERVALS4, EMAIL_KINDS2, PAGE_KINDS2, MERGE_TAG_FIELDS, ConfigError, KIND_ALIASES, isObj2, show, TODO, Issues, PLAN_KEYS;
-var init_config3 = __esm({
-  "packages/cli/src/ci/config.ts"() {
-    "use strict";
-    CONFIG_FILES = ["checkbox.json", ".checkbox.json"];
-    SCHEMA_URL = "https://checkbox.site/schemas/checkbox.json";
-    INTERVALS4 = ["day", "week", "month", "year"];
-    EMAIL_KINDS2 = ["acknowledgment", "trial_reminder", "renewal_reminder", "price_change", "annual_terms", "charge_notice", "cancellation_confirmation"];
-    PAGE_KINDS2 = ["checkout", "pricing", "terms"];
-    MERGE_TAG_FIELDS = ["plan.price", "plan.amount", "plan.interval", "plan.name", "plan.trial_days", "plan.currency", "merchant.name", "merchant.cancel_url", "merchant.support_contact"];
-    ConfigError = class extends Error {
-      constructor(file, issues) {
-        super(`${file}: ${issues.length === 1 ? issues[0] : `${issues.length} problems:
-  - ${issues.join("\n  - ")}`}`);
-        this.file = file;
-        this.issues = issues;
-        this.name = "ConfigError";
-      }
-    };
-    KIND_ALIASES = { trial_ending: "trial_reminder" };
-    isObj2 = (v) => !!v && typeof v === "object" && !Array.isArray(v);
-    show = (v) => typeof v === "string" ? JSON.stringify(v) : Array.isArray(v) ? "an array" : v === null ? "null" : typeof v === "object" ? "an object" : String(v);
-    TODO = /\bTODO\b/;
-    Issues = class {
-      list = [];
-      add(path, msg2) {
-        this.list.push(`${path} ${msg2}`);
-      }
-      keys(path, o, allowed) {
-        for (const k of Object.keys(o)) {
-          if (k === "$comment" || allowed.includes(k)) continue;
-          const near2 = allowed.find((a) => a.replace(/_/g, "") === k.toLowerCase().replace(/[-_]/g, "") || a.startsWith(k) || k.startsWith(a));
-          this.add(`${path ? `${path}.` : ""}${k}`, `is not a known key${near2 ? ` (did you mean "${near2}"?)` : ""}; allowed: ${allowed.join(", ")}`);
-        }
-      }
-      str(path, v, opts = {}) {
-        if (v === void 0) {
-          if (opts.required) this.add(path, "is required");
-          return false;
-        }
-        if (typeof v !== "string" || !v.trim()) {
-          this.add(path, `must be a non-empty string (got ${show(v)})`);
-          return false;
-        }
-        if (TODO.test(v)) {
-          this.add(path, `still has a TODO placeholder (${show(v)}): fill it in`);
-          return false;
-        }
-        if (opts.max && v.length > opts.max) this.add(path, `must be at most ${opts.max} characters`);
-        if (opts.pattern && !opts.pattern.test(v)) this.add(path, `must be ${opts.patternHint} (got ${show(v)})`);
-        return true;
-      }
-      int(path, v, min, max) {
-        if (v === void 0) return;
-        if (typeof v !== "number" || !Number.isInteger(v) || v < min || v > max) this.add(path, `must be an integer from ${min} to ${max} (got ${show(v)})`);
-      }
-      money(path, v) {
-        if (v === void 0) return;
-        if (typeof v === "string" && TODO.test(v)) return this.add(path, `still has a TODO placeholder (${show(v)}): fill it in`);
-        const n = typeof v === "string" ? /^\s*[$€£]?\s*\d+(?:\.\d+)?\s*$/.test(v) ? Number(v.replace(/[^\d.]/g, "")) : NaN : v;
-        if (typeof n !== "number" || !Number.isFinite(n) || n < 0) this.add(path, `must be a price in major units, e.g. 19.99 (got ${show(v)})`);
-      }
-      oneOf(path, v, values, required = false) {
-        if (v === void 0) {
-          if (required) this.add(path, `is required: one of ${values.join(", ")}`);
-          return;
-        }
-        if (typeof v !== "string" || !values.includes(v)) this.add(path, `must be one of ${values.join(", ")} (got ${show(v)})`);
-      }
-      exactlyOne(path, o, keys, allowTogether = []) {
-        const given = keys.filter((k) => o[k] !== void 0);
-        if (!given.length) return this.add(path, `needs one of: ${keys.map((k) => `"${k}"`).join(", ")}`);
-        if (given.length > 1 && !allowTogether.some((set) => given.every((g) => set.includes(g)))) this.add(path, `has ${given.map((k) => `"${k}"`).join(" and ")}: give only one`);
-      }
-      path(path, v) {
-        if (!this.str(path, v)) return;
-        if (/^[a-z][a-z0-9+.-]*:\/\//i.test(v)) this.add(path, `must be a path relative to the config file (got a URL${path.endsWith(".file") ? '; use "url" for pages' : ""})`);
-      }
-      module(path, v) {
-        if (!this.str(path, v)) return;
-        if (!/^[^#]+\.(?:[cm]?[jt]s|[jt]sx)(?:#[A-Za-z_$][\w$]*)?$/.test(v)) this.add(path, `must be "path/to/file.(js|mjs|ts|tsx)#exportName" (got ${show(v)})`);
-      }
-      args(path, v, plans) {
-        if (v === void 0 || Array.isArray(v)) return;
-        if (plans && isObj2(v)) {
-          for (const [k, a] of Object.entries(v)) {
-            if (!plans.has(k)) this.add(`${path}.${k}`, `names no plan this entry sells (plans: ${[...plans].map((n) => JSON.stringify(n)).join(", ")})`);
-            else if (!Array.isArray(a)) this.add(`${path}.${k}`, `must be an array of arguments for the exported function (got ${show(a)})`);
-          }
-          return;
-        }
-        this.add(path, `must be an array of arguments for the exported function${plans ? ", or an object of plan name \u2192 arguments" : ""} (got ${show(v)})`);
-      }
-    };
-    PLAN_KEYS = ["name", "price", "amount", "currency", "interval", "interval_count", "trial_days", "intro_price", "intro_amount", "intro_percent_off", "intro_amount_off", "intro_periods", "cancel_timing"];
-  }
-});
-
-// packages/cli/src/commands/init/literal.ts
-function parseObjectLiteral(source, env2 = {}, consts = {}) {
-  const p = new Parser(source, env2, consts);
-  if (p.peek() !== "{") return { value: null, unresolved: ["<not an object literal>"] };
-  const v = p.object("");
-  return { value: v === UNKNOWN ? null : v, unresolved: [...new Set(p.unresolved)], ...Object.keys(p.fromEnv).length ? { fromEnv: p.fromEnv } : {}, ...p.spreads.length ? { spreads: p.spreads } : {} };
-}
-var UNKNOWN, Parser;
-var init_literal = __esm({
-  "packages/cli/src/commands/init/literal.ts"() {
-    "use strict";
-    UNKNOWN = Symbol("unknown");
-    Parser = class _Parser {
-      constructor(s2, env2, consts = {}, depth = 0) {
-        this.s = s2;
-        this.env = env2;
-        this.consts = consts;
-        this.depth = depth;
-      }
-      i = 0;
-      unresolved = [];
-      fromEnv = {};
-      spreads = [];
-      ws() {
-        for (; ; ) {
-          while (this.i < this.s.length && /\s/.test(this.s[this.i])) this.i++;
-          if (this.s.startsWith("//", this.i)) {
-            const nl = this.s.indexOf("\n", this.i);
-            this.i = nl === -1 ? this.s.length : nl + 1;
-          } else if (this.s.startsWith("/*", this.i)) {
-            const end = this.s.indexOf("*/", this.i + 2);
-            this.i = end === -1 ? this.s.length : end + 2;
-          } else return;
-        }
-      }
-      peek() {
-        this.ws();
-        return this.s[this.i] ?? "";
-      }
-      /** Skips one expression up to a top-level `,`, `}` or `]`. */
-      skipExpr() {
-        let depth = 0;
-        while (this.i < this.s.length) {
-          const ch = this.s[this.i];
-          if (ch === '"' || ch === "'" || ch === "`") {
-            this.string();
-            continue;
-          }
-          if (ch === "(" || ch === "[" || ch === "{") depth++;
-          else if (ch === ")" || ch === "]" || ch === "}") {
-            if (depth === 0) return;
-            depth--;
-          } else if (ch === "," && depth === 0) return;
-          this.i++;
-        }
-      }
-      string() {
-        const q2 = this.s[this.i];
-        this.i++;
-        let out = "";
-        let dynamic = false;
-        while (this.i < this.s.length) {
-          const ch = this.s[this.i];
-          if (ch === "\\") {
-            const n = this.s[this.i + 1] ?? "";
-            out += n === "n" ? "\n" : n === "t" ? "	" : n;
-            this.i += 2;
-            continue;
-          }
-          if (q2 === "`" && ch === "$" && this.s[this.i + 1] === "{") {
-            dynamic = true;
-            let depth = 0;
-            for (; this.i < this.s.length; this.i++) {
-              if (this.s[this.i] === "{") depth++;
-              else if (this.s[this.i] === "}" && --depth === 0) break;
-            }
-            this.i++;
-            continue;
-          }
-          this.i++;
-          if (ch === q2) return dynamic ? UNKNOWN : out;
-          out += ch;
-        }
-        return UNKNOWN;
-      }
-      primary(path = "") {
-        const ch = this.peek();
-        if (ch === "{") return this.object(path);
-        if (ch === "[") return this.array(path);
-        if (ch === '"' || ch === "'" || ch === "`") return this.string();
-        const num3 = /^-?(?:\d[\d_]*)(?:\.\d+)?(?:e[+-]?\d+)?/i.exec(this.s.slice(this.i));
-        if (num3) {
-          this.i += num3[0].length;
-          return Number(num3[0].replace(/_/g, ""));
-        }
-        const id = /^[A-Za-z_$][\w$]*(?:\s*(?:\?\.|\.)\s*[A-Za-z_$][\w$]*)*/.exec(this.s.slice(this.i));
-        if (id) {
-          const after = this.s.slice(this.i + id[0].length).trimStart();
-          const name = id[0].replace(/\s+/g, "").replace(/\?\./g, ".");
-          if (after.startsWith("(")) {
-            this.skipExpr();
-            return UNKNOWN;
-          }
-          this.i += id[0].length;
-          if (name === "true") return true;
-          if (name === "false") return false;
-          if (name === "null") return null;
-          if (name === "undefined") return void 0;
-          if (Object.prototype.hasOwnProperty.call(this.consts, name)) {
-            const sub = new _Parser(this.consts[name], this.env);
-            const v = sub.value("");
-            if (v !== UNKNOWN && v !== void 0 && path) this.fromEnv[path] = name;
-            return v;
-          }
-          const env2 = /^(?:process\.env|import\.meta\.env)\.([A-Za-z_][A-Za-z0-9_]*)$/.exec(name);
-          if (env2) {
-            if (this.env[env2[1]] !== void 0 && path) this.fromEnv[path] = name;
-            return this.env[env2[1]] ?? UNKNOWN;
-          }
-          return UNKNOWN;
-        }
-        this.skipExpr();
-        return UNKNOWN;
-      }
-      /** primary (`??` | `||` primary)* — the first known, non-empty value wins. */
-      value(path) {
-        let conditional = false;
-        let v = this.primary(path);
-        for (; ; ) {
-          this.ws();
-          if (this.s.startsWith("??", this.i) || this.s.startsWith("||", this.i)) {
-            this.i += 2;
-            const alt = this.primary(path);
-            if ((v === UNKNOWN || v === void 0 || v === null || v === "") && /^custom_text\b/.test(path)) conditional = true;
-            if (v === UNKNOWN || v === void 0 || v === null || v === "") v = alt;
-            continue;
-          }
-          const cast = /^(?:as|satisfies)\s+(?:const\b|[A-Za-z_$][\w$.]*(?:<[^,}\]]*>)?(?:\[\])*)/.exec(this.s.slice(this.i));
-          if (cast) {
-            this.i += cast[0].length;
-            continue;
-          }
-          const ch = this.s[this.i];
-          if (ch && ch !== "," && ch !== "}" && ch !== "]") {
-            this.skipExpr();
-            if (path) this.unresolved.push(path);
-            return UNKNOWN;
-          }
-          if ((v === UNKNOWN || conditional) && path) this.unresolved.push(path);
-          return conditional ? UNKNOWN : v;
-        }
-      }
-      object(path) {
-        this.i++;
-        const out = {};
-        for (; ; ) {
-          const ch = this.peek();
-          if (ch === "}") {
-            this.i++;
-            return out;
-          }
-          if (!ch) return UNKNOWN;
-          if (this.s.startsWith("...", this.i)) {
-            this.i += 3;
-            const from = this.i;
-            this.skipExpr();
-            const expr = this.s.slice(from, this.i).trim();
-            const known = /^[A-Za-z_$][\w$]*$/.test(expr) && Object.prototype.hasOwnProperty.call(this.consts, expr) ? this.consts[expr].trim() : void 0;
-            if (known?.startsWith("{") && this.depth < 4) {
-              const { [expr]: _self, ...rest } = this.consts;
-              const sub = new _Parser(known, this.env, rest, this.depth + 1);
-              const v = sub.object("");
-              if (v !== UNKNOWN && !sub.unresolved.length && !sub.spreads.length) {
-                Object.assign(out, v);
-                if (this.peek() === ",") this.i++;
-                continue;
-              }
-            }
-            if (!path) this.spreads.push(expr);
-            this.unresolved.push(`${path ? `${path}.` : ""}...`);
-          } else {
-            let key = null;
-            if (ch === '"' || ch === "'") {
-              const k = this.string();
-              key = typeof k === "string" ? k : null;
-            } else if (ch === "[") {
-              this.skipExpr();
-            } else {
-              const m = /^[A-Za-z_$][\w$]*/.exec(this.s.slice(this.i));
-              if (m) {
-                key = m[0];
-                this.i += m[0].length;
-              } else {
-                this.skipExpr();
-              }
-            }
-            const p = key ? path ? `${path}.${key}` : key : `${path}[computed]`;
-            if (this.peek() === ":") {
-              this.i++;
-              const v = this.value(p);
-              if (key && v !== UNKNOWN && v !== void 0) out[key] = v;
-            } else if (key) {
-              this.unresolved.push(p);
-            }
-          }
-          const sep = this.peek();
-          if (sep === ",") this.i++;
-          else if (sep !== "}") {
-            this.skipExpr();
-            if (this.peek() === ",") this.i++;
-          }
-        }
-      }
-      array(path) {
-        this.i++;
-        const out = [];
-        for (let n = 0; ; n++) {
-          const ch = this.peek();
-          if (ch === "]") {
-            this.i++;
-            return out;
-          }
-          if (!ch) return UNKNOWN;
-          if (this.s.startsWith("...", this.i)) {
-            this.i += 3;
-            this.skipExpr();
-            this.unresolved.push(`${path}[...]`);
-          } else {
-            const v = this.value(`${path}[${n}]`);
-            out.push(v === UNKNOWN ? null : v);
-          }
-          if (this.peek() === ",") this.i++;
-        }
-      }
-    };
-  }
-});
-
-// packages/cli/src/commands/init/detect.ts
-import { existsSync as existsSync4, readdirSync as readdirSync2, readFileSync as readFileSync5, statSync } from "node:fs";
-import { join as join4, relative } from "node:path";
-function plansFromSessions(sessions) {
-  const out = [];
-  for (const s2 of sessions) {
-    const p = s2.params;
-    if (!p || !Array.isArray(p.line_items)) continue;
-    const trial = Number(p.subscription_data?.trial_period_days);
-    for (const li of p.line_items) {
-      const pd = li?.price_data;
-      const amount = Number(pd?.unit_amount);
-      const interval = pd?.recurring?.interval;
-      if (!pd || !Number.isInteger(amount) || amount <= 0 || !["day", "week", "month", "year"].includes(interval) || typeof pd.currency !== "string") continue;
-      const count = Number(pd.recurring.interval_count);
-      const name = pd.product_data?.name;
-      out.push({
-        ...typeof name === "string" && name.trim() ? { name: name.trim().slice(0, 100) } : {},
-        amount,
-        currency: pd.currency.toLowerCase(),
-        interval,
-        ...Number.isInteger(count) && count > 1 ? { interval_count: count } : {},
-        ...Number.isInteger(trial) && trial > 0 ? { trial_days: trial } : {},
-        source: `${s2.file}:${s2.line}`
-      });
-    }
-  }
-  const seen = /* @__PURE__ */ new Set();
-  return out.filter((x) => {
-    const k = `${x.amount}/${x.currency}/${x.interval}/${x.interval_count ?? 1}/${x.trial_days ?? 0}`;
-    if (seen.has(k)) return false;
-    seen.add(k);
-    return true;
-  }).slice(0, 20);
-}
-function codeSnippet(line2) {
-  return redactSecrets(line2.trim()).slice(0, 200);
-}
-function detectBrand(root, layoutFile, pkgName) {
-  for (const f of [layoutFile, "index.html", "public/index.html", "src/app.html"].filter((x) => !!x)) {
-    let text = "";
-    try {
-      text = readFileSync5(join4(root, f), "utf8").slice(0, 2e5);
-    } catch {
-      continue;
-    }
-    const m = /<title[^>]*>([^<]{2,120})<\/title>/i.exec(text) ?? /\btitle\s*:\s*['"`]([^'"`{}$]{2,120})['"`]/.exec(text);
-    const segments = (m?.[1] ?? "").split(/\s+[|–—·-]\s+|\s*:\s+/).map((x) => x.trim()).filter((x) => x.length >= 2);
-    const title = segments.find((x) => !/^(?:home|welcome|untitled|document|checkout|pricing|plans|sign ?up|subscribe|account|login|shop|store|my account|start)$/i.test(x));
-    if (title) return { name: title.slice(0, 100), source: `${f} <title>` };
-  }
-  const base = pkgName?.replace(/^@[^/]+\//, "").replace(/[-_](?:web|app|site|frontend|www)$/i, "");
-  if (base && !GENERIC_NAMES.test(base)) {
-    return { name: base.split(/[-_]+/).map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ").slice(0, 100), source: "package.json name" };
-  }
-  return void 0;
-}
-function detectMailer(deps, framework, hasPackageJson) {
-  const found = MAILER_PACKAGES.find((m) => m in deps);
-  if (found) return found;
-  if (!hasPackageJson && framework === "html") return "none";
-  return null;
-}
-function readJson(path) {
-  try {
-    return JSON.parse(readFileSync5(path, "utf8"));
-  } catch {
-    return null;
-  }
-}
-function readText(path) {
-  try {
-    const st = statSync(path);
-    if (!st.isFile() || st.size > MAX_FILE_BYTES) return null;
-    return readFileSync5(path, "utf8");
-  } catch {
-    return null;
-  }
-}
-function parseDotenv(text) {
-  const out = {};
-  for (const raw of text.split(/\r?\n/)) {
-    const line2 = raw.trim();
-    if (!line2 || line2.startsWith("#")) continue;
-    const m = /^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/.exec(line2);
-    if (!m) continue;
-    let v = m[2].trim();
-    if (v.startsWith('"') && v.endsWith('"') || v.startsWith("'") && v.endsWith("'")) v = v.slice(1, -1);
-    else v = v.replace(/\s+#.*$/, "");
-    out[m[1]] = v;
-  }
-  return out;
-}
-function walk2(root, visit) {
-  let count = 0;
-  const stack = [root];
-  while (stack.length && count < MAX_FILES) {
-    const dir = stack.pop();
-    let entries;
-    try {
-      entries = readdirSync2(dir);
-    } catch {
-      continue;
-    }
-    for (const e of entries) {
-      if (IGNORE_DIRS.has(e) || e.startsWith(".") && e !== ".well-known") continue;
-      const abs = join4(dir, e);
-      let st;
-      try {
-        st = statSync(abs);
-      } catch {
-        continue;
-      }
-      if (st.isDirectory()) stack.push(abs);
-      else if (st.isFile() && CODE_EXT.test(e) && st.size <= MAX_FILE_BYTES) {
-        count += 1;
-        visit(abs, relative(root, abs).split("\\").join("/"));
-        if (count >= MAX_FILES) break;
-      }
-    }
-  }
-}
-function hasAppRouteFile(dir, depth = 0) {
-  if (depth > 3) return false;
-  let names = [];
-  try {
-    names = readdirSync2(dir);
-  } catch {
-    return false;
-  }
-  if (names.some((n) => /^(?:page|route|layout)\.(?:tsx|jsx|ts|js|mdx)$/.test(n))) return true;
-  return names.some((n) => !n.startsWith(".") && n !== "node_modules" && (() => {
-    try {
-      return statSync(join4(dir, n)).isDirectory();
-    } catch {
-      return false;
-    }
-  })() && hasAppRouteFile(join4(dir, n), depth + 1));
-}
-function hasTsFiles(dir, depth = 0) {
-  if (depth > 3) return false;
-  let names = [];
-  try {
-    names = readdirSync2(dir);
-  } catch {
-    return false;
-  }
-  if (names.some((n) => /\.tsx?$/.test(n))) return true;
-  return names.some((n) => !n.startsWith(".") && (() => {
-    try {
-      return statSync(join4(dir, n)).isDirectory();
-    } catch {
-      return false;
-    }
-  })() && hasTsFiles(join4(dir, n), depth + 1));
-}
-function detectFramework(root, deps) {
-  const has2 = (d) => d in deps;
-  if (existsSync4(join4(root, "layout", "theme.liquid")) && existsSync4(join4(root, "config", "settings_schema.json"))) return { framework: "shopify-theme", layoutFile: "layout/theme.liquid" };
-  if (has2("next")) {
-    const app = first(root, ["app/layout.tsx", "app/layout.jsx", "app/layout.js", "app/layout.ts", "src/app/layout.tsx", "src/app/layout.jsx", "src/app/layout.js"]);
-    if (app) return { framework: "nextjs-app", layoutFile: app };
-    const appDir = ["src/app", "app"].find((d) => existsSync4(join4(root, d)) && hasAppRouteFile(join4(root, d)));
-    const pagesExists = existsSync4(join4(root, "pages")) || existsSync4(join4(root, "src", "pages"));
-    if (appDir && !pagesExists) return { framework: "nextjs-app", layoutFile: `${appDir}/layout.${existsSync4(join4(root, "tsconfig.json")) || hasTsFiles(join4(root, appDir)) ? "tsx" : "js"}` };
-    const doc = first(root, ["pages/_document.tsx", "pages/_document.jsx", "pages/_document.js", "src/pages/_document.tsx", "src/pages/_document.jsx", "src/pages/_document.js"]);
-    const pagesDir = existsSync4(join4(root, "src", "pages")) ? "src/pages" : "pages";
-    return { framework: "nextjs-pages", layoutFile: doc ?? `${pagesDir}/_document.${existsSync4(join4(root, "tsconfig.json")) ? "tsx" : "js"}` };
-  }
-  if (has2("@remix-run/react") || has2("@remix-run/node")) return { framework: "remix", layoutFile: first(root, ["app/root.tsx", "app/root.jsx", "app/root.js"]) };
-  if (has2("react-router") && existsSync4(join4(root, "app", "root.tsx"))) return { framework: "react-router", layoutFile: "app/root.tsx" };
-  if (has2("@sveltejs/kit")) return { framework: "sveltekit", layoutFile: first(root, ["src/app.html"]) };
-  if (has2("nuxt") || has2("nuxt3")) return { framework: "nuxt", layoutFile: "plugins/checkbox.client.ts" };
-  if (has2("astro")) {
-    let layout = first(root, ["src/layouts/Layout.astro", "src/layouts/BaseLayout.astro", "src/layouts/Base.astro", "src/layouts/MainLayout.astro"]);
-    if (!layout && existsSync4(join4(root, "src", "layouts"))) {
-      const any = readdirSync2(join4(root, "src", "layouts")).find((f) => f.endsWith(".astro") && /<head[\s>]/i.test(readText(join4(root, "src", "layouts", f)) ?? ""));
-      if (any) layout = `src/layouts/${any}`;
-    }
-    return { framework: "astro", layoutFile: layout };
-  }
-  if (has2("vite") && existsSync4(join4(root, "index.html"))) return { framework: "vite", layoutFile: "index.html" };
-  if (has2("express") || has2("fastify") || has2("koa") || has2("hono")) {
-    const views = first(root, ["views/layout.ejs", "views/layouts/main.hbs", "views/layouts/main.handlebars", "views/layout.hbs", "views/partials/head.ejs", "views/index.ejs", "public/index.html", "views/index.html"]);
-    return { framework: "express", layoutFile: views };
-  }
-  const html = first(root, ["index.html", "public/index.html", "src/index.html"]);
-  if (html) return { framework: "html", layoutFile: html };
-  return { framework: "unknown", layoutFile: null };
-}
-function publicEnvPrefix(f) {
-  switch (f) {
-    case "nextjs-app":
-    case "nextjs-pages":
-      return "NEXT_PUBLIC_";
-    case "sveltekit":
-    case "astro":
-      return "PUBLIC_";
-    case "nuxt":
-      return "NUXT_PUBLIC_";
-    case "remix":
-    case "react-router":
-    case "vite":
-      return "VITE_";
-    default:
-      return "";
-  }
-}
-function publicDirOf(root, f) {
-  if (f === "sveltekit") return "static";
-  if (f === "shopify-theme") return null;
-  if (f === "html") return existsSync4(join4(root, "public")) ? "public" : ".";
-  return "public";
-}
-function isPublicSiteUrl(v) {
-  if (!v) return false;
-  try {
-    const u = new URL(v);
-    if (u.protocol !== "https:" && u.protocol !== "http:") return false;
-    const h2 = u.hostname;
-    if (h2 === "localhost" || h2.endsWith(".localhost") || h2.endsWith(".local") || h2.endsWith(".internal") || h2 === "0.0.0.0" || h2.startsWith("127.") || h2.startsWith("10.") || h2.startsWith("192.168.") || /^172\.(1[6-9]|2\d|3[01])\./.test(h2) || h2 === "[::1]") return false;
-    return h2.includes(".");
-  } catch {
-    return false;
-  }
-}
-function originOf2(url) {
-  const u = new URL(url);
-  return `${u.protocol}//${u.host}`;
-}
-function detectSiteUrl(root, env2, pkg) {
-  for (const k of SITE_URL_KEYS) if (isPublicSiteUrl(env2[k])) return { url: originOf2(env2[k]), source: k };
-  if (typeof pkg?.homepage === "string" && isPublicSiteUrl(pkg.homepage)) return { url: originOf2(pkg.homepage), source: "package.json homepage" };
-  const cname = readText(join4(root, "CNAME")) ?? readText(join4(root, "public", "CNAME"));
-  if (cname && /^[a-z0-9.-]+\.[a-z]{2,}$/i.test(cname.trim())) return { url: `https://${cname.trim()}`, source: "CNAME" };
-  return {};
-}
-function routeOf(rel2) {
-  const patterns = [
-    /^(?:src\/)?app\/(.+)\/page\.[jt]sx?$/,
-    /^(?:src\/)?pages\/(.+?)(?:\/index)?\.(?:[jt]sx?|astro|vue|md|mdx)$/,
-    /^src\/routes\/(.+)\/\+page\.(?:svelte|md|svx)$/,
-    /^app\/routes\/(.+?)(?:\/route)?\.[jt]sx?$/,
-    /^(?:public\/)?(.+?)(?:\/index)?\.html$/
-  ];
-  for (const re of patterns) {
-    const m = re.exec(rel2);
-    if (m) return m[1].replace(/\([^)]*\)\//g, "").replace(/^\(.*\)$/, "").replace(/\./g, "/").toLowerCase();
-  }
-  return null;
-}
-function findStripeKey(env2, processEnv, envFile = {}) {
-  const sources = [];
-  const named = ["CHECKBOX_STRIPE_TEST_KEY", "STRIPE_RESTRICTED_KEY", "STRIPE_TEST_RESTRICTED_KEY", "STRIPE_SECRET_KEY", "STRIPE_TEST_SECRET_KEY", "STRIPE_API_KEY", "STRIPE_SK"];
-  const others = [.../* @__PURE__ */ new Set([...Object.keys(env2), ...Object.keys(processEnv)])].filter((k) => !named.includes(k)).sort();
-  for (const k of [...named, ...others]) {
-    sources.push([`${k} (environment)`, processEnv[k]]);
-    sources.push([`${k} (${envFile[k] ?? ".env"})`, env2[k]]);
-  }
-  const found = sources.filter((s2) => typeof s2[1] === "string" && /^(sk|rk)_(test|live)_[A-Za-z0-9]{10,}$/.test(s2[1].trim())).map(([src, v]) => [src, v.trim()]);
-  const hint = (key) => `${key.slice(0, 8)}\u2026${key.slice(-4)}`;
-  const pick2 = found.find((s2) => s2[1].startsWith("rk_test_"));
-  if (pick2) return { key: { key: pick2[1], hint: hint(pick2[1]), source: pick2[0], restricted: true } };
-  const other = found.find((s2) => s2[1].startsWith("sk_test_")) ?? found[0];
-  if (!other) return {};
-  return { refused: { hint: hint(other[1]), source: other[0], kind: /_live_/.test(other[1]) ? "live" : "secret" } };
-}
-function stripeKeyRefusedMessage(r) {
-  const what = r.kind === "live" ? `${r.hint} in ${r.source} is a LIVE Stripe key. Live keys are never stored by the CLI or an agent: a person adds them in the Checkbox dashboard.` : `${r.hint} in ${r.source} is the Stripe secret key, which can do everything in your Stripe test account, so Checkbox refuses it.`;
-  return `${what} For test runs, make a restricted TEST key instead: in Stripe, switch to Test mode, open Developers \u2192 API keys \u2192 Create restricted key, tick the permissions on https://checkbox.site/docs/guides/stripe-key, and put the key (rk_test_\u2026) in STRIPE_RESTRICTED_KEY in .env.local (never in a chat). Then run \`checkbox init\` again.`;
-}
-function sessionLiteral(text, index) {
-  const open2 = text.indexOf("{", index);
-  const paren = text.indexOf(")", index);
-  if (open2 === -1 || paren !== -1 && paren < open2) return null;
-  let depth = 0;
-  let quote2 = null;
-  for (let i = open2; i < text.length && i - open2 < 2e4; i++) {
-    const ch = text[i];
-    if (quote2) {
-      if (ch === "\\") i++;
-      else if (ch === quote2) quote2 = null;
-      continue;
-    }
-    if (ch === "/" && text[i + 1] === "/") {
-      const nl = text.indexOf("\n", i);
-      i = nl === -1 ? text.length : nl;
-    } else if (ch === "/" && text[i + 1] === "*") {
-      const end = text.indexOf("*/", i + 2);
-      i = end === -1 ? text.length : end + 1;
-    } else if (ch === '"' || ch === "'" || ch === "`") quote2 = ch;
-    else if (ch === "{") depth++;
-    else if (ch === "}") {
-      depth--;
-      if (depth === 0) return text.slice(open2, i + 1);
-    }
-  }
-  return null;
-}
-function declaredExpr(text, from) {
-  let depth = 0;
-  let quote2 = null;
-  for (let i = from; i < text.length && i - from < 2e3; i++) {
-    const ch = text[i];
-    if (quote2) {
-      if (ch === "\\") i++;
-      else if (ch === quote2) quote2 = null;
-      continue;
-    }
-    if (ch === '"' || ch === "'" || ch === "`") quote2 = ch;
-    else if (ch === "(" || ch === "[" || ch === "{") depth++;
-    else if (ch === ")" || ch === "]" || ch === "}") depth--;
-    else if ((ch === ";" || ch === "\n") && depth <= 0) return text.slice(from, i).trim();
-  }
-  return text.slice(from, from + 2e3).trim();
-}
-function constDeclarations(text, exportedOnly) {
-  const out = {};
-  const re = exportedOnly ? /(?:^|\n)[ \t]*export\s+const\s+([A-Za-z_$][\w$]*)\s*(?::[^=\n]+)?=\s*/g : /(?:^|\n)[ \t]*(?:export\s+)?const\s+([A-Za-z_$][\w$]*)\s*(?::[^=\n]+)?=\s*/g;
-  for (const m of text.matchAll(re)) if (!(m[1] in out)) out[m[1]] = declaredExpr(text, m.index + m[0].length);
-  return out;
-}
-function resolveImport(root, fromFile, spec) {
-  const dir = fromFile.includes("/") ? fromFile.slice(0, fromFile.lastIndexOf("/")) : "";
-  const bases = spec.startsWith(".") ? [join4(dir, spec)] : /^[@~]\//.test(spec) ? [spec.slice(2), join4("src", spec.slice(2))] : [];
-  for (const b of bases) {
-    const base = b.split("\\").join("/").replace(/\.(?:[cm]?js|jsx)$/, "");
-    for (const f of [b, ...[".ts", ".tsx", ".js", ".mjs", ".jsx", "/index.ts", "/index.js"].map((e) => `${base}${e}`)]) {
-      if (/\.[cm]?[jt]sx?$/.test(f) && existsSync4(join4(root, f))) return f.split("\\").join("/");
-    }
-  }
-  return void 0;
-}
-function constantsFor(root, relFile, text) {
-  const out = {};
-  for (const m of text.matchAll(/import\s*(?:type\s+)?\{([^}]*)\}\s*from\s*['"]([^'"]+)['"]/g)) {
-    const target = resolveImport(root, relFile, m[2]);
-    if (!target) continue;
-    let exported;
-    try {
-      exported = constDeclarations(readFileSync5(join4(root, target), "utf8"), true);
-    } catch {
-      continue;
-    }
-    for (const part of m[1].split(",")) {
-      const [name, alias] = part.trim().split(/\s+as\s+/).map((x) => x.trim());
-      if (name && exported[name] !== void 0) out[alias || name] = exported[name];
-    }
-  }
-  return { ...out, ...constDeclarations(text, false) };
-}
-function detectProject(root, processEnv = {}) {
-  const pkg = readJson(join4(root, "package.json"));
-  const deps = { ...pkg?.dependencies ?? {}, ...pkg?.devDependencies ?? {} };
-  const { framework, layoutFile } = detectFramework(root, deps);
-  const packageManager = existsSync4(join4(root, "pnpm-lock.yaml")) ? "pnpm" : existsSync4(join4(root, "yarn.lock")) ? "yarn" : existsSync4(join4(root, "bun.lockb")) || existsSync4(join4(root, "bun.lock")) ? "bun" : pkg ? "npm" : null;
-  const env2 = {};
-  const envFile = {};
-  for (const f of [".env", ".env.production", ".env.local", ".env.development", ".env.development.local"]) {
-    const t = readText(join4(root, f));
-    if (!t) continue;
-    const vars = parseDotenv(t);
-    Object.assign(env2, vars);
-    for (const k of Object.keys(vars)) envFile[k] = f;
-  }
-  let billingPlatform = "stripe" in deps || "@stripe/stripe-js" in deps || "@stripe/react-stripe-js" in deps ? "stripe" : framework === "shopify-theme" || "@shopify/hydrogen" in deps || "@shopify/shopify-api" in deps ? "shopify" : "@rechargeapps/storefront-client" in deps ? "recharge" : "@paddle/paddle-js" in deps ? "paddle" : "chargebee" in deps ? "chargebee" : "custom";
-  const checkoutCode = [];
-  const payButtons = [];
-  const checkoutSessions = [];
-  const policyPaths = {};
-  const linkedPolicies = {};
-  walk2(root, (abs, rel2) => {
-    const route = routeOf(rel2);
-    const served = route && /\.html?$/i.test(rel2) && !/(?:^|\/)index\.html?$/i.test(rel2) ? `/${route}${/\.htm$/i.test(rel2) ? ".htm" : ".html"}` : `/${route}`;
-    if (route) {
-      for (const p of POLICY_ROUTES) if (!policyPaths[p.kind] && p.re.test(route)) policyPaths[p.kind] = served;
-    }
-    const text = readText(abs);
-    if (!text) return;
-    for (const m of text.matchAll(/\bhref=\{?\s*["'`](\/[A-Za-z0-9._~\/-]*)["'`]/g)) {
-      const path = m[1].slice(1).replace(/\/$/, "").replace(/\.html?$/i, "").toLowerCase();
-      for (const p of POLICY_ROUTES) if (!linkedPolicies[p.kind] && p.re.test(path)) linkedPolicies[p.kind] = m[1].replace(/(.)\/$/, "$1");
-    }
-    const lines = text.split("\n");
-    lines.forEach((line2, i) => {
-      for (const p of CHECKOUT_PATTERNS) {
-        if (p.re.test(line2) && checkoutCode.length < 100) checkoutCode.push({ file: rel2, line: i + 1, kind: p.kind, snippet: codeSnippet(line2) });
-      }
-      if (PAY_BUTTON.test(line2) && payButtons.length < 50) payButtons.push({ file: rel2, line: i + 1, kind: "subscribe_button", snippet: codeSnippet(line2) });
-    });
-    for (const m of text.matchAll(/checkout\.sessions\.create\s*\(/g)) {
-      const lit = sessionLiteral(text, m.index + m[0].length);
-      const line2 = text.slice(0, m.index).split("\n").length;
-      if (!lit) {
-        checkoutSessions.push({ file: rel2, line: line2, unresolved: ["<params are not an object literal>"] });
-        continue;
-      }
-      const parsed = parseObjectLiteral(lit, { ...env2, ...Object.fromEntries(Object.entries(processEnv).filter((e) => typeof e[1] === "string" && /^(STRIPE_|NEXT_PUBLIC_STRIPE_|PRICE_)/.test(e[0]))) }, constantsFor(root, rel2, text));
-      checkoutSessions.push({ file: rel2, line: line2, ...parsed.value ? { params: redactSecretsDeep(parsed.value) } : {}, unresolved: parsed.unresolved });
-    }
-  });
-  if (billingPlatform === "custom" && checkoutCode.some((c) => c.kind.startsWith("stripe_"))) billingPlatform = "stripe";
-  Object.assign(policyPaths, linkedPolicies);
-  const site = detectSiteUrl(root, env2, pkg);
-  const stripeKey = findStripeKey(env2, processEnv, envFile);
-  const brand = detectBrand(root, layoutFile, typeof pkg?.name === "string" ? pkg.name : void 0);
-  return {
-    root,
-    ...typeof pkg?.name === "string" ? { name: pkg.name } : {},
-    framework,
-    packageManager,
-    billingPlatform,
-    layoutFile,
-    envFile: framework === "express" || framework === "html" || framework === "unknown" || framework === "shopify-theme" ? ".env" : ".env.local",
-    publicEnvPrefix: publicEnvPrefix(framework),
-    publicDir: publicDirOf(root, framework),
-    ...site.url ? { siteUrl: site.url, siteUrlSource: site.source } : {},
-    policyPaths,
-    checkoutCode,
-    payButtons,
-    checkoutSessions,
-    ...stripeKey.key ? { stripeTestKey: stripeKey.key } : {},
-    ...stripeKey.refused ? { stripeKeyRefused: stripeKey.refused } : {},
-    ...brand ? { brand } : {},
-    plans: plansFromSessions(checkoutSessions),
-    env: env2,
-    mailer: detectMailer(deps, framework, !!pkg)
-  };
-}
-var GENERIC_NAMES, MAILER_PACKAGES, IGNORE_DIRS, CODE_EXT, MAX_FILES, MAX_FILE_BYTES, first, SITE_URL_KEYS, POLICY_ROUTES, CHECKOUT_PATTERNS, PAY_BUTTON;
-var init_detect = __esm({
-  "packages/cli/src/commands/init/detect.ts"() {
-    "use strict";
-    init_src2();
-    init_literal();
-    GENERIC_NAMES = /^(?:web|app|site|website|frontend|client|my-app|my-site|demo|example|store|shop|starter|template|project|monorepo|root)$/i;
-    MAILER_PACKAGES = ["nodemailer", "resend", "@sendgrid/mail", "postmark", "mailgun.js", "mailgun-js", "@aws-sdk/client-ses", "@aws-sdk/client-sesv2", "@react-email/components", "react-email", "@mailchimp/mailchimp_transactional", "mailersend", "@sparkpost/node", "sparkpost", "emailjs", "@emailjs/browser", "loops", "plunk", "@plunk/node", "brevo", "@getbrevo/brevo", "sib-api-v3-sdk", "nodemailer-mailgun-transport", "@vercel/email"];
-    IGNORE_DIRS = /* @__PURE__ */ new Set(["node_modules", ".git", ".next", ".nuxt", ".svelte-kit", ".output", ".vercel", ".netlify", ".turbo", ".cache", "dist", "build", "out", "coverage", ".astro", "vendor", ".venv", "__pycache__"]);
-    CODE_EXT = /\.(?:[cm]?[jt]sx?|vue|svelte|astro|liquid|html|ejs|hbs|erb)$/i;
-    MAX_FILES = 4e3;
-    MAX_FILE_BYTES = 4e5;
-    first = (root, candidates) => candidates.find((c) => existsSync4(join4(root, c))) ?? null;
-    SITE_URL_KEYS = ["NEXT_PUBLIC_SITE_URL", "SITE_URL", "PUBLIC_SITE_URL", "NEXT_PUBLIC_APP_URL", "APP_URL", "NEXT_PUBLIC_BASE_URL", "BASE_URL", "PUBLIC_URL", "NUXT_PUBLIC_SITE_URL", "VITE_SITE_URL", "URL", "NEXTAUTH_URL"];
-    POLICY_ROUTES = [
-      { kind: "terms", re: /^(terms(-of-(service|use|sale))?|tos|legal\/terms|conditions|terms-and-conditions)$/ },
-      { kind: "privacy", re: /^(privacy(-policy)?|legal\/privacy)$/ },
-      { kind: "refund", re: /^(refunds?(-policy)?|returns?(-policy)?|legal\/refunds?)$/ },
-      { kind: "cancellation", re: /^(cancel(lation)?(-policy)?|legal\/cancel(lation)?)$/ }
-    ];
-    CHECKOUT_PATTERNS = [
-      { kind: "stripe_checkout_session", re: /checkout\.sessions\.create\s*\(/ },
-      { kind: "stripe_payment_link", re: /paymentLinks\.create\s*\(|https:\/\/buy\.stripe\.com\// },
-      { kind: "stripe_checkout_link", re: /https:\/\/checkout\.stripe\.com\// },
-      { kind: "stripe_pricing_table", re: /<stripe-pricing-table\b/ },
-      { kind: "stripe_subscription_api", re: /subscriptions\.create\s*\(/ },
-      { kind: "stripe_elements", re: /<(PaymentElement|CardElement|ExpressCheckoutElement)\b|elements\.create\(\s*['"]payment['"]/ },
-      { kind: "stripe_customer_portal", re: /billingPortal\.sessions\.create\s*\(/ },
-      { kind: "shopify_checkout", re: /checkoutCreate|cartCreate|\/cart\/add/ },
-      { kind: "recharge_checkout", re: /rechargeapps\.com|recharge-checkout/ }
-    ];
-    PAY_BUTTON = /<(?:button|a|Button|Link)\b[^>]*>\s*(?:\{[^}]*\}\s*)?(Subscribe(?: now)?|Start (?:your )?(?:free )?trial|Start subscription|Join now|Upgrade(?: now| to [A-Z][a-z]+)?|Get (?:started|Pro|Premium)|Buy now|Checkout|Continue to (?:payment|checkout))\b/;
-  }
-});
-
-// packages/cli/src/ci/render-entry.ts
-import { existsSync as existsSync5, readFileSync as readFileSync6 } from "node:fs";
-import { join as join5, posix } from "node:path";
-function balanced(text, open2) {
-  const pairs = { "(": ")", "{": "}", "[": "]" };
-  const stack = [];
-  for (let i = open2; i < text.length; i++) {
-    const c = text[i];
-    if (c === '"' || c === "'" || c === "`") {
-      i = skipString(text, i);
-      continue;
-    }
-    if (c === "/" && text[i + 1] === "/") {
-      const nl = text.indexOf("\n", i);
-      i = nl < 0 ? text.length : nl;
-      continue;
-    }
-    if (c === "/" && text[i + 1] === "*") {
-      const e = text.indexOf("*/", i + 2);
-      i = e < 0 ? text.length : e + 1;
-      continue;
-    }
-    if (pairs[c]) stack.push(pairs[c]);
-    else if (c === ")" || c === "}" || c === "]") {
-      if (stack.pop() !== c) return void 0;
-      if (!stack.length) return { inner: text.slice(open2 + 1, i), end: i };
-    }
-  }
-  return void 0;
-}
-function skipString(text, i) {
-  const q2 = text[i];
-  for (let j = i + 1; j < text.length; j++) {
-    const c = text[j];
-    if (c === "\\") j++;
-    else if (q2 === "`" && c === "$" && text[j + 1] === "{") {
-      const b = balanced(text, j + 1);
-      if (!b) return text.length;
-      j = b.end;
-    } else if (c === q2) return j;
-    else if (q2 !== "`" && c === "\n") return j;
-  }
-  return text.length;
-}
-function splitTop(text, sep = ",") {
-  const out = [];
-  let depth = 0;
-  let start = 0;
-  for (let i = 0; i < text.length; i++) {
-    const c = text[i];
-    if (c === '"' || c === "'" || c === "`") i = skipString(text, i);
-    else if (c === "(" || c === "{" || c === "[") depth++;
-    else if (c === ")" || c === "}" || c === "]") depth--;
-    else if (c === sep && depth === 0) {
-      out.push(text.slice(start, i));
-      start = i + 1;
-    }
-  }
-  out.push(text.slice(start));
-  return out.map((s2) => s2.trim()).filter(Boolean);
-}
-function importsOf(root, file, text) {
-  const out = /* @__PURE__ */ new Map();
-  for (const m of text.matchAll(/(?:^|\n)\s*import\s+(?!type\s)([\s\S]*?)\s+from\s*['"]([^'"]+)['"]/g)) {
-    const clause = m[1].trim();
-    const spec = m[2];
-    const target = resolveImport(root, file, spec);
-    const add = (local, imported) => out.set(local, { spec, imported, ...target ? { file: target } : {} });
-    const ns = /\*\s+as\s+([A-Za-z_$][\w$]*)/.exec(clause);
-    if (ns) add(ns[1], "*");
-    const def = /^([A-Za-z_$][\w$]*)\s*(?:,|$)/.exec(clause);
-    if (def) add(def[1], "default");
-    const named = /\{([^}]*)\}/.exec(clause);
-    if (named) {
-      for (const part of named[1].split(",")) {
-        const p = part.trim();
-        if (!p || /^type\s/.test(p)) continue;
-        const am = /^([A-Za-z_$][\w$]*)(?:\s+as\s+([A-Za-z_$][\w$]*))?$/.exec(p);
-        if (am) add(am[2] ?? am[1], am[1]);
-      }
-    }
-  }
-  return out;
-}
-function exprFrom(text, i) {
-  let depth = 0;
-  for (let j = i; j < text.length; j++) {
-    const c = text[j];
-    if (c === '"' || c === "'" || c === "`") j = skipString(text, j);
-    else if (c === "(" || c === "{" || c === "[") depth++;
-    else if (c === ")" || c === "}" || c === "]") {
-      if (depth === 0) return text.slice(i, j).trim();
-      depth--;
-    } else if ((c === ";" || c === "\n") && depth === 0) {
-      const before = text.slice(i, j).trimEnd();
-      if (c === "\n" && /[?:|&+\-*/,=(]$/.test(before)) continue;
-      if (c === "\n" && /^\s*[?:.|&]/.test(text.slice(j + 1, j + 40))) continue;
-      return text.slice(i, j).trim();
-    }
-  }
-  return text.slice(i).trim();
-}
-function localsBefore(text, before) {
-  const out = /* @__PURE__ */ new Map();
-  for (const m of text.slice(0, before).matchAll(/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::[^=\n]+?)?=(?!=)\s*/g)) out.set(m[1], exprFrom(text, m.index + m[0].length));
-  return out;
-}
-function rewrite(expr, ctx, depth = 0) {
-  const e = expr.trim();
-  if (depth > 4 || /\bawait\b|=>|\bfunction\b|\bthis\b/.test(e)) return void 0;
-  if (e.startsWith("{") && balanced(e, 0)?.end === e.length - 1) return rewriteObject(balanced(e, 0).inner, ctx, depth);
-  let out = "";
-  let ok = true;
-  for (let i = 0; i < e.length; ) {
-    const c = e[i];
-    if (c === '"' || c === "'" || c === "`") {
-      const end = skipString(e, i);
-      const str3 = e.slice(i, end + 1);
-      if (c === "`" && str3.includes("${")) {
-        let t = "";
-        for (let j = 0; j < str3.length; j++) {
-          if (str3[j] === "\\") {
-            t += str3.slice(j, j + 2);
-            j++;
-          } else if (str3[j] === "$" && str3[j + 1] === "{") {
-            const b = balanced(str3, j + 1);
-            const inner = rewrite(b.inner, ctx, depth + 1);
-            if (inner === void 0) ok = false;
-            t += `\${${inner ?? "undefined"}}`;
-            j = b.end;
-          } else t += str3[j];
-        }
-        out += t;
-      } else out += str3;
-      i = end + 1;
-      continue;
-    }
-    IDENT.lastIndex = i;
-    const m = /[A-Za-z_$]/.test(c) && !/[\w$]/.test(e[i - 1] ?? "") ? IDENT.exec(e) : null;
-    if (!m) {
-      out += c;
-      i++;
-      continue;
-    }
-    const name = m[0];
-    i += name.length;
-    const prev = out.trimEnd().slice(-1);
-    if (prev === "." || out.trimEnd().endsWith("?.")) {
-      out += name;
-      continue;
-    }
-    if (/^\s*:/.test(e.slice(i)) && /[{,]$/.test(out.trimEnd())) {
-      out += name;
-      continue;
-    }
-    const v = valueOf(name, ctx, depth);
-    if (v === void 0) {
-      ok = false;
-      out += "undefined";
-    } else out += v;
-  }
-  return ok ? out : void 0;
-}
-function valueOf(name, ctx, depth) {
-  if (name === ctx.planVar) return "plan(name)";
-  if (GLOBALS.has(name)) return name;
-  if (ctx.imports.has(name)) return name;
-  const init = ctx.locals.get(name);
-  if (init !== void 0) {
-    const saved = ctx.runtime;
-    ctx.runtime = /* @__PURE__ */ new Set();
-    const v = rewrite(init, ctx, depth + 1);
-    ctx.runtime = saved;
-    if (v !== void 0) return /^[\w$.]+(?:\([^()]*\))?$|^'[^']*'$|^"[^"]*"$|^\d+$/.test(v) ? v : `(${v})`;
-  }
-  ctx.runtime.add(name);
-  return void 0;
-}
-function rewriteObject(body, ctx, depth) {
-  const props = [];
-  for (const p of splitTop(body)) {
-    if (p.startsWith("...")) {
-      const v2 = rewrite(p.slice(3), ctx, depth + 1);
-      if (v2 !== void 0) props.push(`...${v2}`);
-      continue;
-    }
-    const kv = /^((?:[A-Za-z_$][\w$]*|'[^']*'|"[^"]*"|\[[^\]]+\]))\s*:\s*([\s\S]+)$/.exec(p);
-    if (kv) {
-      const v2 = rewrite(kv[2], ctx, depth + 1);
-      if (v2 !== void 0) props.push(`${kv[1]}: ${v2}`);
-      continue;
-    }
-    if (/^[A-Za-z_$][\w$]*$/.test(p)) {
-      const v2 = valueOf(p, ctx, depth);
-      if (v2 !== void 0) props.push(v2 === p ? p : `${p}: ${v2}`);
-      continue;
-    }
-    const v = rewrite(p, ctx, depth + 1);
-    if (v !== void 0) props.push(v);
-  }
-  return props.length ? `{ ${props.join(", ")} }` : "{}";
-}
-function renderCallFor(root, file, line2, planNames, planFile) {
-  let text;
-  try {
-    text = readFileSync6(join5(root, file), "utf8");
-  } catch {
-    return void 0;
-  }
-  const lineStart2 = text.split("\n").slice(0, line2 - 1).join("\n").length;
-  const at = text.slice(lineStart2).search(/checkout\s*\.\s*sessions\s*\.\s*create\s*\(/);
-  if (at < 0) return void 0;
-  const open2 = text.indexOf("(", lineStart2 + at);
-  const outer = balanced(text, open2);
-  if (!outer) return void 0;
-  const call = /^\s*(?:await\s+)?([A-Za-z_$][\w$]*)\s*\(/.exec(outer.inner);
-  if (!call) return void 0;
-  const fn = call[1];
-  const innerOpen = open2 + 1 + call[0].length - 1;
-  const args = balanced(text, innerOpen);
-  if (!args || text.slice(args.end + 1, outer.end).trim()) return void 0;
-  const imports = importsOf(root, file, text);
-  const fnImport = imports.get(fn);
-  const fnFile = fnImport?.file ?? (new RegExp(`export\\s+(?:async\\s+)?function\\s+${fn}\\b|export\\s+const\\s+${fn}\\b`).test(text) ? file : void 0);
-  if (!fnFile) return void 0;
-  const locals = localsBefore(text, open2);
-  const planImports = [...imports.entries()].filter(([, v]) => v.file && planFile.test(v.file));
-  if (!planImports.length) return void 0;
-  const usesPlans = (expr) => planImports.find(([local]) => new RegExp(`(?<![\\w$.])${local.replace(/\$/g, "\\$")}(?![\\w$])`).test(expr));
-  const parts = splitTop(args.inner);
-  let planVar;
-  let plansFile;
-  let planArgIndex = -1;
-  parts.forEach((p, i) => {
-    const init = /^[A-Za-z_$][\w$]*$/.test(p) ? locals.get(p) : void 0;
-    const hit = init !== void 0 ? usesPlans(init) : usesPlans(p);
-    if (!hit || planArgIndex >= 0) return;
-    planArgIndex = i;
-    plansFile = hit[1].file;
-    if (init !== void 0) planVar = p;
-  });
-  if (planArgIndex < 0 || !plansFile) return void 0;
-  let plansText = "";
-  try {
-    plansText = readFileSync6(join5(root, plansFile), "utf8");
-  } catch {
-    return void 0;
-  }
-  if (!planNames.length || !planNames.every((n) => new RegExp(`\\bname\\s*:\\s*(['"\`])${n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\1`).test(plansText))) return void 0;
-  const ctx = { imports, locals, ...planVar ? { planVar } : {}, runtime: /* @__PURE__ */ new Set() };
-  const rendered = parts.map((p, i) => i === planArgIndex ? "plan(name)" : rewrite(p, ctx) ?? "undefined");
-  const expression = `${fn}(${rendered.join(", ")})`;
-  const reads = (local) => new RegExp(`(?<![\\w$.])${local.replace(/\$/g, "\\$")}(?![\\w$])`).test(expression.replace(/(['"])(?:\\.|(?!\1).)*\1/g, "''"));
-  const used = new Map([...imports.entries()].filter(([local]) => local === fn || reads(local)));
-  if (!fnImport) used.set(fn, { spec: `./${posix.basename(file)}`, imported: fn, file });
-  return { exportName: "checkoutParams", expression, imports: used, plansFile, runtime: [...ctx.runtime], fn, fnFile };
-}
-function renderFilePath(root, fnFile) {
-  const dir = posix.dirname(fnFile.split("\\").join("/"));
-  const ext = /\.(?:[cm]?js|jsx)$/.test(fnFile) ? ".mjs" : ".ts";
-  for (const name of ["checkbox-ci", "checkbox-ci-checkout", "checkbox-ci-render"]) {
-    const rel2 = dir === "." ? `${name}${ext}` : `${dir}/${name}${ext}`;
-    if (!existsSync5(join5(root, rel2))) return rel2;
-    try {
-      if (readFileSync6(join5(root, rel2), "utf8").includes(RENDER_MARKER)) return rel2;
-    } catch {
-    }
-  }
-  return `${dir === "." ? "" : `${dir}/`}checkbox-ci-${Date.now().toString(36)}${ext}`;
-}
-function specFrom(fromFile, imp) {
-  if (!imp.file) return imp.spec;
-  let rel2 = posix.relative(posix.dirname(fromFile), imp.file);
-  if (!rel2.startsWith(".")) rel2 = `./${rel2}`;
-  return /\.[cm]?js$/.test(imp.spec) ? rel2.replace(/\.[cm]?tsx?$/, ".js") : rel2.replace(/\.(?:[cm]?[jt]sx?)$/, "").replace(/\/index$/, "");
-}
-function renderFile(path, calls) {
-  const ts = path.endsWith(".ts");
-  const byFile = /* @__PURE__ */ new Map();
-  const plansFile = calls[0].plansFile;
-  const plansSpec = specFrom(path, { spec: plansFile, imported: "*", file: plansFile });
-  const refs2 = [];
-  const bodies = [];
-  const exports = /* @__PURE__ */ new Set();
-  for (const c of calls) {
-    for (const [local, imp] of c.imports) {
-      const spec = specFrom(path, imp);
-      const entry = byFile.get(spec) ?? { names: /* @__PURE__ */ new Set() };
-      if (imp.imported === "*") entry.ns = local;
-      else if (imp.imported === "default") entry.def = local;
-      else entry.names.add(imp.imported === local ? local : `${imp.imported} as ${local}`);
-      byFile.set(spec, entry);
-    }
-    let name = c.exportName;
-    for (let i = 2; exports.has(name); i++) name = `${c.exportName}${i}`;
-    exports.add(name);
-    refs2.push(`${path}#${name}`);
-    const left = c.runtime.length ? `
- * ${c.runtime.join(", ")} ${c.runtime.length === 1 ? "is" : "are"} read from the request there, so ${c.runtime.length === 1 ? "it is" : "they are"} left out here.` : "";
-    bodies.push(`/**
- * The params ${c.source} passes to stripe.checkout.sessions.create, for the plan named \`name\`.${left}
- */
-export function ${name}(name${ts ? ": string" : ""}) {
-  return ${c.expression};
-}`);
-  }
-  const imports = [`import * as plansModule from '${plansSpec}';`];
-  for (const [spec, e] of byFile) {
-    if (e.ns) imports.push(`import * as ${e.ns} from '${spec}';`);
-    const named = [...e.names].sort();
-    if (e.def || named.length) imports.push(`import ${[e.def, named.length ? `{ ${named.join(", ")} }` : void 0].filter(Boolean).join(", ")} from '${spec}';`);
-  }
-  const fns = [...new Set(calls.map((c) => `${c.fn} (${c.fnFile})`))].join(", ");
-  const content = `// ${RENDER_MARKER}. \`checkbox ci\` imports this file (checkbox.json "module" entries) to render the exact
-// Stripe Checkout Session params your app sends, one plan at a time, with the app's own params function:
-// ${fns}.
-// It runs offline on every check: nothing is sent to Stripe. If the Checkout route changes how it builds the params,
-// change this file to match (\`checkbox ci init\` keeps it unless you pass --force).
-${imports.join("\n")}
-
-/** The plan named \`name\` in ${plansFile} (checkbox.json uses the same plan names). */
-${ts ? "// eslint-disable-next-line @typescript-eslint/no-explicit-any\n" : ""}function plan(name${ts ? ": string" : ""})${ts ? ": any" : ""} {
-  const seen = new Set${ts ? "<unknown>" : ""}();
-  const find = (v${ts ? ": unknown" : ""})${ts ? ": unknown" : ""} => {
-    if (!v || typeof v !== 'object' || seen.has(v)) return undefined;
-    seen.add(v);
-    if (${ts ? "(v as { name?: unknown })" : "v"}.name === name) return v;
-    for (const x of Object.values(v)) {
-      const hit = find(x);
-      if (hit) return hit;
-    }
-    return undefined;
-  };
-  const hit = find(plansModule);
-  if (!hit) throw new Error(\`${plansFile} has no plan named "\${name}" (checkbox.json names it)\`);
-  return hit;
-}
-
-${bodies.join("\n\n")}
-`;
-  return { content, refs: refs2 };
-}
-var RENDER_MARKER, GLOBALS, IDENT;
-var init_render_entry = __esm({
-  "packages/cli/src/ci/render-entry.ts"() {
-    "use strict";
-    init_detect();
-    RENDER_MARKER = "Written by `checkbox ci init`";
-    GLOBALS = /* @__PURE__ */ new Set(["undefined", "null", "true", "false", "String", "Number", "Boolean", "Date", "Math", "JSON", "Object", "Array", "URL", "encodeURIComponent", "decodeURIComponent", "process", "new", "typeof", "void", "in", "of", "instanceof", "Intl", "NaN", "Infinity"]);
-    IDENT = /[A-Za-z_$][\w$]*/y;
-  }
-});
-
 // packages/cli/src/ci/scaffold.ts
-import { existsSync as existsSync6, readdirSync as readdirSync3, readFileSync as readFileSync7, statSync as statSync2 } from "node:fs";
-import { basename, join as join6, relative as relative2 } from "node:path";
+import { existsSync as existsSync7, readdirSync as readdirSync3, readFileSync as readFileSync7, statSync as statSync2 } from "node:fs";
+import { basename as basename2, join as join7, relative as relative2 } from "node:path";
 function countTodoValues(v) {
   if (typeof v === "string") return /^TODO\b/.test(v) ? 1 : 0;
   if (Array.isArray(v)) return v.reduce((n, x) => n + countTodoValues(x), 0);
@@ -31618,7 +31982,7 @@ function termsPageOf(root, facts = {}) {
   let text;
   let route;
   walk3(root, (rel2) => {
-    if (!html && TERMS_STATIC.test(rel2)) html = rel2;
+    if (!html && (TERMS_STATIC.test(rel2) || TERMS_TEMPLATE.test(rel2))) html = rel2;
     else if (!text && TERMS_TEXT.test(rel2) && !rel2.startsWith("docs/") && !rel2.includes("node_modules")) text = rel2;
     if (route) return;
     let m = /^(?:src\/)?app\/((?:\([^/]+\)\/)*)((?:legal\/)?[^/()]+)\/page\.(?:tsx|jsx|ts|js|mdx)$/.exec(rel2);
@@ -31633,7 +31997,7 @@ function termsPageOf(root, facts = {}) {
   let routeDyn;
   if (route) {
     try {
-      routeDyn = dynamicReason(readFileSync7(join6(root, route.source), "utf8"));
+      routeDyn = dynamicReason(readFileSync7(join7(root, route.source), "utf8"));
     } catch {
       routeDyn = void 0;
     }
@@ -31660,7 +32024,7 @@ function brandFromPageTitles(root) {
     if (seen.length >= 4 || !(PAGE_FILE.test(rel2) || TERMS_STATIC.test(rel2))) return;
     let html = "";
     try {
-      html = readFileSync7(join6(root, rel2), "utf8").slice(0, 5e4);
+      html = readFileSync7(join7(root, rel2), "utf8").slice(0, 5e4);
     } catch {
       return;
     }
@@ -31694,7 +32058,7 @@ function walk3(root, visit) {
     }
     for (const name of names) {
       if (IGNORE.has(name) || name.startsWith(".") && name !== ".well-known") continue;
-      const abs = join6(dir, name);
+      const abs = join7(dir, name);
       let st;
       try {
         st = statSync2(abs);
@@ -31711,7 +32075,7 @@ function walk3(root, visit) {
   go(root, 0);
 }
 function emailKindOf(file) {
-  const name = basename(file).replace(/\.[^.]+$/, "");
+  const name = basename2(file).replace(/\.[^.]+$/, "");
   return EMAIL_NAMES.find(([re]) => re.test(name))?.[1];
 }
 function plansFromLiterals(text, file) {
@@ -31739,7 +32103,7 @@ function plansFromLiterals(text, file) {
 function paramsBuilder(root, file, line2) {
   let text;
   try {
-    text = readFileSync7(join6(root, file), "utf8");
+    text = readFileSync7(join7(root, file), "utf8");
   } catch {
     return void 0;
   }
@@ -31780,7 +32144,7 @@ function copyTexts(root, sessionFiles = []) {
     if (seen.has(rel2) || out.length >= 200) return;
     seen.add(rel2);
     try {
-      out.push({ file: rel2, text: readFileSync7(join6(root, rel2), "utf8").slice(0, 2e5) });
+      out.push({ file: rel2, text: readFileSync7(join7(root, rel2), "utf8").slice(0, 2e5) });
     } catch {
     }
   };
@@ -31814,13 +32178,13 @@ function pageSource(root, built) {
   if (!route) return void 0;
   const path = [route[1], route[2]].filter(Boolean).join("/");
   const bases = [`app/${path}/page`, `src/app/${path}/page`, `app/(marketing)/${path}/page`, `pages/${path}`, `src/pages/${path}`, `src/routes/${path}/+page`, `pages/${path}/index`, `src/pages/${path}/index`];
-  const hits = bases.flatMap((b) => [".tsx", ".jsx", ".ts", ".js", ".svelte", ".vue", ".astro", ".mdx"].map((e) => `${b}${e}`)).filter((f) => existsSync6(join6(root, f)));
+  const hits = bases.flatMap((b) => [".tsx", ".jsx", ".ts", ".js", ".svelte", ".vue", ".astro", ".mdx"].map((e) => `${b}${e}`)).filter((f) => existsSync7(join7(root, f)));
   return hits.length === 1 ? hits[0] : void 0;
 }
 function priceExpressions(root, file, line2) {
   let text;
   try {
-    text = readFileSync7(join6(root, file), "utf8");
+    text = readFileSync7(join7(root, file), "utf8");
   } catch {
     return [];
   }
@@ -31869,7 +32233,7 @@ function runtimeLocal(root, file, line2, expr) {
   if (!id) return false;
   let text;
   try {
-    text = readFileSync7(join6(root, file), "utf8");
+    text = readFileSync7(join7(root, file), "utf8");
   } catch {
     return false;
   }
@@ -31952,7 +32316,7 @@ function scaffoldConfig(root, env2 = {}, facts = {}) {
   if (cancelFact) {
     merchant.cancel_url = cancelFact;
     found.push(`cancel URL ${cancelFact} (from checkbox init)`);
-  } else if (siteUrl && cancelPath) merchant.cancel_url = `${originOf2(siteUrl)}${cancelPath}`;
+  } else if (siteUrl && cancelPath) merchant.cancel_url = `${originOf(siteUrl)}${cancelPath}`;
   else if (cancelUrlInCode(det.checkoutSessions)) {
     merchant.cancel_url = cancelUrlInCode(det.checkoutSessions);
     found.push(`cancel URL ${String(merchant.cancel_url)} (from the Checkout custom_text)`);
@@ -31975,7 +32339,7 @@ function scaffoldConfig(root, env2 = {}, facts = {}) {
     if (!PLAN_FILE.test(rel2) || literals.length >= 8) return;
     let text = "";
     try {
-      text = readFileSync7(join6(root, rel2), "utf8");
+      text = readFileSync7(join7(root, rel2), "utf8");
     } catch {
       return;
     }
@@ -31996,7 +32360,7 @@ function scaffoldConfig(root, env2 = {}, facts = {}) {
     for (const [i, p] of facts.plans.entries()) {
       if (typeof p.amount !== "number" || typeof p.interval !== "string") continue;
       plans.push({ name: typeof p.name === "string" && p.name.trim() && !(codeRef(p.name) && literalFor(p)) ? p.name : literalFor(p)?.name ?? `Plan ${i + 1}`, amount: p.amount, currency: typeof p.currency === "string" ? p.currency : "usd", interval: p.interval, ...typeof p.interval_count === "number" ? { interval_count: p.interval_count } : {}, ...typeof p.trial_days === "number" ? { trial_days: p.trial_days } : {} });
-      found.push(`plan ${String(plans[plans.length - 1].name)} (from checkbox init --plan)`);
+      found.push(`plan ${String(plans[plans.length - 1].name)} (from the plans Checkbox has for this project)`);
     }
   }
   if (!plans.length) {
@@ -32014,6 +32378,8 @@ function scaffoldConfig(root, env2 = {}, facts = {}) {
     if (lit?.price_ids?.length) planPriceIds.set(String(p.name), lit.price_ids);
     const known = initPlans.find((x) => Array.isArray(x.stripe_price_ids) && minorOf(x) === minorOf(p) && x.interval === p.interval && (Number(x.interval_count ?? 1) || 1) === (Number(p.interval_count ?? 1) || 1));
     if (known) planPriceIds.set(String(p.name), [...planPriceIds.get(String(p.name)) ?? [], ...known.stripe_price_ids]);
+    const ids = [...new Set((planPriceIds.get(String(p.name)) ?? []).filter((x) => typeof x === "string" && /^price_\w+$/.test(x)))];
+    if (ids.length) p.stripe_price_ids = ids;
   }
   if (!plans.length) {
     plans.push({ name: "TODO: plan name", price: "TODO: e.g. 19.99", currency: "usd", interval: "month" });
@@ -32034,18 +32400,21 @@ function scaffoldConfig(root, env2 = {}, facts = {}) {
   for (const s2 of det.checkoutSessions) {
     const call = (perFile.get(s2.file) ?? 0) + 1;
     perFile.set(s2.file, call);
-    const entry = { name: unique(names, `Stripe Checkout (${basename(s2.file)}${call > 1 ? ` #${call}` : ""})`), source: s2.file, ...call > 1 ? { call } : {} };
+    const entry = { name: unique(names, `Stripe Checkout (${basename2(s2.file)}${call > 1 ? ` #${call}` : ""})`), source: s2.file, ...call > 1 ? { call } : {} };
     const builder = !s2.params ? paramsBuilder(root, s2.file, s2.line) : void 0;
     const named = plans.length > 0 && !plans.some((p) => String(p.name).startsWith("TODO"));
     const render = builder?.takesArgs && named ? renderCallFor(root, s2.file, s2.line, plans.map((p) => String(p.name)), PLAN_FILE) : void 0;
     if (render) {
       renderPath ??= renderFilePath(root, render.fnFile);
-      const exportName = renderCalls.length ? `checkoutParams${renderCalls.length + 1}` : "checkoutParams";
+      const imported = new Set([...renderCalls, render].flatMap((c) => [...c.imports.keys()]));
+      const stem = imported.has("checkoutParams") ? "checkboxCheckoutParams" : "checkoutParams";
+      let exportName = renderCalls.length ? `${stem}${renderCalls.length + 1}` : stem;
+      for (let i = renderCalls.length + 2; imported.has(exportName) || renderCalls.some((c) => c.exportName === exportName); i++) exportName = `${stem}${i}`;
       renderCalls.push({ ...render, exportName, source: `${s2.file}${call > 1 ? ` (call ${call})` : ""}` });
       found.push(`${s2.file}:${s2.line}: Checkout Session built by ${render.fn} (${render.fnFile}) for the plan looked up in ${render.plansFile}; checked for each plan through ${renderPath}#${exportName}`);
       plans.forEach((p, i) => {
         const n = String(p.name);
-        stripe.push({ name: unique(names, plans.length > 1 ? `Stripe Checkout: ${n}` : `Stripe Checkout (${basename(s2.file)})`), module: `${renderPath}#${exportName}`, args: [n], plan: n, strict: true, ...i === 0 ? { covers: [call > 1 ? `${s2.file}#${call}` : s2.file] } : {} });
+        stripe.push({ name: unique(names, plans.length > 1 ? `Stripe Checkout: ${n}` : `Stripe Checkout (${basename2(s2.file)})`), module: `${renderPath}#${exportName}`, args: [n], plan: n, strict: true, ...i === 0 ? { covers: [call > 1 ? `${s2.file}#${call}` : s2.file] } : {} });
       });
       if (render.runtime.length) notes2.push(`${renderPath}: ${render.runtime.join(", ")} ${render.runtime.length === 1 ? "is" : "are"} read from the request in ${s2.file}, so the rendered params leave ${render.runtime.length === 1 ? "it" : "them"} out. Check the file renders what the route sends.`);
       continue;
@@ -32108,12 +32477,12 @@ function scaffoldConfig(root, env2 = {}, facts = {}) {
       if (/\.(?:html?|txt|md)$/i.test(rel2) && kind) {
         let text = "";
         try {
-          text = readFileSync7(join6(root, rel2), "utf8");
+          text = readFileSync7(join7(root, rel2), "utf8");
         } catch {
         }
         const tags = Object.fromEntries(mergeTagsIn(text).flatMap((t) => mergeTagField(t) ? [[t, mergeTagField(t)]] : []));
         const planTagged = Object.values(tags).some((v) => v.startsWith("plan."));
-        const hint = intervalHintOf(basename(rel2).replace(/\.[^.]+$/, ""));
+        const hint = intervalHintOf(basename2(rel2).replace(/\.[^.]+$/, ""));
         const byName = hint && plans.length > 1 ? plans.filter((p) => p.interval === hint && (Number(p.interval_count ?? 1) || 1) === 1) : [];
         const inText = plans.length > 1 && !planTagged && byName.length !== 1 ? plansNamedIn(text, plans, { trial: kind === "trial_reminder" || /\btrial\b/i.test(text) }) : [];
         const planAgnostic = kind === "cancellation_confirmation" && !inText.length && byName.length !== 1;
@@ -32121,7 +32490,7 @@ function scaffoldConfig(root, env2 = {}, facts = {}) {
         if (inText.length === 1 && plans.length > 1) found.push(`${rel2}: names plan "${String(inText[0].name)}" (its name, price or trial)`);
         const contact2 = supportAddressIn(text);
         if (contact2 && !supportSeen.has(contact2)) supportSeen.set(contact2, rel2);
-        emails.push({ name: unique(names, `Email: ${basename(rel2)}`), kind, file: rel2, ...plan2, ...Object.keys(tags).length ? { merge_tags: tags } : {} });
+        emails.push({ name: unique(names, `Email: ${basename2(rel2)}`), kind, file: rel2, ...plan2, ...Object.keys(tags).length ? { merge_tags: tags } : {} });
         found.push(`${rel2}: ${kind} email${Object.keys(tags).length ? ` (its merge tags ${Object.keys(tags).map((t) => `{{${t}}}`).join(", ")} are filled from checkbox.json: see "merge_tags")` : ""}`);
         return;
       }
@@ -32135,7 +32504,7 @@ function scaffoldConfig(root, env2 = {}, facts = {}) {
       const src = pageSource(root, rel2);
       let html = "";
       try {
-        html = readFileSync7(join6(root, rel2), "utf8");
+        html = readFileSync7(join7(root, rel2), "utf8");
       } catch {
       }
       const shown = plans.length > 1 ? plansNamedIn(html, plans) : [];
@@ -32147,12 +32516,12 @@ function scaffoldConfig(root, env2 = {}, facts = {}) {
     if (/\.(?:txt|md)$/i.test(rel2) && !/(?:^|\/)(?:README|CHANGELOG|LICENSE|CONTRIBUTING|AGENTS|CLAUDE)[^/]*$/i.test(rel2) && !rel2.startsWith("docs/") && !TERMS_TEXT.test(rel2)) {
       let text = "";
       try {
-        text = readFileSync7(join6(root, rel2), "utf8");
+        text = readFileSync7(join7(root, rel2), "utf8");
       } catch {
         return;
       }
       if (text.length < 1500 && DISCLOSURE_TEXT.test(text)) {
-        disclosures.push({ name: unique(names, `Disclosure: ${basename(rel2)}`), file: rel2, ...planFor() });
+        disclosures.push({ name: unique(names, `Disclosure: ${basename2(rel2)}`), file: rel2, ...planFor() });
         found.push(`${rel2}: disclosure text`);
       }
     }
@@ -32161,7 +32530,7 @@ function scaffoldConfig(root, env2 = {}, facts = {}) {
     if (pages.some((p) => p.source === ps.source || p.file === ps.file)) continue;
     let text = "";
     try {
-      text = readFileSync7(join6(root, ps.source), "utf8");
+      text = readFileSync7(join7(root, ps.source), "utf8");
     } catch {
     }
     const kind = /checkout|subscribe/i.test(ps.route) ? "checkout" : "pricing";
@@ -32182,7 +32551,16 @@ function scaffoldConfig(root, env2 = {}, facts = {}) {
   } else notes2.push(`No Terms of service page found in the project: ${TERMS_NOT_CHECKED} (every run says so). Add a pages entry { "name": "Terms of service", "kind": "terms", "file": "<your Terms page>" } so a trial or price change cannot ship with stale Terms.`);
   const inPages = (f) => pages.some((p) => p.source === f || p.file === f);
   if (!disclosures.length && det.payButtons.length && !det.payButtons.some((b) => inPages(b.file))) {
-    notes2.push(`The renewal disclosure lives in code (${det.payButtons[0].file}); keep its text in a .txt file the component imports and add it under checks.disclosures, or check the rendered page under checks.pages`);
+    const holder = det.payButtons.find((b) => {
+      try {
+        return DISCLOSURE_TEXT.test(readFileSync7(join7(root, b.file), "utf8"));
+      } catch {
+        return false;
+      }
+    });
+    notes2.push(
+      holder ? `The renewal disclosure lives in code (${holder.file}); keep its text in a .txt file the component imports and add it under checks.disclosures, or check the rendered page under checks.pages` : `A sign-up button is in ${det.payButtons[0].file}, and no file in the project holds the renewal disclosure next to it: add the page that shows it under checks.pages (or its text under checks.disclosures)`
+    );
   }
   const [contact] = [...supportSeen.entries()];
   if (!merchant.support_contact && contact) {
@@ -32200,7 +32578,12 @@ function scaffoldConfig(root, env2 = {}, facts = {}) {
     notes2.push('No checkout code, email templates or pages were found: add entries under "checks" (https://checkbox.site/docs/guides/ci#config)');
   }
   const files = [];
-  if (renderPath && renderCalls.length) files.push({ path: renderPath, content: renderFile(renderPath, renderCalls).content });
+  if (renderPath && renderCalls.length) {
+    const rendered = renderFile(renderPath, renderCalls);
+    files.push({ path: renderPath, content: rendered.content });
+    const final = new Map(renderCalls.map((c, i) => [`${renderPath}#${c.exportName}`, rendered.refs[i]]));
+    for (const e of stripe) if (typeof e.module === "string" && final.has(e.module)) e.module = final.get(e.module);
+  }
   return {
     files,
     config: { $schema: SCHEMA_URL, merchant, jurisdictions: "all", plans, checks },
@@ -32210,17 +32593,19 @@ function scaffoldConfig(root, env2 = {}, facts = {}) {
     todoValues: countTodoValues({ merchant, plans, checks })
   };
 }
-var PAGE_ROUTE, TERMS_NAME, TERMS_STATIC, TERMS_TEXT, TERMS_ROUTE, TERMS_NOT_CHECKED, IGNORE, MAX_FILES2, EMAIL_NAMES, IN_EMAIL_DIR, PAGE_FILE, DISCLOSURE_TEXT, unique, PLAN_FILE, EMAIL_ADDRESS;
+var PAGE_ROUTE, TERMS_NAME, TERMS_STATIC, TEMPLATE_DIR, TERMS_TEMPLATE, TERMS_TEXT, TERMS_ROUTE, TERMS_NOT_CHECKED, IGNORE, MAX_FILES2, EMAIL_NAMES, IN_EMAIL_DIR, PAGE_FILE, DISCLOSURE_TEXT, unique, PLAN_FILE, EMAIL_ADDRESS;
 var init_scaffold = __esm({
   "packages/cli/src/ci/scaffold.ts"() {
     "use strict";
     init_detect();
     init_render_entry();
     init_preflight();
-    init_config3();
+    init_config2();
     PAGE_ROUTE = /^(pricing|checkout|subscribe|plans)$/i;
     TERMS_NAME = "(?:terms|terms-of-service|terms-of-use|terms-and-conditions|tos|legal/terms)";
     TERMS_STATIC = new RegExp(`(?:^|/)(?:public|dist|out|build|static|_site|www)/(?:.*/)?${TERMS_NAME}(?:/index)?\\.html?$`, "i");
+    TEMPLATE_DIR = "(?:templates|views)/(?:.*/)?";
+    TERMS_TEMPLATE = new RegExp(`(?:^|/)${TEMPLATE_DIR}${TERMS_NAME}(?:/index)?\\.(?:html?|jinja2?|j2|ejs|hbs|erb|html\\.erb)$`, "i");
     TERMS_TEXT = new RegExp(`(?:^|/)(?:content/|src/content/|legal/)?${TERMS_NAME}\\.(?:md|mdx|txt)$`, "i");
     TERMS_ROUTE = /^(?:terms|terms-of-service|terms-of-use|terms-and-conditions|tos)$/i;
     TERMS_NOT_CHECKED = "Terms: NOT checked in CI";
@@ -32236,7 +32621,7 @@ var init_scaffold = __esm({
       [/welcome|confirm|acknowledg|subscribed|signup|sign[-_]up|order/i, "acknowledgment"]
     ];
     IN_EMAIL_DIR = /(?:^|\/)(?:e-?mails?|mail(?:ers?)?|notifications?)(?:\/|$)|(?:^|\/)templates\/(?:e-?mails?|mail)\//i;
-    PAGE_FILE = /(?:^|\/)(?:public|dist|out|build|static|_site|www)\/(?:.*\/)?(pricing|checkout|subscribe|plans)(?:\/index)?\.html?$/i;
+    PAGE_FILE = /(?:^|\/)(?:(?:public|dist|out|build|static|_site|www)\/(?:.*\/)?(pricing|checkout|subscribe|plans)(?:\/index)?\.html?|(?:templates|views)\/(?:.*\/)?(pricing|checkout|subscribe|plans)\.(?:html?|jinja2?|j2|ejs|hbs))$/i;
     DISCLOSURE_TEXT = /renews? automatically|automatically renews?|auto-?renew|until (?:you )?cancel/i;
     unique = (names, base) => {
       let n = base;
@@ -32251,7 +32636,7 @@ var init_scaffold = __esm({
 
 // packages/cli/src/ci/coverage.ts
 import { readFileSync as readFileSync8 } from "node:fs";
-import { join as join7, relative as relative3, resolve as resolve4 } from "node:path";
+import { join as join8, relative as relative3, resolve as resolve3 } from "node:path";
 function callsIn(text, file) {
   const hits = [];
   for (const [re, kind] of PATTERNS) {
@@ -32273,13 +32658,13 @@ function callsIn(text, file) {
 }
 function coverageOf(loaded, root, files) {
   const cfg = loaded.config;
-  const toRoot = (p) => relative3(root, resolve4(loaded.dir, p)).split("\\").join("/");
+  const toRoot = (p) => relative3(root, resolve3(loaded.dir, p)).split("\\").join("/");
   const calls = [];
   const visit = (rel2) => {
     if (!CODE.test(rel2) || TESTISH.test(rel2)) return;
     let text = "";
     try {
-      text = readFileSync8(join7(root, rel2), "utf8");
+      text = readFileSync8(join8(root, rel2), "utf8");
     } catch {
       return;
     }
@@ -32373,7 +32758,7 @@ var init_coverage = __esm({
 
 // packages/cli/src/ci/unlisted-emails.ts
 import { readFileSync as readFileSync9 } from "node:fs";
-import { basename as basename2, join as join8, relative as relative4, resolve as resolve5 } from "node:path";
+import { basename as basename3, join as join9, relative as relative4, resolve as resolve4 } from "node:path";
 function emailKindFromText(text) {
   const t = text.replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/\s+/g, " ");
   if (/\b(?:price|prices|pricing)\b[^.]{0,40}\b(?:chang|increas|go(?:es|ing)? up|ris(?:e|es|ing)|updat)|\bcosts? (?:a (?:little|bit) )?more\b|\bnew (?:price|pricing|rate)\b|\braising (?:our|the|your) (?:price|rate)s?\b|\bprice (?:increase|change|update)\b/i.test(t)) return "price_change";
@@ -32385,7 +32770,7 @@ function emailKindFromText(text) {
 function unlistedEmailTemplates(loaded, root = loaded.dir, files) {
   const cfg = loaded.config;
   if (cfg.coverage === false) return [];
-  const toRoot = (p) => relative4(root, resolve5(loaded.dir, p)).split("\\").join("/");
+  const toRoot = (p) => relative4(root, resolve4(loaded.dir, p)).split("\\").join("/");
   const listed2 = /* @__PURE__ */ new Set();
   for (const e of cfg.checks.emails ?? []) {
     if (e.file) listed2.add(toRoot(e.file));
@@ -32399,9 +32784,9 @@ function unlistedEmailTemplates(loaded, root = loaded.dir, files) {
   const out = [];
   const visit = (rel2) => {
     if (listed2.has(rel2) || TESTISH2.test(rel2) || ignore.some((re) => re.test(rel2))) return;
-    const text = TEXT_TEMPLATE.test(rel2) || COMPONENT.test(rel2) ? readText2(join8(root, rel2)) : void 0;
+    const text = TEXT_TEMPLATE.test(rel2) || COMPONENT.test(rel2) ? readText2(join9(root, rel2)) : void 0;
     if (text === void 0) return;
-    const name = basename2(rel2).replace(/\.[^.]+$/, "");
+    const name = basename3(rel2).replace(/\.[^.]+$/, "");
     const inDir = IN_EMAIL_DIR2.test(rel2);
     const looksLikeEmail = EMAIL_MARKER.test(text) && SUBSCRIPTION_WORD.test(text);
     if (COMPONENT.test(rel2)) {
@@ -32413,7 +32798,7 @@ function unlistedEmailTemplates(loaded, root = loaded.dir, files) {
     const kind = byName ?? byText;
     const kindFrom = byName ? "name" : byText ? "wording" : void 0;
     if (COMPONENT.test(rel2)) {
-      out.push({ file: rel2, ...kind ? { kind, kindFrom } : {}, reason: `it is a component (${basename2(rel2)}) Checkbox cannot render without a "module" entry` });
+      out.push({ file: rel2, ...kind ? { kind, kindFrom } : {}, reason: `it is a component (${basename3(rel2)}) Checkbox cannot render without a "module" entry` });
       return;
     }
     if (!kind) {
@@ -32451,7 +32836,7 @@ function withUnlisted(loaded, unlisted) {
   return { ...loaded, config: { ...loaded.config, checks: { ...loaded.config.checks, emails: [...loaded.config.checks.emails ?? [], ...add] } } };
 }
 function unlistedAlert(u) {
-  return `Not in checkbox.json: ${u.file} is judged as a ${KIND_WORDS2[u.kind]} (from its ${u.kindFrom === "name" ? "file name" : "wording"}). Add it to checks.emails: { "name": "Email: ${basename2(u.file)}", "kind": "${u.kind}", "file": "${u.file}"${u.entry?.plan ? `, "plan": "${u.entry.plan}"` : ""} }, or to "coverage": { "ignore": [...] } if it never reaches a subscriber.`;
+  return `Not in checkbox.json: ${u.file} is judged as a ${KIND_WORDS2[u.kind]} (from its ${u.kindFrom === "name" ? "file name" : "wording"}). Add it to checks.emails: { "name": "Email: ${basename3(u.file)}", "kind": "${u.kind}", "file": "${u.file}"${u.entry?.plan ? `, "plan": "${u.entry.plan}"` : ""} }, or to "coverage": { "ignore": [...] } if it never reaches a subscriber.`;
 }
 function markUnlisted(checks, unlisted) {
   for (const u of unlisted) {
@@ -32467,7 +32852,7 @@ function unlistedResults(unlisted, toTarget = (f) => f) {
   return unlisted.filter((u) => !u.entry).map((u) => {
     const kindHint = u.kind ? `"kind": "${u.kind}", ` : '"kind": "<price_change | renewal_reminder | trial_reminder | cancellation_confirmation | acknowledgment | charge_notice | annual_terms>", ';
     const how = COMPONENT.test(u.file) ? `"module": "${u.file}#<export returning { subject, html }>"` : `"file": "${u.file}"`;
-    const fix = `Add it to checks.emails: { "name": "Email: ${basename2(u.file)}", ${kindHint}${how} }, or to "coverage": { "ignore": [...] } if it never reaches a subscriber.`;
+    const fix = `Add it to checks.emails: { "name": "Email: ${basename3(u.file)}", ${kindHint}${how} }, or to "coverage": { "ignore": [...] } if it never reaches a subscriber.`;
     return {
       name: `New email template: ${u.file}`,
       type: "email",
@@ -32515,11 +32900,11 @@ var init_unlisted_emails = __esm({
 
 // packages/cli/src/ci/inputs.ts
 import { execFile } from "node:child_process";
-import { existsSync as existsSync7, readFileSync as readFileSync10, statSync as statSync3 } from "node:fs";
-import { dirname as dirname4, isAbsolute as isAbsolute2, join as join9, relative as relative5, resolve as resolve6 } from "node:path";
+import { existsSync as existsSync8, readFileSync as readFileSync10, statSync as statSync3 } from "node:fs";
+import { dirname as dirname5, isAbsolute as isAbsolute2, join as join10, relative as relative5, resolve as resolve5 } from "node:path";
 import { pathToFileURL as pathToFileURL2 } from "node:url";
 function readRel(dir, file) {
-  const abs = isAbsolute2(file) ? file : resolve6(dir, file);
+  const abs = isAbsolute2(file) ? file : resolve5(dir, file);
   try {
     return readFileSync10(abs, "utf8");
   } catch (err) {
@@ -32529,8 +32914,8 @@ function readRel(dir, file) {
 }
 function hasTsx(dir) {
   for (let d = dir, i = 0; i < 8; i++) {
-    if (existsSync7(join9(d, "node_modules", "tsx", "package.json"))) return true;
-    const up = dirname4(d);
+    if (existsSync8(join10(d, "node_modules", "tsx", "package.json"))) return true;
+    const up = dirname5(d);
     if (up === d) break;
     d = up;
   }
@@ -32539,11 +32924,11 @@ function hasTsx(dir) {
 function declaresTsx(dir) {
   for (let d = dir, i = 0; i < 8; i++) {
     try {
-      const pkg = JSON.parse(readFileSync10(join9(d, "package.json"), "utf8"));
+      const pkg = JSON.parse(readFileSync10(join10(d, "package.json"), "utf8"));
       if (pkg.dependencies?.tsx || pkg.devDependencies?.tsx) return true;
     } catch {
     }
-    const up = dirname4(d);
+    const up = dirname5(d);
     if (up === d) break;
     d = up;
   }
@@ -32561,14 +32946,24 @@ function loaderFlags(file, dir, nodeVersion = process.versions.node, features = 
   if (major2 > 22 || major2 === 22 && minor >= 6) return ["--experimental-strip-types"];
   return declaresTsx(dir) ? `${file}: ${NOT_INSTALLED}` : `${file}: TypeScript modules need Node 22.6+ (type stripping) or tsx in the project (npm install -D tsx); or point "file" at a JSON export`;
 }
+function usesSvelteKitAliases(dir) {
+  if (["svelte.config.js", "svelte.config.ts", "svelte.config.mjs"].some((f) => existsSync8(join10(dir, f)))) return true;
+  try {
+    return /"@sveltejs\/kit"/.test(readFileSync10(join10(dir, "package.json"), "utf8"));
+  } catch {
+    return false;
+  }
+}
 function runModule(dir, ref, args = [], env2 = process.env, timeoutMs = 3e4) {
   const hash = ref.lastIndexOf("#");
   const file = hash > 0 ? ref.slice(0, hash) : ref;
   const name = hash > 0 ? ref.slice(hash + 1) : "default";
-  const abs = resolve6(dir, file);
-  if (!existsSync7(abs)) return Promise.reject(new InputError(`${file} does not exist (paths are relative to checkbox.json)`));
-  const flags = loaderFlags(file, dir);
-  if (typeof flags === "string") return Promise.reject(new InputError(flags));
+  const abs = resolve5(dir, file);
+  if (!existsSync8(abs)) return Promise.reject(new InputError(`${file} does not exist (paths are relative to checkbox.json)`));
+  const flags0 = loaderFlags(file, dir);
+  if (typeof flags0 === "string") return Promise.reject(new InputError(flags0));
+  const flags0b = !flags0.includes("tsx") && /\.[cm]?ts$/.test(file) ? [...flags0, "--import", RESOLVE_HOOK_IMPORT] : flags0;
+  const flags = usesSvelteKitAliases(dir) ? [...flags0b, "--import", ALIAS_HOOK_IMPORT] : flags0b;
   return new Promise((resolvePromise, reject) => {
     execFile(
       process.execPath,
@@ -32599,6 +32994,10 @@ function moduleErrorMessage(stderr, dir, flags = []) {
   };
   const tsx = flags.includes("tsx");
   const missing = /Cannot find (module|package) '([^']+)' imported from (\S+)/.exec(text);
+  const alias = /\$(?:env|lib|app)\/[\w/.-]*|\$lib\b/.exec(missing?.[2] ?? (/does not provide an export named '(\w+)'[\s\S]*?\$env/.test(text) ? "$env/static" : /'\$(?:env|lib|app)[^']*'/.exec(text)?.[0]?.replace(/'/g, "") ?? ""));
+  if (alias) {
+    return `${missing ? `${rel2(missing[3])} imports` : "The module imports"} "${alias[0]}", a framework alias (SvelteKit's $env, $lib or $app), not a package: installing dependencies does not provide it, and checkbox ci runs the module in plain Node. Checkbox resolves $lib, $env/dynamic/*, $env/static/* (from this job's environment) and $app/environment; for anything else, move the Checkout params into a pure function that takes its values as arguments (no framework imports) and point the "module" entry at it, with "args".`;
+  }
   if (missing) {
     const [, what, target, from] = missing;
     if (what === "package" || !/^[./]|^[A-Za-z]:[\\/]/.test(target) && !target.startsWith(dir)) {
@@ -32619,6 +33018,7 @@ function moduleErrorMessage(stderr, dir, flags = []) {
   return first2.replace(/file:\/\/\S+/g, (u) => rel2(u)).replace(/\s+/g, " ").slice(0, 400);
 }
 function paramsFromSource(text, file, call = 1, env2 = {}, consts = {}) {
+  if (/\.py$/i.test(file)) return pyParamsFromSource(text, file, call, env2);
   const calls = [...text.matchAll(/checkout\.sessions\.create\s*\(/g)];
   if (!calls.length) throw new InputError(`${file} has no stripe.checkout.sessions.create( call`);
   const m = calls[call - 1];
@@ -32630,6 +33030,18 @@ function paramsFromSource(text, file, call = 1, env2 = {}, consts = {}) {
   if (!parsed.value) throw new InputError(`${file}:${line2}: could not read the params object`);
   const unresolved = [...parsed.unresolved, ...spreadUnread(parsed.value, parsed.spreads ?? [], consts)];
   return { params: parsed.value, line: line2, unresolved, ...parsed.fromEnv ? { fromEnv: parsed.fromEnv } : {} };
+}
+function pyParamsFromSource(text, file, call = 1, env2 = {}) {
+  const calls = [...text.matchAll(PY_SESSION_CREATE)];
+  if (!calls.length) throw new InputError(`${file} has no stripe.checkout.Session.create( call. Checkbox reads Python statically only for that call's literal keyword arguments; otherwise keep the params in a JSON file your code loads and use "file" (with "covers": ["${file}"]).`);
+  const m = calls[call - 1];
+  if (!m) throw new InputError(`${file} has ${calls.length} checkout.Session.create( call(s), not ${call}`);
+  const line2 = text.slice(0, m.index).split("\n").length;
+  const args = pyCallArgs(text, m.index + m[0].length);
+  const parsed = args === null ? null : parseObjectLiteral(pyArgsToObjectLiteral(args), env2);
+  if (!parsed?.value) throw new InputError(`${file}:${line2}: could not read the keyword arguments of checkout.Session.create(. Keep the params in a JSON file your code loads and use "file" (with "covers": ["${file}"]).`);
+  const unresolved = [...parsed.unresolved, ...spreadUnread(parsed.value, parsed.spreads ?? [], {})];
+  return { params: parsed.value, line: line2, unresolved };
 }
 function spreadUnread(params, spreads, consts = {}) {
   const out = [];
@@ -32662,7 +33074,7 @@ function exportLine(dir, ref) {
   const name = hash > 0 ? ref.slice(hash + 1) : "default";
   let text;
   try {
-    text = readFileSync10(resolve6(dir, file), "utf8");
+    text = readFileSync10(resolve5(dir, file), "utf8");
   } catch {
     return 1;
   }
@@ -32671,15 +33083,44 @@ function exportLine(dir, ref) {
   const m = re.exec(text);
   return m ? text.slice(0, m.index).split("\n").length + (m[0].startsWith("\n") ? 1 : 0) : 1;
 }
-function projectEnv(dir) {
+function projectEnv(dir, processEnv = {}, configEnv = {}) {
   const out = {};
   for (const f of [".env.example", ".env", ".env.local", ".env.test"]) {
     try {
-      Object.assign(out, parseDotenv(readFileSync10(join9(dir, f), "utf8")));
+      Object.assign(out, parseDotenv(readFileSync10(join10(dir, f), "utf8")));
     } catch {
     }
   }
+  for (const [k, v] of Object.entries(configEnv)) if (out[k] === void 0 && typeof v === "string") out[k] = v;
+  for (const [k, v] of Object.entries(processEnv)) if (typeof v === "string" && v !== "" && /^[A-Za-z_][A-Za-z0-9_]*$/.test(k)) out[k] = v;
   return out;
+}
+function consentInUnreadCustomText(srcText, line2, consts) {
+  const call = srcText.split("\n").slice(line2 - 1).join("\n").slice(0, 6e3);
+  if (CONSENT_WORDING_RE.test(call)) return true;
+  const block = /custom_text\s*:\s*\{[\s\S]{0,600}/.exec(call)?.[0] ?? "";
+  const names = [...block.matchAll(/\b(?:message|custom_text)\s*:\s*([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)/g)].map((m) => m[1].split(".")[0]);
+  return names.some((n) => Object.prototype.hasOwnProperty.call(consts, n) && CONSENT_WORDING_RE.test(consts[n]));
+}
+function priceExpressions2(text) {
+  return [...text.matchAll(/\bprice\s*:\s*((?:process\.env|import\.meta\.env)\.[A-Za-z_][A-Za-z0-9_]*|[A-Za-z_$][\w$]*(?:\??\.[A-Za-z_$][\w$]*)*)/g)].map((m) => m[1]);
+}
+function fillDeclaredPrice(params, plan2) {
+  const items = Array.isArray(params.line_items) ? params.line_items : [];
+  const filled = [];
+  const unresolved = [];
+  const declared = (plan2?.stripe_price_ids ?? []).filter((x) => typeof x === "string" && /^price_\w+$/.test(x));
+  items.forEach((li, i) => {
+    if (!li || typeof li !== "object" || Array.isArray(li)) return;
+    const item = li;
+    if (item.price_data !== void 0) return;
+    if (typeof item.price === "string" && /^(?:price|plan)_\w+$/.test(item.price)) return;
+    if (declared[0]) {
+      item.price = declared[0];
+      filled.push(`line_items[${i}].price`);
+    } else unresolved.push(`line_items[${i}].price`);
+  });
+  return { filled, unresolved };
 }
 function pickPlan(config, name) {
   const plans = config.plans ?? [];
@@ -32700,8 +33141,31 @@ function planTerms(config, plan2) {
   }
   return t;
 }
+function localImports(dir, file, max = 200) {
+  const seen = /* @__PURE__ */ new Set([file.split("\\").join("/")]);
+  const queue = [...seen];
+  const RE = /(?:\bimport|\bexport)\s+(?:type\s+)?[^'"`;]*?\bfrom\s*['"]([^'"]+)['"]|\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)|\brequire\s*\(\s*['"]([^'"]+)['"]\s*\)|(?:^|\n)\s*import\s*['"]([^'"]+)['"]/g;
+  while (queue.length && seen.size < max) {
+    const cur = queue.shift();
+    let text;
+    try {
+      text = readFileSync10(resolve5(dir, cur), "utf8");
+    } catch {
+      continue;
+    }
+    for (const m of text.matchAll(RE)) {
+      const spec = m[1] ?? m[2] ?? m[3] ?? m[4];
+      if (!spec || /node_modules/.test(spec)) continue;
+      const hit = resolveImport(dir, cur, spec);
+      if (!hit || hit.includes("node_modules/") || seen.has(hit)) continue;
+      seen.add(hit);
+      queue.push(hit);
+    }
+  }
+  return [...seen].slice(1);
+}
 function rel(loaded, root, file) {
-  return relative5(root, resolve6(loaded.dir, file)).split("\\").join("/") || file;
+  return relative5(root, resolve5(loaded.dir, file)).split("\\").join("/") || file;
 }
 function emailFromFile(content, file, subject) {
   let body = content;
@@ -32756,7 +33220,7 @@ async function stripeJob(loaded, e, o, root, entryName = e.name) {
     } else if (e.module) {
       const file = e.module.replace(/#.*$/, "");
       job.target = { file: rel(loaded, root, file), line: exportLine(dir, e.module) };
-      job.inputs.push(file);
+      job.inputs.push(file, ...localImports(dir, file));
       params = await runModule(dir, e.module, e.args ?? [], o.env);
       const unset = (Array.isArray(params?.line_items) ? params.line_items : []).flatMap((li, i) => li && typeof li === "object" && !Array.isArray(li) && li.price === void 0 && li.price_data === void 0 ? [`line_items[${i}].price`] : []);
       if (unset.length) {
@@ -32767,7 +33231,7 @@ async function stripeJob(loaded, e, o, root, entryName = e.name) {
       const src = e.source;
       job.inputs.push(src);
       const srcText = readRel(dir, src);
-      const r = paramsFromSource(srcText, src, e.call ?? 1, projectEnv(dir), constantsFor(dir, src, srcText));
+      const r = paramsFromSource(srcText, src, e.call ?? 1, projectEnv(dir, o.env, config.env ?? {}), constantsFor(dir, src, srcText));
       job.target = { file: rel(loaded, root, src), line: r.line };
       job.fromSource = true;
       params = r.params;
@@ -32775,6 +33239,7 @@ async function stripeJob(loaded, e, o, root, entryName = e.name) {
       if (r.unresolved.length) {
         job.partial = true;
         job.unresolved = r.unresolved;
+        if (r.unresolved.some((p) => /^custom_text\b/.test(p)) && consentInUnreadCustomText(srcText, r.line, constantsFor(dir, src, srcText))) job.consentInUnreadText = true;
         const listed0 = r.unresolved.some((p) => / \(may come from \.\.\./.test(p)) ? r.unresolved.filter((p) => p !== "...") : r.unresolved;
         const priceGiven = !!pickPlan(config, e.plan);
         const listed2 = listed0.filter((p) => /^line_items\b/.test(p) ? !priceGiven : VERDICT_KEY_RE.test(p));
@@ -32788,6 +33253,20 @@ async function stripeJob(loaded, e, o, root, entryName = e.name) {
     const items0 = Array.isArray(params.line_items) ? params.line_items : [];
     if (!e.plan && (config.plans?.length ?? 0) > 1 && !items0.some((li) => li && typeof li === "object" && li.price_data)) {
       throw new InputError(`"${e.name}" does not say which plan it sells, and its price is a Price id or an expression Checkbox cannot read: add "plan": one of ${(config.plans ?? []).map((p) => JSON.stringify(p.name)).join(", ")} to this entry (one entry per plan when one call serves several plans).`);
+    }
+    const priceFill = fillDeclaredPrice(params, pickPlan(config, e.plan));
+    if (priceFill.filled.length) job.placeholders = { ...job.placeholders ?? {}, ...Object.fromEntries(priceFill.filled.map((p) => [p, job.placeholders?.[p] ?? "{{your Stripe Price id}}"])) };
+    if (priceFill.unresolved.length) {
+      let exprs = [];
+      try {
+        exprs = e.source ? priceExpressions2(readRel(dir, e.source)) : [];
+      } catch {
+        exprs = [];
+      }
+      job.priceUnresolved = priceFill.unresolved.map((p, i) => {
+        const expr = exprs[i] ?? exprs[0];
+        return expr && !/^['"`]/.test(expr) ? `${p} (${expr})` : p;
+      });
     }
     const merchant = planTerms(config, pickPlan(config, e.plan));
     const trialUnread = trialKeyUnread(job.unresolved);
@@ -32905,7 +33384,7 @@ function termsJob(loaded, e, o, root) {
     try {
       content = readRel(dir, e.file);
     } catch (err) {
-      if (!existsSync7(resolve6(dir, e.file))) throw new InputError(`${e.file} does not exist (paths are relative to checkbox.json). If it is build output, build it before checkbox ci: in GitHub Actions, add a build step before the Checkbox step (\`checkbox ci init\` writes one when package.json has a build script).`);
+      if (!existsSync8(resolve5(dir, e.file))) throw new InputError(`${e.file} does not exist (paths are relative to checkbox.json). If it is build output, build it before checkbox ci: in GitHub Actions, add a build step before the Checkbox step (\`checkbox ci init\` writes one when package.json has a build script).`);
       throw err;
     }
     const stale = staleBuild(dir, e.source, e.file);
@@ -32963,13 +33442,13 @@ function pageJob(loaded, e, o, root) {
     try {
       html = readRel(dir, e.file);
     } catch (err) {
-      if (!existsSync7(resolve6(dir, e.file))) throw new InputError(`${e.file} does not exist (paths are relative to checkbox.json). If it is build output, build it before checkbox ci: in GitHub Actions, add a build step before the Checkbox step (\`checkbox ci init\` writes one when package.json has a build script).`);
+      if (!existsSync8(resolve5(dir, e.file))) throw new InputError(`${e.file} does not exist (paths are relative to checkbox.json). If it is build output, build it before checkbox ci: in GitHub Actions, add a build step before the Checkbox step (\`checkbox ci init\` writes one when package.json has a build script).`);
       throw err;
     }
     if (!e.source) job.locate = (needles) => lineOfAny(html, needles);
     const stale = staleBuild(dir, e.source, e.file);
     if (stale) throw new InputError(stale);
-    const css = builtCss(html, resolve6(dir, e.file), dir);
+    const css = builtCss(html, resolve5(dir, e.file), dir);
     if (css.files.length) {
       html = `${html}
 ${css.files.map((f) => `<style ${BUILT_CSS_ATTR2}="${f.rel.replace(/"/g, "")}">${f.css.replace(/<\/style/gi, "<\\/style")}</style>`).join("\n")}`;
@@ -32984,8 +33463,8 @@ ${css.files.map((f) => `<style ${BUILT_CSS_ATTR2}="${f.rel.replace(/"/g, "")}">$
 function staleBuild(dir, source, file) {
   if (!source) return void 0;
   try {
-    const src = statSync3(resolve6(dir, source)).mtimeMs;
-    const built = statSync3(resolve6(dir, file)).mtimeMs;
+    const src = statSync3(resolve5(dir, source)).mtimeMs;
+    const built = statSync3(resolve5(dir, file)).mtimeMs;
     if (src <= built + 2e3) return void 0;
   } catch {
     return void 0;
@@ -33002,15 +33481,15 @@ function builtCss(html, pageAbs, configDir2) {
     if (href && !/^(?:[a-z]+:)?\/\//i.test(href) && !/^data:/i.test(href)) hrefs.push(href);
   }
   const dirs = [];
-  for (let d = dirname4(pageAbs); ; d = dirname4(d)) {
+  for (let d = dirname5(pageAbs); ; d = dirname5(d)) {
     dirs.push(d);
-    if (d === configDir2 || dirname4(d) === d || !d.startsWith(configDir2)) break;
+    if (d === configDir2 || dirname5(d) === d || !d.startsWith(configDir2)) break;
   }
   const files = [];
   let total = 0;
   for (const href of [...new Set(hrefs)]) {
-    const candidates = href.startsWith("/_next/") ? dirs.flatMap((d) => [join9(d, ".next", href.slice("/_next/".length)), ...d.endsWith(".next") ? [join9(d, href.slice("/_next/".length))] : []]) : href.startsWith("/") ? dirs.map((d) => join9(d, href)) : [resolve6(dirname4(pageAbs), href)];
-    const found = candidates.find((c) => existsSync7(c));
+    const candidates = href.startsWith("/_next/") ? dirs.flatMap((d) => [join10(d, ".next", href.slice("/_next/".length)), ...d.endsWith(".next") ? [join10(d, href.slice("/_next/".length))] : []]) : href.startsWith("/") ? dirs.map((d) => join10(d, href)) : [resolve5(dirname5(pageAbs), href)];
+    const found = candidates.find((c) => existsSync8(c));
     if (!found) continue;
     try {
       const css = readFileSync10(found, "utf8");
@@ -33081,7 +33560,7 @@ async function emailJob(loaded, e, o, root, planName = e.plan, name = e.name) {
     } else if (e.module) {
       const file = e.module.replace(/#.*$/, "");
       job.target = { file: rel(loaded, root, file), line: exportLine(dir, e.module) };
-      job.inputs.push(file);
+      job.inputs.push(file, ...localImports(dir, file));
       const v = await runModule(dir, e.module, e.args ?? [], o.env);
       if (typeof v === "string") msg2 = emailFromFile(v, /^\s*</.test(v) ? "x.html" : "x.txt", e.subject);
       else if (v && typeof v === "object") {
@@ -33166,13 +33645,14 @@ async function planJobs(loaded, o, root) {
   }
   return jobs;
 }
-var InputError, NOT_INSTALLED, CHILD, VERDICT_KEY_RE, SPREAD_VERDICT_KEYS, jurisdictionsOf, BUILT_CSS_ATTR2;
+var InputError, NOT_INSTALLED, CHILD, RESOLVE_HOOKS, ALIAS_HOOKS, ALIAS_HOOK_IMPORT, RESOLVE_HOOK_IMPORT, VERDICT_KEY_RE, SPREAD_VERDICT_KEYS, CONSENT_WORDING_RE, jurisdictionsOf, BUILT_CSS_ATTR2;
 var init_inputs = __esm({
   "packages/cli/src/ci/inputs.ts"() {
     "use strict";
     init_detect();
     init_literal();
-    init_config3();
+    init_py_literal();
+    init_config2();
     InputError = class extends Error {
       constructor(message) {
         super(message);
@@ -33194,8 +33674,41 @@ if (typeof v === 'function') v = await v(...JSON.parse(argsJson));
 process.stdout.write('\\n__CHECKBOX_JSON__' + JSON.stringify(v === undefined ? null : v) + '\\n');
 process.exit(0);
 `;
+    RESOLVE_HOOKS = `export async function resolve(spec, ctx, next) {
+  try { return await next(spec, ctx); } catch (e) {
+    const code = e && e.code;
+    if ((code !== 'ERR_MODULE_NOT_FOUND' && code !== 'ERR_UNSUPPORTED_DIR_IMPORT') || !/^\\.{1,2}\\//.test(spec)) throw e;
+    if (/\\.(?:[cm]?tsx?|json|mjs|cjs)$/.test(spec)) throw e;
+    const base = spec.replace(/\\.js$/, '');
+    for (const ext of ['.ts', '.mts', '.js', '.mjs', '/index.ts', '/index.js']) {
+      try { return await next(base + ext, ctx); } catch {}
+    }
+    throw e;
+  }
+}`;
+    ALIAS_HOOKS = `import { pathToFileURL } from 'node:url';
+const data = (code) => ({ url: 'data:text/javascript,' + encodeURIComponent(code), shortCircuit: true });
+export async function resolve(spec, ctx, next) {
+  if (spec === '$env/dynamic/private' || spec === '$env/dynamic/public') return data('export const env = process.env;');
+  if (spec === '$env/static/private' || spec === '$env/static/public') {
+    const names = Object.keys(process.env).filter((k) => /^[A-Za-z_$][\\w$]*$/.test(k) && k !== 'default');
+    return data(names.map((k) => 'export const ' + k + ' = process.env[' + JSON.stringify(k) + '];').join(' '));
+  }
+  if (spec === '$app/environment') return data('export const browser = false; export const dev = false; export const building = false; export const version = "";');
+  if (spec === '$lib' || spec.startsWith('$lib/')) {
+    const base = pathToFileURL(process.cwd() + '/src/lib' + spec.slice(4)).href;
+    const stem = base.replace(/\\.js$/, '');
+    for (const c of [base, stem + '.ts', stem + '.js', stem + '/index.ts', stem + '/index.js']) {
+      try { return await next(c, ctx); } catch {}
+    }
+  }
+  return next(spec, ctx);
+}`;
+    ALIAS_HOOK_IMPORT = `data:text/javascript,${encodeURIComponent(`import { register } from 'node:module'; register(${JSON.stringify(`data:text/javascript,${encodeURIComponent(ALIAS_HOOKS)}`)});`)}`;
+    RESOLVE_HOOK_IMPORT = `data:text/javascript,${encodeURIComponent(`import { register } from 'node:module'; register(${JSON.stringify(`data:text/javascript,${encodeURIComponent(RESOLVE_HOOKS)}`)});`)}`;
     VERDICT_KEY_RE = /^(?:mode|custom_text|consent_collection|discounts|subscription_data|allow_promotion_codes|payment_method_collection|line_items)\b|^\.\.\.| \(may come from \.\.\./;
     SPREAD_VERDICT_KEYS = ["mode", "consent_collection", "custom_text", "subscription_data", "discounts"];
+    CONSENT_WORDING_RE = /\b(?:you\s+agree|I\s+agree|by\s+(?:subscribing|clicking|continuing|starting|paying|confirming|tapping)\b[^.]{0,80}\bagree)/i;
     jurisdictionsOf = (config) => config.jurisdictions ? { jurisdictions: config.jurisdictions } : {};
     BUILT_CSS_ATTR2 = "data-checkbox-built-css";
   }
@@ -33363,7 +33876,7 @@ var init_src3 = __esm({
     init_notices();
     init_hosted();
     init_cancellation();
-    init_config2();
+    init_config3();
     init_visual();
     init_text();
     init_remediation();
@@ -33874,7 +34387,7 @@ function offlineEngine() {
     }
   };
 }
-function operationFor2(kind) {
+function operationFor(kind) {
   const path = `/v1/checks/${kind}`;
   const op = Object.values(OPERATIONS).find((o) => o.httpMethod === "POST" && o.path === path);
   if (!op) throw new Error(`No API operation for POST ${path}`);
@@ -33886,7 +34399,7 @@ function onlineEngine(client) {
     mode: "online",
     run: async (kind, body) => {
       if (kind === "terms_page") return local.run(kind, typeof body.url === "string" && body.html === void 0 && body.text === void 0 ? { ...body, html: await fetchTermsPage(body.url) } : body);
-      return client.sdk.call(operationFor2(kind), body);
+      return client.sdk.call(operationFor(kind), body);
     }
   };
 }
@@ -33974,6 +34487,9 @@ function withStripeNotChecked(run2, strict, opts = {}) {
   const diff2 = online ? "" : (opts.workflow ? opts.workflow === "require_stripe" : opts.requireStripe) ? STRIPE_ONLINE_WORKFLOW_DIFF_REQUIRE : STRIPE_ONLINE_WORKFLOW_DIFF;
   return {
     ...run2,
+    // Round 50 (pilot 49 core-ci-pr / core-headless-pr: $GITHUB_OUTPUT said status=pass next to exit_code=2 and
+    // "failed: Stripe was NOT checked"): a run that --require-stripe / --strict fails is never status "pass".
+    ...failedBy && run2.status === "pass" ? { status: "needs_review" } : {},
     offline_notice: reason,
     stripe_not_checked: {
       reason,
@@ -34350,9 +34866,11 @@ function resolvePageConsent(checks, config) {
     const plans = page.plan ? [page.plan] : (config.plans ?? []).map((p) => p.name);
     const paired = checkouts.filter((x) => !x.plan || !plans.length || plans.includes(x.plan));
     const passing = paired.filter((x) => checkoutConsentPasses(x) === true);
-    const failing = paired.filter((x) => checkoutConsentPasses(x) === false);
+    const notRead = paired.filter((x) => checkoutConsentPasses(x) === false && /^Not checked\b/.test(x.label));
+    const failing = paired.filter((x) => checkoutConsentPasses(x) === false && !notRead.includes(x));
     const names = (list2) => list2.map((x) => `"${x.name}"`).join(", ");
-    const note = failing.length ? `Consent is collected on Stripe Checkout, not on this page: fix consent_collection in ${names(failing)} (that entry fails this run). No checkbox is needed on this page.` : passing.length ? `Consent is collected on Stripe Checkout and passes there: ${consentHow(passing, names)} (checked in this run). No checkbox is needed on this page.` : `Consent is collected on Stripe Checkout, not on this page. checkbox.json has no stripe_checkout entry for ${plans.length === 1 ? `plan "${plans[0]}"` : "these plans"}, so this run did not check it: add one (checkbox ci init finds the checkout.sessions.create call). No checkbox is needed on this page.`;
+    const unloaded = checks.filter((x) => x.type === "stripe_checkout" && !x.report && x.status === "error" && (!x.plan || !plans.length || plans.includes(x.plan)));
+    const note = failing.length ? `Consent is collected on Stripe Checkout, not on this page: fix consent_collection in ${names(failing)} (that entry fails this run). No checkbox is needed on this page.` : passing.length ? `Consent is collected on Stripe Checkout and passes there: ${consentHow(passing, names)} (checked in this run). No checkbox is needed on this page.` : notRead.length ? `Consent is collected on Stripe Checkout, not on this page. ${names(notRead)} could not be read (an expression Checkbox cannot read statically; see ${notRead.length === 1 ? "that entry" : "those entries"}), so this run did not check consent there. No checkbox is needed on this page.` : unloaded.length ? `Consent is collected on Stripe Checkout, not on this page. ${names(unloaded)} could not be loaded (see ${unloaded.length === 1 ? "that entry" : "those entries"}), so this run did not check it. No checkbox is needed on this page.` : `Consent is collected on Stripe Checkout, not on this page. checkbox.json has no stripe_checkout entry for ${plans.length === 1 ? `plan "${plans[0]}"` : "these plans"}, so this run did not check it: add one (checkbox ci init finds the checkout.sessions.create call). No checkbox is needed on this page.`;
     page.warnings = [note, ...page.warnings.filter((w) => w !== note)];
   }
 }
@@ -34476,7 +34994,7 @@ async function runJob(job, engine, config, opts = {}) {
   }
   const literal = [];
   if (unread) {
-    const consentRead = !(job.unresolved ?? []).some((p) => /^(?:consent_collection|\.\.\.)/.test(p));
+    const consentRead = !job.consentInUnreadText && !(job.unresolved ?? []).some((p) => /^(?:consent_collection|\.\.\.)/.test(p));
     const consentFails = (report.checks ?? []).some((c) => c.check_id === "signup.consent.affirmative" && (c.status === "fail" || c.compliance_status === "needs_fix"));
     if (consentRead && consentFails && params?.consent_collection?.terms_of_service !== "required") literal.push(stripeConsentFix2("Add one unchecked checkbox", params));
     fixes.unshift(...literal);
@@ -34651,7 +35169,7 @@ function staleLinkResults(checks, requireStripe, strictEntries = /* @__PURE__ */
   return out;
 }
 function withIntroducedOnly(run2) {
-  const old = run2.checks.filter((x) => x.introduced === false && (x.status === "fail" || x.status === "needs_review" || x.status === "error"));
+  const old = run2.checks.filter((x) => x.introduced === false && (x.status === "fail" || x.status === "needs_review"));
   if (!run2.checks.some((x) => x.introduced !== void 0)) {
     return { ...run2, introduced_only: { already_open: 0, note: "git could not compare this change with the base branch, so every open item counts" } };
   }
@@ -34669,6 +35187,25 @@ function withIntroducedOnly(run2) {
     result: `${base.replace(/ \(exit \d+\)$/, "")}; --introduced-only: ${old.length} already-open item${old.length === 1 ? "" : "s"} not counted (exit ${exit})`
   };
 }
+function priceUnresolvedResult(job) {
+  const paths = job.priceUnresolved ?? [];
+  if (!paths.length) return void 0;
+  const envVar = paths.map((p) => /\((?:process\.env|import\.meta\.env)\.(\w+)\)/.exec(p)?.[1]).find((x) => !!x);
+  const message = `Stripe NOT checked for ${job.name}: ${paths.join(", ")} did not resolve to a Stripe Price id when checkbox ci ran${envVar ? ` (${envVar} is not set in this job's environment, .env.example or .env)` : ""}, so this run did not read the Price or the Payment Links that sell it.`;
+  const fix = `${envVar ? `Set ${envVar} in the workflow's env (e.g. env: ${envVar}: \${{ vars.${envVar} }}), or ` : ""}add "stripe_price_ids": ["price_\u2026"] to ${job.plan ? `plan "${job.plan}"` : "the plan"} in checkbox.json, so checkbox ci --online can read the Price and its Payment Links.`;
+  return { name: `Stripe Price${job.plan ? ` (${job.plan})` : ` (${job.name})`}`, type: "stripe_checkout", ...job.plan ? { plan: job.plan } : {}, target: { ...job.target }, status: "needs_review", blocking: true, label: PRICE_UNRESOLVED_LABEL, message, fix, fixes: [fix], warnings: [] };
+}
+function notCheckedList(run2) {
+  const out = [];
+  for (const c of run2.checks) {
+    if (c.status === "skipped") out.push(`${c.name}: skipped${c.message ? ` (${c.message.replace(/\.$/, "")})` : ""}`);
+    else if (c.status === "error") out.push(`${c.name}: could not run`);
+    else if (c.label === PRICE_UNRESOLVED_LABEL) out.push(`${c.name}: Stripe Price and Payment Links not read (Price id not resolved)`);
+  }
+  if (run2.stripe_not_checked) out.push(`Stripe (Prices, Payment Links): not read${run2.stripe_not_checked.no_base ? " (the base branch could not be compared)" : " (offline run)"}`);
+  if (run2.terms_not_checked) out.push("Terms of service: not read");
+  return out;
+}
 function nothingCheckedMessage(run2) {
   const urlSkipped = run2.checks.some((c) => c.status === "skipped" && /^URL pages/.test(c.message ?? ""));
   const how = urlSkipped ? run2.mode === "offline" ? ' Page entries with a "url" are fetched only with --online and an API key (CHECKBOX_SECRET_KEY); offline, point them at the built HTML with "file" instead.' : ' Page entries with a "url" need a key that can read that site (a live key for a live site); or point them at the built HTML with "file".' : ' Add a check checkbox.json can run (a "file" page, a disclosure, Stripe Checkout params or an email).';
@@ -34676,7 +35213,11 @@ function nothingCheckedMessage(run2) {
 }
 async function runCi(jobs, engine, opts) {
   const ran = [...opts.extra ?? []];
-  for (const j of jobs) ran.push(await runJob(j, engine, opts.config, { ...opts.notices ? { notices: opts.notices } : {} }));
+  for (const j of jobs) {
+    ran.push(await runJob(j, engine, opts.config, { ...opts.notices ? { notices: opts.notices } : {} }));
+    const unread = engine.mode === "online" && !j.error && !j.skip ? priceUnresolvedResult(j) : void 0;
+    if (unread) ran.push(unread);
+  }
   const checks = staleLinkResults(ran, !!opts.requireStripe, new Set(jobs.filter((j) => j.strict).map((j) => j.name)), opts.config.stripe_links_kept ?? [], engine.mode === "online");
   const cross = opts.notices ? noticesCrossCheck(opts.config, opts.notices, opts.noticesTarget ?? { file: opts.configPath }) : void 0;
   if (cross) checks.push(cross);
@@ -34702,7 +35243,7 @@ async function runCi(jobs, engine, opts) {
     result: resultOf(status, exit, opts.strict)
   };
 }
-var ENGINE_KIND, TERMS_NOT_CHECKED_LINE, STRIPE_OBJECTS_OFFLINE_NOTICE, STRIPE_ONLINE_WORKFLOW_DIFF, STRIPE_ONLINE_WORKFLOW_DIFF_REQUIRE, WORKFLOW_ALREADY_ONLINE, CI_DISCLAIMER, RANK2, PLACEHOLDER_LINE_RE, OK_STATUSES, INTERVAL_WORDS3, BOXED_HTML, GEO_TITLE, ADD_LINE_RE, BOXED_LINE, NOTICE_TO_EMAIL, EMAIL_LABEL, DEFAULT_LABEL, CONSENT_COVERED, OPEN_COUNTS, ALERT_CODES, OWNER_FIX_RE, FACT_SYNC_RE, ACTOR_LEGEND, STALE_LINK_LABEL, KEPT_LINK_LABEL, KEPT_IN_REPO_LABEL;
+var ENGINE_KIND, TERMS_NOT_CHECKED_LINE, STRIPE_OBJECTS_OFFLINE_NOTICE, STRIPE_ONLINE_WORKFLOW_DIFF, STRIPE_ONLINE_WORKFLOW_DIFF_REQUIRE, WORKFLOW_ALREADY_ONLINE, CI_DISCLAIMER, RANK2, PLACEHOLDER_LINE_RE, OK_STATUSES, INTERVAL_WORDS3, BOXED_HTML, GEO_TITLE, ADD_LINE_RE, BOXED_LINE, NOTICE_TO_EMAIL, EMAIL_LABEL, DEFAULT_LABEL, CONSENT_COVERED, OPEN_COUNTS, ALERT_CODES, OWNER_FIX_RE, FACT_SYNC_RE, ACTOR_LEGEND, STALE_LINK_LABEL, KEPT_LINK_LABEL, KEPT_IN_REPO_LABEL, PRICE_UNRESOLVED_LABEL;
 var init_runner = __esm({
   "packages/cli/src/ci/runner.ts"() {
     "use strict";
@@ -34714,7 +35255,7 @@ var init_runner = __esm({
     init_set_off_fix();
     init_separate_act();
     init_src2();
-    init_config3();
+    init_config2();
     init_decisions3();
     ENGINE_KIND = {
       stripe_checkout: "stripe_checkout_session",
@@ -34734,7 +35275,7 @@ var init_runner = __esm({
       "-        # with:",
       "-        #   strict: true          # also fail when a check needs review",
       "+        with:",
-      "+          args: --online",
+      "+          args: --online --require-stripe",
       "+        env:",
       "+          CHECKBOX_SECRET_KEY: ${{ secrets.CHECKBOX_SECRET_KEY }}"
     ].join("\n");
@@ -34745,7 +35286,7 @@ var init_runner = __esm({
       "       - uses: checkbox-site/checkbox@v1",
       "         with:",
       "-          args: --require-stripe",
-      "+          args: --online",
+      "+          args: --online --require-stripe",
       "@@",
       "-        # env:",
       "-        #   CHECKBOX_SECRET_KEY: ${{ secrets.CHECKBOX_SECRET_KEY }}",
@@ -34789,6 +35330,7 @@ var init_runner = __esm({
     STALE_LINK_LABEL = "Stripe still sells the old terms \xB7 owner decision";
     KEPT_LINK_LABEL = "Kept on purpose \xB7 confirmed by the owner in Checkbox";
     KEPT_IN_REPO_LABEL = "Kept on purpose \xB7 recorded in the repo, not confirmed by the owner";
+    PRICE_UNRESOLVED_LABEL = "Stripe NOT checked \xB7 Price id not resolved";
   }
 });
 
@@ -34858,6 +35400,7 @@ function renderHuman(run2, c, opts = {}) {
     if (run2.stripe_not_checked.workflow_diff) lines.push(c.dim("Workflow change (.github/workflows/checkbox.yml), plus the repository secret CHECKBOX_SECRET_KEY:"), ...run2.stripe_not_checked.workflow_diff.split("\n").map((l) => c.dim(`  ${l}`)));
   } else if (run2.offline_notice) lines.push("", c.yellow(wrap(run2.offline_notice, 110, "      ")));
   if (run2.terms_not_checked) lines.push("", c.yellow(wrap(run2.terms_not_checked, 110, "")));
+  if (run2.not_checked?.length) lines.push("", c.yellow("Not checked in this run:"), ...run2.not_checked.map((l) => c.yellow(`  - ${wrap(l, 106, "    ")}`)));
   if (run2.checks.some((x) => x.status !== "error" && displayFixes(x).length)) lines.push("", c.dim(wrap(ACTOR_LEGEND, 110, "")));
   if (run2.owner_items?.length) lines.push("", c.bold("For the owner (paste into the PR body):"), ...ownerChecklist(run2.owner_items).split("\n").map((l) => wrap(l, 110, "      ")));
   const split = changeSplit(run2);
@@ -35021,6 +35564,7 @@ function stepSummary(run2) {
     if (run2.stripe_not_checked.workflow_diff) lines.push("<details><summary>Workflow change that checks Stripe (plus the repository secret <code>CHECKBOX_SECRET_KEY</code>)</summary>", "", "```diff", run2.stripe_not_checked.workflow_diff, "```", "", "</details>", "");
   } else if (run2.offline_notice) lines.push(`\u26A0\uFE0F ${run2.offline_notice}`, "");
   if (run2.terms_not_checked) lines.push(`\u26A0\uFE0F **Terms: NOT checked in CI.** ${run2.terms_not_checked.replace(/^Terms: NOT checked in CI: /, "")}`, "");
+  if (run2.not_checked?.length) lines.push("**Not checked in this run:**", "", ...run2.not_checked.map((l) => `- ${l}`), "");
   const split = changeSplit(run2);
   if (split) lines.push(split, "");
   const row = (x) => {
@@ -35097,7 +35641,7 @@ var init_report = __esm({
 });
 
 // packages/cli/src/commands/plan/lib.ts
-import { dirname as dirname5, resolve as resolve7 } from "node:path";
+import { dirname as dirname6, resolve as resolve6 } from "node:path";
 async function resolveSite(ctx, flag, client) {
   const explicit = flag ?? ctx.env.CHECKBOX_SITE;
   if (explicit) {
@@ -35105,10 +35649,10 @@ async function resolveSite(ctx, flag, client) {
     return explicit;
   }
   const projects = ctx.config.load().init?.projects ?? {};
-  for (let dir = resolve7(ctx.cwd); ; dir = dirname5(dir)) {
+  for (let dir = resolve6(ctx.cwd); ; dir = dirname6(dir)) {
     const site = projects[dir]?.site;
     if (site) return site;
-    if (dirname5(dir) === dir) break;
+    if (dirname6(dir) === dir) break;
   }
   const list2 = await client.sdk.sites.list({ limit: 3 });
   const sites = list2?.data ?? [];
@@ -35170,350 +35714,8 @@ var init_lib = __esm({
   }
 });
 
-// packages/cli/src/commands/init/patch.ts
-import { execFileSync } from "node:child_process";
-import { chmodSync as chmodSync2, existsSync as existsSync8, mkdirSync as mkdirSync2, readFileSync as readFileSync11, writeFileSync as writeFileSync2 } from "node:fs";
-import { basename as basename3, dirname as dirname6, join as join10 } from "node:path";
-function pinnedRelease(body) {
-  const b = body;
-  if (!b || typeof b.version !== "string" || !/^\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(b.version)) return void 0;
-  if (typeof b.integrity !== "string" || !/^sha384-[A-Za-z0-9+/]{64}$/.test(b.integrity)) return void 0;
-  return { version: b.version, integrity: b.integrity };
-}
-function snippetScriptTag(s2, jsx = false, attrs = "") {
-  const pin = s2.pinned ? ` integrity="${s2.pinned.integrity}" ${jsx ? "crossOrigin" : "crossorigin"}="anonymous"` : "";
-  return `<script${attrs} async src="${srcOf(s2)}"${pin} data-key="${s2.snippetKey}" data-api="${s2.apiBase.replace(/\/+$/, "")}"></script>`;
-}
-function read(root, rel2) {
-  try {
-    return readFileSync11(join10(root, rel2), "utf8");
-  } catch {
-    return null;
-  }
-}
-function srcOf(s2) {
-  const api = s2.apiBase.replace(/\/+$/, "");
-  return s2.pinned ? `${api}/s/${s2.pinned.version}.js` : `${api}/s.js`;
-}
-function jsxBlock(s2, indent) {
-  return [
-    `${indent}{/* ${MARK_START} \u2014 Checkbox subscription-compliance monitoring (https://checkbox.site/docs/snippet) */}`,
-    `${indent}${snippetScriptTag(s2, true)}`,
-    `${indent}{/* ${MARK_END} */}`
-  ];
-}
-function htmlBlock(s2, indent, attrs = "") {
-  return [
-    `${indent}<!-- ${MARK_START} \u2014 Checkbox subscription-compliance monitoring (https://checkbox.site/docs/snippet) -->`,
-    `${indent}${snippetScriptTag(s2, false, attrs)}`,
-    `${indent}<!-- ${MARK_END} -->`
-  ];
-}
-function replaceMarked(text, block) {
-  const start = text.indexOf(MARK_START);
-  if (start === -1) return null;
-  const lineStart2 = text.lastIndexOf("\n", start) + 1;
-  const endIdx = text.indexOf(MARK_END, start);
-  if (endIdx === -1) return null;
-  const lineEnd = text.indexOf("\n", endIdx);
-  return text.slice(0, lineStart2) + block.join("\n") + (lineEnd === -1 ? "" : text.slice(lineEnd));
-}
-function insertBefore(text, re, block) {
-  const m = re.exec(text);
-  if (!m) return null;
-  const lineStart2 = text.lastIndexOf("\n", m.index) + 1;
-  if (text.slice(lineStart2, m.index).trim()) return `${text.slice(0, m.index)}${block.map((l) => l.trim()).join("")}${text.slice(m.index)}`;
-  return `${text.slice(0, lineStart2)}${block.join("\n")}
-${text.slice(lineStart2)}`;
-}
-function insertAfter(text, re, block) {
-  const m = re.exec(text);
-  if (!m) return null;
-  const end = m.index + m[0].length;
-  const nl = text.indexOf("\n", end);
-  if (text.slice(end, nl === -1 ? text.length : nl).trim()) return `${text.slice(0, end)}${block.map((l) => l.trim()).join("")}${text.slice(end)}`;
-  const at = nl === -1 ? text.length : nl + 1;
-  return `${text.slice(0, at)}${block.join("\n")}
-${text.slice(at)}`;
-}
-function snippetPlacedSafely(text, jsx) {
-  const at = text.indexOf(MARK_START);
-  if (at === -1) return false;
-  const lineStart2 = text.lastIndexOf("\n", at) + 1;
-  const before = text.slice(lineStart2, at);
-  if (/\breturn\b[^]*;/.test(before)) return false;
-  if (jsx) {
-    const prev = text.slice(0, lineStart2).trimEnd();
-    const prevLine = prev.slice(prev.lastIndexOf("\n") + 1);
-    if (/^\s*return\b.*;\s*$/.test(prevLine)) return false;
-  }
-  const open2 = text.slice(0, at).search(/<head\b[^>]*>(?![^]*<head\b)/i);
-  const closeBefore = text.slice(0, at).search(/<\/head>/i);
-  const hasHead = /<head\b/i.test(text) && /<\/head>/i.test(text);
-  if (hasHead && (open2 === -1 || closeBefore !== -1 && closeBefore > open2)) return false;
-  if (open2 !== -1 && !/<\/head>/i.test(text.slice(at))) return false;
-  return true;
-}
-function indentOf(text, re, extra = "  ") {
-  const m = re.exec(text);
-  if (!m) return "    ";
-  const lineStart2 = text.lastIndexOf("\n", m.index) + 1;
-  return (/^\s*/.exec(text.slice(lineStart2))?.[0] ?? "") + extra;
-}
-function planSnippet(d, s2) {
-  const root = d.root;
-  const file = d.layoutFile;
-  const manual = `Add this tag inside <head> on every page (your root layout / template):
-  ${s2.pinned ? snippetScriptTag(s2) : s2.scriptTag}`;
-  if (!file) return { change: null, manual };
-  const existing = read(root, file);
-  const jsx = (f) => f === "nextjs-app" || f === "nextjs-pages" || f === "remix" || f === "react-router";
-  if (d.framework === "nuxt") {
-    const contents = NUXT_PLUGIN(s2);
-    if (existing === contents) return { change: { file, action: "unchanged", summary: "Nuxt plugin already installs the snippet", added: [] } };
-    return { change: { file, action: existing === null ? "create" : "modify", summary: "Nuxt client plugin that adds the snippet to every page", contents, added: contents.trim().split("\n") } };
-  }
-  if (existing === null) {
-    if (d.framework === "nextjs-app") {
-      const contents = NEXT_APP_LAYOUT(s2, /\.tsx$/.test(file));
-      return { change: { file, action: "create", summary: "Root layout with the snippet in <head>", contents, added: contents.trim().split("\n") } };
-    }
-    if (d.framework === "nextjs-pages") {
-      const contents = NEXT_DOCUMENT(s2);
-      return { change: { file, action: "create", summary: "Custom _document with the snippet in <Head>", contents, added: contents.trim().split("\n") } };
-    }
-    return { change: null, manual };
-  }
-  if (existing.includes(`data-key="${s2.snippetKey}"`) && existing.includes(MARK_START) && existing.includes(`src="${srcOf(s2)}"`) && (!s2.pinned || existing.includes(s2.pinned.integrity))) {
-    return { change: { file, action: "unchanged", summary: s2.pinned ? `Snippet already installed (pinned release ${s2.pinned.version} with SRI)` : "Snippet already installed", added: [] } };
-  }
-  const isJsx = jsx(d.framework);
-  const indentRe = isJsx ? d.framework === "nextjs-pages" ? /<Head\b[^>]*>/ : /<head\b[^>]*>/ : /<\/head>/i;
-  const indent = isJsx ? indentOf(existing, indentRe) : indentOf(existing, /<\/head>/i, "  ");
-  const block = isJsx ? jsxBlock(s2, indent) : htmlBlock(s2, indent, d.framework === "astro" ? " is:inline" : "");
-  const replaced = replaceMarked(existing, block);
-  if (replaced !== null) return { change: { file, action: "modify", summary: existing.includes(`data-key="${s2.snippetKey}"`) ? s2.pinned ? `Snippet tag pinned to release ${s2.pinned.version} with SRI` : "Snippet tag updated" : "Snippet tag updated (new site key)", contents: replaced, added: block } };
-  let next = null;
-  switch (d.framework) {
-    case "nextjs-app": {
-      next = insertAfter(existing, /<head\b[^>]*>/, block);
-      if (!next && /<html\b[^>]*>/.test(existing)) {
-        const ind = indentOf(existing, /<html\b[^>]*>/);
-        next = insertAfter(existing, /<html\b[^>]*>/, [`${ind}<head>`, ...jsxBlock(s2, `${ind}  `), `${ind}</head>`]);
-      }
-      break;
-    }
-    case "nextjs-pages":
-      next = insertAfter(existing, /<Head\b[^>]*>/, block) ?? (/<Head\s*\/>/.test(existing) ? existing.replace(/<Head\s*\/>/, `<Head>
-${block.join("\n")}
-${indentOf(existing, /<Head\s*\/>/, "")}</Head>`) : null);
-      break;
-    case "remix":
-    case "react-router":
-      next = insertAfter(existing, /<Links\s*\/>/, block) ?? insertAfter(existing, /<Meta\s*\/>/, block) ?? insertAfter(existing, /<head\b[^>]*>/, block);
-      break;
-    case "sveltekit":
-      next = insertBefore(existing, /%sveltekit\.head%/, htmlBlock(s2, indentOf(existing, /%sveltekit\.head%/, ""))) ?? insertBefore(existing, /<\/head>/i, block);
-      break;
-    case "shopify-theme":
-      next = insertBefore(existing, /\{\{\s*content_for_header\s*\}\}/, htmlBlock(s2, indentOf(existing, /\{\{\s*content_for_header\s*\}\}/, ""))) ?? insertBefore(existing, /<\/head>/i, block);
-      break;
-    default:
-      next = insertBefore(existing, /<\/head>/i, block);
-  }
-  if (!next) return { change: null, manual: `Could not find <head> in ${file}. ${manual}` };
-  if (!snippetPlacedSafely(next, isJsx)) return { change: null, manual: `Could not place the snippet safely in ${file} (its <head> is not where Checkbox can patch it without breaking the file), so ${file} was NOT changed. ${manual}` };
-  return { change: { file, action: "modify", summary: `Snippet added to <head> in ${file}${s2.pinned ? ` (pinned release ${s2.pinned.version} with SRI)` : ""}`, contents: next, added: block } };
-}
-function envVarNames(d) {
-  return {
-    secret: "CHECKBOX_SECRET_KEY",
-    publishable: `${d.publicEnvPrefix}CHECKBOX_PUBLISHABLE_KEY`,
-    liveSecret: "CHECKBOX_LIVE_SECRET_KEY",
-    livePublishable: `${d.publicEnvPrefix}CHECKBOX_LIVE_PUBLISHABLE_KEY`
-  };
-}
-function planEnv(d, v) {
-  const names = envVarNames(d);
-  const entries = [
-    [names.secret, v.secretKey],
-    [names.publishable, v.publishableKey],
-    ...v.liveSecretKey ? [[names.liveSecret, v.liveSecretKey]] : [],
-    ...v.livePublishableKey ? [[names.livePublishable, v.livePublishableKey]] : [],
-    ...v.apiBase ? [["CHECKBOX_API_BASE", v.apiBase]] : []
-  ];
-  const existing = read(d.root, d.envFile);
-  let text = existing ?? "";
-  const added = [];
-  const missing = [];
-  for (const [k, val] of entries) {
-    const re = new RegExp(`^${k}=.*$`, "m");
-    if (re.test(text)) {
-      if (!text.match(re)[0].endsWith(`=${val}`)) {
-        text = text.replace(re, `${k}=${val}`);
-        added.push(`${k}=${k === "CHECKBOX_API_BASE" ? val : mask(val)}`);
-      }
-    } else missing.push([k, val]);
-  }
-  if (missing.length) {
-    const block = ["# Checkbox (subscription compliance) \u2014 written by `checkbox init`. Secret: never commit this file.", ...missing.map(([k, val]) => `${k}=${val}`)];
-    text = `${text}${text && !text.endsWith("\n") ? "\n" : ""}${text ? "\n" : ""}${block.join("\n")}
-`;
-    added.push(...missing.map(([k, val]) => `${k}=${k === "CHECKBOX_API_BASE" ? val : mask(val)}`));
-  }
-  if (existing === text) return { file: d.envFile, action: "unchanged", summary: `${d.envFile} already has the Checkbox keys`, added: [] };
-  return { file: d.envFile, action: existing === null ? "create" : "modify", summary: `Keys written to ${d.envFile} (${entries.map(([k]) => k).join(", ")})`, contents: text, added };
-}
-function mask(v) {
-  const m = /^([a-z]{2}_(?:live|test)_)/.exec(v);
-  return `${m?.[1] ?? v.slice(0, 3)}\u2026${v.slice(-4)}`;
-}
-function isGitTracked(root, file) {
-  try {
-    execFileSync("git", ["ls-files", "--error-unmatch", "--", file], { cwd: root, stdio: "ignore", timeout: 5e3 });
-    return true;
-  } catch {
-    return false;
-  }
-}
-function trackedEnvWarning(file) {
-  return `${file} is tracked by git, so the secret key was NOT written to it (it would go into your next commit, even with ${file} in .gitignore). Untrack it, keeping your copy: \`git rm --cached ${file}\`, commit that, then run \`checkbox init\` again to write the key. Meanwhile the key is saved in the Checkbox CLI config (\`checkbox plan\`, \`checkbox verify\` use it). If ${file} was ever pushed with other secrets in it, rotate those secrets.`;
-}
-function planGitignore(d) {
-  const existing = read(d.root, ".gitignore");
-  const env2 = d.envFile;
-  if (existing !== null) {
-    const lines = existing.split(/\r?\n/).map((l) => l.trim());
-    const covered = lines.some((l) => l === env2 || l === `/${env2}` || l === ".env*" || l === "*.env" || env2 === ".env.local" && (l === ".env*.local" || l === "*.local" || l === ".env.local*") || env2 === ".env" && l === ".env*");
-    if (covered) return null;
-  }
-  if (existing === null && !existsSync8(join10(d.root, ".git"))) return null;
-  const text = `${existing ?? ""}${existing && !existing.endsWith("\n") ? "\n" : ""}# Checkbox keys (checkbox init)
-${env2}
-`;
-  return { file: ".gitignore", action: existing === null ? "create" : "modify", summary: `${env2} added to .gitignore`, contents: text, added: [env2] };
-}
-function planWellKnown(d, token) {
-  if (!d.publicDir) return null;
-  const file = `${d.publicDir === "." ? "" : `${d.publicDir}/`}.well-known/checkbox-verify.txt`;
-  const existing = read(d.root, file);
-  if (existing?.trim() === token) return { file, action: "unchanged", summary: "Domain verification file already present", added: [] };
-  return { file, action: existing === null ? "create" : "modify", summary: `Domain verification file ${file} (deploy it, then verify)`, contents: `${token}
-`, added: [token] };
-}
-function applyChange(root, c) {
-  if (c.action === "unchanged" || c.contents === void 0) return;
-  const abs = join10(root, c.file);
-  mkdirSync2(dirname6(abs), { recursive: true });
-  const secret = /^\.env(\.|$)/.test(basename3(c.file));
-  writeFileSync2(abs, c.contents, secret ? { mode: 384 } : void 0);
-  if (secret) {
-    try {
-      chmodSync2(abs, 384);
-    } catch {
-    }
-  }
-}
-function planAgentsRule(root, opts = {}) {
-  const rule2 = opts.connected ? AGENTS_RULE : AGENTS_RULE_OFFLINE;
-  const has2 = (t) => !!t && (t.includes(AGENTS_RULE_MARKER) || /^#+\s*(?:Subscription compliance \(Checkbox\)|Checkbox\b)/m.test(t));
-  const offlineBlock = (t) => t && opts.connected && t.includes(AGENTS_RULE_OFFLINE) ? t : null;
-  const upgrade = (file, t) => ({
-    file,
-    action: "modify",
-    summary: `${file}: the Checkbox rule for coding agents now says the project is connected`,
-    contents: t.replace(AGENTS_RULE_OFFLINE, AGENTS_RULE),
-    added: AGENTS_RULE.split("\n")
-  });
-  const agents = read(root, "AGENTS.md");
-  const claude = read(root, "CLAUDE.md");
-  const upgrades = [["AGENTS.md", offlineBlock(agents)], ["CLAUDE.md", offlineBlock(claude)]].filter(([, t]) => t !== null).map(([f, t]) => upgrade(f, t));
-  if (upgrades.length) return upgrades;
-  const claudeImport = () => ({ file: "CLAUDE.md", action: "create", summary: "CLAUDE.md: imports AGENTS.md, so Claude Code reads the Checkbox rule", contents: "@AGENTS.md\n", added: ["@AGENTS.md"] });
-  if (has2(agents) || has2(claude) && agents === null) return opts.claudeCode && claude === null && has2(agents) ? [claudeImport()] : [];
-  const append = (file, text) => ({
-    file,
-    action: text === null ? "create" : "modify",
-    summary: `${file}: Checkbox rule for coding agents (run \`checkbox ci\` before committing billing changes)`,
-    contents: `${text ?? ""}${text && !text.endsWith("\n") ? "\n" : ""}${text ? "\n" : ""}${rule2}`,
-    added: rule2.split("\n")
-  });
-  const out = [append("AGENTS.md", agents)];
-  if (claude !== null && !has2(claude) && !/@AGENTS\.md/.test(claude)) out.push(append("CLAUDE.md", claude));
-  if (claude === null && opts.claudeCode) out.push(claudeImport());
-  return out;
-}
-var MARK_START, MARK_END, NEXT_DOCUMENT, NEXT_APP_LAYOUT, NUXT_PLUGIN, AGENTS_RULE_MARKER, AGENTS_RULE, AGENTS_RULE_OFFLINE_LINE, AGENTS_RULE_OFFLINE;
-var init_patch = __esm({
-  "packages/cli/src/commands/init/patch.ts"() {
-    "use strict";
-    MARK_START = "checkbox:snippet:start";
-    MARK_END = "checkbox:snippet:end";
-    NEXT_DOCUMENT = (s2) => `import { Html, Head, Main, NextScript } from 'next/document';
-
-export default function Document() {
-  return (
-    <Html lang="en">
-      <Head>
-${jsxBlock(s2, "        ").join("\n")}
-      </Head>
-      <body>
-        <Main />
-        <NextScript />
-      </body>
-    </Html>
-  );
-}
-`;
-    NEXT_APP_LAYOUT = (s2, ts) => `${ts ? "import type { ReactNode } from 'react';\n\n" : ""}export default function RootLayout({ children }${ts ? ": { children: ReactNode }" : ""}) {
-  return (
-    <html lang="en">
-      <head>
-${jsxBlock(s2, "        ").join("\n")}
-      </head>
-      <body>{children}</body>
-    </html>
-  );
-}
-`;
-    NUXT_PLUGIN = (s2) => `// ${MARK_START} \u2014 Checkbox subscription-compliance monitoring (https://checkbox.site/docs/snippet)
-export default defineNuxtPlugin(() => {
-  useHead({
-    script: [{ src: '${srcOf(s2)}', async: true,${s2.pinned ? ` integrity: '${s2.pinned.integrity}', crossorigin: 'anonymous',` : ""} 'data-key': '${s2.snippetKey}', 'data-api': '${s2.apiBase.replace(/\/+$/, "")}' }],
-  });
-});
-// ${MARK_END}
-`;
-    AGENTS_RULE_MARKER = "<!-- checkbox: agent rule -->";
-    AGENTS_RULE = [
-      AGENTS_RULE_MARKER,
-      "## Subscription compliance (Checkbox)",
-      "",
-      "This project is connected to Checkbox (`checkbox init` set up its site; the key is CHECKBOX_SECRET_KEY). Before committing",
-      "a change to sign-up, pricing, trials, renewal emails or cancellation, run `npx @checkbox-site/cli ci` (or the Checkbox",
-      "MCP tools: check_stripe_checkout_session, check_page_html, check_email) and apply the fixes it returns. When",
-      "checkbox.json reads built pages (.next, dist), build first (e.g. `npm run build && npx @checkbox-site/cli ci`). Pull",
-      "requests run the same check. Its result is an automated check, not legal advice. Guide: https://checkbox.site/llms.txt",
-      ""
-    ].join("\n");
-    AGENTS_RULE_OFFLINE_LINE = "This project checks its subscription terms with Checkbox CI (checkbox.json, run offline: no account or";
-    AGENTS_RULE_OFFLINE = [
-      AGENTS_RULE_MARKER,
-      "## Subscription compliance (Checkbox)",
-      "",
-      AGENTS_RULE_OFFLINE_LINE,
-      "key; it is not connected to a Checkbox site, so Stripe is not read). Before committing a change to sign-up, pricing,",
-      "trials, renewal emails or cancellation, run `npx @checkbox-site/cli ci` and apply the fixes it returns. When",
-      "checkbox.json reads built pages (.next, dist), build first (e.g. `npm run build && npx @checkbox-site/cli ci`). Pull",
-      "requests run the same check. To also check Stripe and the live site, a person connects it with `npx @checkbox-site/cli init`.",
-      "Its result is an automated check, not legal advice. Guide: https://checkbox.site/llms.txt",
-      ""
-    ].join("\n");
-  }
-});
-
 // packages/cli/src/ci/drift.ts
-import { readFileSync as readFileSync12 } from "node:fs";
+import { readFileSync as readFileSync11 } from "node:fs";
 import { join as join11 } from "node:path";
 function planDrift2(loaded) {
   const plans = loaded.config.plans ?? [];
@@ -35524,7 +35726,7 @@ function planDrift2(loaded) {
     if (!PLAN_FILE.test(rel2)) return;
     let text;
     try {
-      text = readFileSync12(join11(loaded.dir, rel2), "utf8");
+      text = readFileSync11(join11(loaded.dir, rel2), "utf8");
     } catch {
       return;
     }
@@ -35579,7 +35781,7 @@ var init_drift = __esm({
 
 // packages/cli/src/ci/workflow.ts
 import { execFileSync as execFileSync2 } from "node:child_process";
-import { existsSync as existsSync9, readFileSync as readFileSync13 } from "node:fs";
+import { existsSync as existsSync9, readFileSync as readFileSync12 } from "node:fs";
 import { join as join12 } from "node:path";
 function workflowYaml(needs = {}) {
   const node = !!(needs.install || needs.build);
@@ -35594,7 +35796,8 @@ function workflowYaml(needs = {}) {
   steps.push("      - uses: checkbox-site/checkbox@v1", "        with:");
   if (needs.online) {
     steps.push(
-      "          args: --online          # also checks Stripe (the Price, trial, Payment Links) with the key below",
+      // Round 51 (pilot 50 core-headless-pr): --online with --require-stripe, so a run that could not read Stripe fails.
+      "          args: --online --require-stripe   # checks Stripe (the Price, trial, Payment Links) with the key below; fails if it could not",
       "          # strict: true          # also fail when a check needs review",
       "        env:",
       "          # Add it once: GitHub \u2192 Settings \u2192 Secrets and variables \u2192 Actions \u2192 New repository secret.",
@@ -35667,7 +35870,7 @@ function workflowNeeds(root, config) {
   const urlPages = list2("pages").some((e) => typeof e.url === "string" && e.kind !== "terms");
   let pkg = null;
   try {
-    pkg = JSON.parse(readFileSync13(join12(root, "package.json"), "utf8"));
+    pkg = JSON.parse(readFileSync12(join12(root, "package.json"), "utf8"));
   } catch {
     pkg = null;
   }
@@ -35708,16 +35911,18 @@ __export(ci_exports, {
   default: () => ci_default,
   diffHunks: () => diffHunks,
   diffTouchesTerms: () => diffTouchesTerms,
+  implicitBase: () => implicitBase,
   markIntroduced: () => markIntroduced,
+  noticesSentByCheckbox: () => noticesSentByCheckbox,
   siteFactsFor: () => siteFactsFor,
   termsChanged: () => termsChanged,
   touchesConfig: () => touchesConfig,
   undiffableInputs: () => undiffableInputs
 });
 import { execFileSync as execFileSync3 } from "node:child_process";
-import { appendFileSync, existsSync as existsSync10, mkdirSync as mkdirSync3, readFileSync as readFileSync14, realpathSync, writeFileSync as writeFileSync3 } from "node:fs";
+import { appendFileSync, existsSync as existsSync10, mkdirSync as mkdirSync3, readFileSync as readFileSync13, realpathSync, writeFileSync as writeFileSync3 } from "node:fs";
 import { createInterface } from "node:readline";
-import { dirname as dirname7, join as join13, relative as relative6, resolve as resolve8 } from "node:path";
+import { dirname as dirname7, join as join13, relative as relative6, resolve as resolve7 } from "node:path";
 function baseDiff(cwd, base, args) {
   let first2 = "";
   const cut = args.includes("--") ? args.indexOf("--") : args.length;
@@ -35747,6 +35952,24 @@ function baseDiff(cwd, base, args) {
   }
   return { error: first2 };
 }
+function implicitBase(cwd) {
+  const git = (a) => execFileSync3("git", a, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+  let branch;
+  try {
+    branch = git(["rev-parse", "--abbrev-ref", "HEAD"]);
+  } catch {
+    return void 0;
+  }
+  if (/^(?:main|master)$/.test(branch)) return void 0;
+  for (const ref of ["main", "master", "origin/HEAD", "origin/main", "origin/master"]) {
+    try {
+      git(["rev-parse", "--verify", "--quiet", `${ref}^{commit}`]);
+      return ref;
+    } catch {
+    }
+  }
+  return void 0;
+}
 function baseProblem(cwd, base) {
   if (!base) return void 0;
   const r = baseDiff(cwd, base, ["--name-only"]);
@@ -35771,7 +35994,12 @@ function termsChanged(cwd, base, jobs) {
   return diffTouchesTerms(out);
 }
 function diffTouchesTerms(out) {
-  return out.split("\n").some((l) => /^[+-](?![+-])/.test(l) && /\b(?:trial(?:_period)?_?days|trialDays|trial_end|unit_amount|interval(?:_count)?|price|amount)\b/i.test(l));
+  const KEY = /(?:^|[^\w$])['"]?(?:[\w$]*_)?(?:trial(?:_period)?_?days|trialDays|trialPeriodDays|trial_end|unit_amount|interval(?:_count)?|price|amount)(?:_[\w$]*)?['"]?\s*(?::|=(?![=>]))/i;
+  return out.split("\n").some((l) => {
+    if (!/^[+-](?![+-])/.test(l)) return false;
+    const code2 = l.slice(1).replace(/(['"`])(?:\\.|(?!\1)[^\\])*\1(?!\s*:)/g, '""');
+    return KEY.test(code2);
+  });
 }
 function codeTermsChanged(cwd, base) {
   const r = baseDiff(cwd, base, ["-U0", "--no-color", ...TERMS_DIFF_EXCLUDES]);
@@ -35789,14 +36017,33 @@ function diffHunks(cwd, base, file) {
   }
   return hunks;
 }
-function anchorToChanges(checks, cwd, workspace, base) {
+function anchorToChanges(checks, cwd, workspace, base, inputsOf = () => []) {
   const cache2 = /* @__PURE__ */ new Map();
+  const hunksOf = (file) => {
+    if (!cache2.has(file)) cache2.set(file, diffHunks(cwd, base, file));
+    return cache2.get(file);
+  };
   for (const x of checks) {
     if (!(x.status === "fail" || x.status === "needs_review" || x.status === "error") || !x.target.line || x.failure) continue;
-    const file = resolve8(workspace, x.target.file);
-    if (!cache2.has(file)) cache2.set(file, diffHunks(cwd, base, file));
-    const hunks = cache2.get(file);
-    if (!hunks.length) continue;
+    const file = resolve7(workspace, x.target.file);
+    const hunks = hunksOf(file);
+    if (!hunks.length) {
+      if (x.type !== "stripe_checkout") continue;
+      const said = `${x.label} ${x.fix ?? ""} ${x.snippet ?? ""} ${x.message ?? ""} ${JSON.stringify(x.fixes ?? [])} ${JSON.stringify(x.warnings ?? [])}`;
+      const keys = STRIPE_KEYS.filter((k) => new RegExp(`\\b${k}\\b`).test(said));
+      if (!keys.length) continue;
+      for (const f of inputsOf(x.name)) {
+        if (f === file) continue;
+        const hs = hunksOf(f);
+        const h2 = hs.find((hh) => hh.removed.some((l) => keys.some((k) => new RegExp(`^\\s*['"]?${k}['"]?\\s*:`).test(l))));
+        if (!h2) continue;
+        const removed = [...new Map(h2.removed.filter((l) => keys.some((k) => new RegExp(`^\\s*['"]?${k}['"]?\\s*:`).test(l))).map((l) => [l.trim(), l])).values()];
+        x.anchored = { from: x.target.line, removed };
+        x.target = { ...x.target, file: relative6(workspace, f).split("\\").join("/") || x.target.file, line: Math.max(1, h2.count > 0 ? h2.start : h2.start + 1) };
+        break;
+      }
+      continue;
+    }
     const line2 = x.target.line;
     let keyRemoved = [];
     if (x.type === "stripe_checkout") {
@@ -35838,22 +36085,23 @@ function markIntroduced(checks, o) {
   }
   set.delete(real(o.loaded.path));
   const inputs = /* @__PURE__ */ new Map();
-  for (const j of o.jobs) inputs.set(j.name, [...inputs.get(j.name) ?? [], ...j.inputs.map((f) => resolve8(o.loaded.dir, f))]);
+  for (const j of o.jobs) inputs.set(j.name, [...inputs.get(j.name) ?? [], ...j.inputs.map((f) => resolve7(o.loaded.dir, f))]);
   const allPlans = (o.loaded.config.plans ?? []).map((p) => p.name);
   const emailFiles = (plan2) => (o.loaded.config.checks.emails ?? []).filter((e) => {
     const ref = e.plan;
     const read2 = Array.isArray(ref) ? ref : ref === void 0 || ref === "all" ? allPlans : [String(ref)];
     return !plan2 || read2.includes(plan2);
-  }).flatMap((e) => ["file" in e && e.file || "", "module" in e && typeof e.module === "string" && e.module.split("#")[0] || ""].filter(Boolean).map((f) => resolve8(o.loaded.dir, f)));
+  }).flatMap((e) => ["file" in e && e.file || "", "module" in e && typeof e.module === "string" && e.module.split("#")[0] || ""].filter(Boolean).map((f) => resolve7(o.loaded.dir, f)));
   let termsInCode;
   for (const x of checks) {
-    const own = [resolve8(o.workspace, x.target.file), ...inputs.get(x.name) ?? []];
+    const own = [resolve7(o.workspace, x.target.file), ...inputs.get(x.name) ?? []];
     const orig = /^(.*) \(as "/.exec(x.name)?.[1];
     if (orig) own.push(...inputs.get(orig) ?? []);
     if (x.type === "notice_schedule") own.push(...emailFiles(x.plan));
     const soldChanged = !!orig && / sells it: /.test(x.name) && (termsInCode ??= codeTermsChanged(o.cwd, o.base));
     const touches = own.some((f) => set.has(real(f))) || !!cfg && configTouches(x, orig, cfg, o.loaded) || soldChanged;
     if (x.status === "pass" || x.status === "not_applicable" || x.status === "skipped") x.touched = touches;
+    else if (x.status === "error") x.introduced = true;
     else x.introduced = touches;
   }
 }
@@ -35911,7 +36159,7 @@ function gitChanged(cwd, base) {
     const root = execFileSync3("git", ["rev-parse", "--show-toplevel"], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
     const r = baseDiff(cwd, base, ["--name-only"]);
     if ("error" in r) return `git diff ${base}...HEAD failed (${r.error}); fetch the base branch (actions/checkout with fetch-depth: 0)`;
-    return { root, files: r.out.split("\n").map((l) => l.trim()).filter(Boolean).map((f) => resolve8(root, f)) };
+    return { root, files: r.out.split("\n").map((l) => l.trim()).filter(Boolean).map((f) => resolve7(root, f)) };
   } catch (err) {
     const msg2 = String(err.stderr || err.message).trim().split("\n")[0];
     return `git diff ${base}...HEAD failed (${msg2}); fetch the base branch (actions/checkout with fetch-depth: 0)`;
@@ -35921,13 +36169,13 @@ function undiffableInputs(loaded, jobs, gitRoot) {
   const need = [];
   const out = [];
   for (const e of loaded.config.checks.pages ?? []) {
-    if (e.source) need.push({ path: resolve8(loaded.dir, e.source), label: `pages "${e.name}" source ${e.source}` });
+    if (e.source) need.push({ path: resolve7(loaded.dir, e.source), label: `pages "${e.name}" source ${e.source}` });
     else if (e.url) out.push(`pages "${e.name}" is a URL with no "source" file to diff`);
-    else if (e.file) need.push({ path: resolve8(loaded.dir, e.file), label: `pages "${e.name}" file ${e.file}` });
+    else if (e.file) need.push({ path: resolve7(loaded.dir, e.file), label: `pages "${e.name}" file ${e.file}` });
   }
   for (const j of jobs) {
     if (j.type === "page" || j.type === "terms") continue;
-    for (const f of j.inputs) need.push({ path: resolve8(loaded.dir, f), label: `"${j.name}" reads ${f}` });
+    for (const f of j.inputs) need.push({ path: resolve7(loaded.dir, f), label: `"${j.name}" reads ${f}` });
   }
   if (!need.length) return out;
   const real = (p) => {
@@ -35943,7 +36191,7 @@ function undiffableInputs(loaded, jobs, gitRoot) {
   try {
     const rels = [...new Set(need.map((n) => relative6(gitRoot, n.path)))];
     const listed2 = execFileSync3("git", ["ls-files", "-z", "--", ...rels], { cwd: gitRoot, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
-    tracked = new Set(listed2.split("\0").filter(Boolean).map((f) => resolve8(gitRoot, f)));
+    tracked = new Set(listed2.split("\0").filter(Boolean).map((f) => resolve7(gitRoot, f)));
   } catch (err) {
     return `git ls-files failed (${String(err.stderr || err.message).trim().split("\n")[0]})`;
   }
@@ -35955,7 +36203,7 @@ function touchesConfig(loaded, jobs, changed) {
   if (set.has(loaded.path)) return true;
   const codeChanged = changed.some((f) => /\.(?:[cm]?[jt]sx?)$/.test(f));
   for (const j of jobs) {
-    for (const f of j.inputs) if (set.has(resolve8(loaded.dir, f))) return true;
+    for (const f of j.inputs) if (set.has(resolve7(loaded.dir, f))) return true;
   }
   const hasModules = [...loaded.config.checks.stripe_checkout ?? [], ...loaded.config.checks.emails ?? []].some((e) => "module" in e && e.module);
   return hasModules && codeChanged;
@@ -35976,16 +36224,25 @@ async function confirm(question) {
     rl.close();
   }
 }
-async function siteFactsFor(ctx, setupSession) {
-  if (!setupSession) return {};
+async function siteFactsFor(ctx, setupSession, site) {
   try {
     if (!ctx.credentials()) return {};
     const client = ctx.client();
-    const sess = await Promise.race([client.sdk.setupSessions.retrieve(setupSession), new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), 8e3))]);
+    const timeout = (p) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), 8e3))]);
+    if (!setupSession) {
+      const list2 = await timeout(client.sdk.setupSessions.list({ limit: 10 }));
+      const rows = (list2?.data ?? []).filter((x) => !!x.site);
+      const sites = [...new Set(rows.map((x) => x.site))];
+      const pick2 = site ? rows.find((x) => x.site === site) : sites.length === 1 ? rows[0] : void 0;
+      if (!pick2) return {};
+      setupSession = pick2.id;
+    }
+    const sess = await timeout(client.sdk.setupSessions.retrieve(setupSession));
     const out = {};
     const b = sess?.business ?? {};
     if (b.merchant_name) out.merchant_name = b.merchant_name;
     if (b.site_url) out.site_url = b.site_url;
+    if (typeof sess.site === "string") out.site = sess.site;
     if (b.terms_url) out.terms_url = b.terms_url;
     const cancel = b.cancellation_url ?? b.account_url;
     if (cancel) out.account_url = cancel;
@@ -36007,11 +36264,19 @@ async function siteFactsFor(ctx, setupSession) {
     return {};
   }
 }
+async function noticesSentByCheckbox(ctx, site) {
+  try {
+    const ns = await Promise.race([ctx.client().sdk.noticeSettings.retrieve(site), new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), 8e3))]);
+    return ns?.mode === "checkbox" && (ns.enabled_kinds ?? []).length ? [...ns.enabled_kinds ?? []] : null;
+  } catch {
+    return null;
+  }
+}
 async function runInit(ctx, argv) {
   const p = parseArgs(argv, { boolean: ["yes", "force", "dry-run", "workflow", "online", "offline", "agents-md"], string: ["config"], alias: { y: "yes" } });
   if (p.positionals.length) throw new UsageError(`Unexpected argument "${p.positionals[0]}"`);
   const explicit = str(p.flags, "config");
-  const configPath = explicit ? resolve8(ctx.cwd, explicit) : CONFIG_FILES.map((f) => join13(ctx.cwd, f)).find((f) => existsSync10(f)) ?? join13(ctx.cwd, CONFIG_FILES[0]);
+  const configPath = explicit ? resolve7(ctx.cwd, explicit) : CONFIG_FILES.map((f) => join13(ctx.cwd, f)).find((f) => existsSync10(f)) ?? join13(ctx.cwd, CONFIG_FILES[0]);
   const workflowPath = join13(ctx.cwd, WORKFLOW_PATH);
   const force = bool(p.flags, "force") === true;
   const withWorkflow = bool(p.flags, "workflow") !== false;
@@ -36019,7 +36284,7 @@ async function runInit(ctx, argv) {
   let facts = {};
   let setupSession;
   let projectSite;
-  for (let dir = resolve8(ctx.cwd); ; dir = dirname7(dir)) {
+  for (let dir = resolve7(ctx.cwd); ; dir = dirname7(dir)) {
     const proj = projects[dir];
     projectSite ??= proj?.site;
     if (proj?.facts || proj?.setup_session) {
@@ -36036,7 +36301,8 @@ async function runInit(ctx, argv) {
     hasKey = false;
   }
   const online = bool(p.flags, "offline") === true ? false : bool(p.flags, "online") === true || hasKey && !!(projectSite ?? ctx.env.CHECKBOX_SITE);
-  const fromSite = await siteFactsFor(ctx, setupSession);
+  const fromSite0 = await siteFactsFor(ctx, setupSession, projectSite ?? ctx.env.CHECKBOX_SITE);
+  const { site: siteOfSession, ...fromSite } = fromSite0;
   facts = { ...fromSite, ...facts, ...fromSite.plans && !facts.plans ? { plans: fromSite.plans } : {} };
   if (Array.isArray(facts.plans) && Array.isArray(fromSite.plans)) {
     facts.plans = facts.plans.map((p2) => {
@@ -36045,6 +36311,14 @@ async function runInit(ctx, argv) {
     });
   }
   const s2 = scaffoldConfig(ctx.cwd, ctx.env, facts);
+  const noticeSite = projectSite ?? ctx.env.CHECKBOX_SITE ?? siteOfSession;
+  const sending = hasKey && noticeSite && !s2.config.notices ? await noticesSentByCheckbox(ctx, noticeSite) : null;
+  if (sending) {
+    const { checks, ...rest } = s2.config;
+    s2.config = { ...rest, notices: { sent_by_checkbox: true }, checks };
+    s2.found.push(`Checkbox Notices sends ${sending.join(", ")} for this site (its Notice settings): "notices": { "sent_by_checkbox": true }`);
+  }
+  if (!hasKey && s2.todoValues) s2.notes.push("If this project already has a Checkbox site (set up through MCP or the dashboard), Checkbox knows these values: run `checkbox login` (or export CHECKBOX_SECRET_KEY from your .env file), then `checkbox ci init --force` fills them in.");
   const actionFor = (f) => existsSync10(f) ? force ? "overwrite" : "keep" : "create";
   const files = [{ path: configPath, content: `${JSON.stringify(s2.config, null, 2)}
 `, action: actionFor(configPath) }];
@@ -36052,7 +36326,10 @@ async function runInit(ctx, argv) {
   const needs = { ...workflowNeeds(ctx.cwd, s2.config), ...online ? { online: true } : {} };
   const workflowSteps = [...needs.install ? [needs.install] : [], ...needs.build ? [needs.build] : []];
   if (withWorkflow) files.push({ path: workflowPath, content: workflowYaml(needs), action: actionFor(workflowPath) });
-  const agentsRule = bool(p.flags, "agents-md") === false ? [] : planAgentsRule(ctx.cwd, { connected: hasKey && !!(projectSite ?? ctx.env.CHECKBOX_SITE), claudeCode: detectAgent(ctx.env) === "Claude Code" });
+  const agentsFlag = bool(p.flags, "agents-md");
+  const agentsPlanned = agentsFlag === false ? [] : planAgentsRule(ctx.cwd, { connected: hasKey && !!(projectSite ?? ctx.env.CHECKBOX_SITE), claudeCode: detectAgent(ctx.env) === "Claude Code" });
+  const agentsRule = agentsFlag === true ? agentsPlanned : agentsPlanned.filter((c) => c.action !== "create");
+  const agentsOptIn = agentsFlag === void 0 && agentsPlanned.some((c) => c.action === "create") ? `Not written: ${agentsPlanned.filter((c) => c.action === "create").map((c) => c.file).join(" and ")} (the Checkbox rule for coding agents). Add it with \`checkbox ci init --agents-md\`.` : null;
   for (const c of agentsRule) files.push({ path: join13(ctx.cwd, c.file), content: c.contents, action: c.action === "create" ? "create" : "overwrite" });
   const toWrite = files.filter((f) => f.action !== "keep");
   const dry = bool(p.flags, "dry-run") === true;
@@ -36062,6 +36339,8 @@ async function runInit(ctx, argv) {
       for (const f of toWrite) ctx.out.info(`${f.action === "create" ? "create" : "overwrite"} ${relative6(ctx.cwd, f.path)}`);
       write = await confirm("Write these files? [Y/n] ");
     } else write = false;
+  } else if (write && !ctx.flags.json) {
+    ctx.out.info(`Writing ${toWrite.map((f) => `${relative6(ctx.cwd, f.path)}${f.action === "overwrite" && agentsRule.some((c) => join13(ctx.cwd, c.file) === f.path) ? " (appending the Checkbox rule)" : ""}`).join(", ")}`);
   }
   if (write) {
     for (const f of toWrite) {
@@ -36087,6 +36366,7 @@ async function runInit(ctx, argv) {
     ...withWorkflow ? { workflow_mode: online ? "online" : "offline" } : {},
     ...withWorkflow && online ? { owner_step: OWNER_SECRET_STEP } : {},
     ...agentsRule.length ? { agents_rule: { files: agentsRule.map((c) => c.file), written: write } } : {},
+    ...agentsOptIn ? { agents_rule_opt_in: agentsOptIn } : {},
     config: s2.config,
     next_action: s2.todoValues ? { type: "edit_config", message: `Fill in the ${s2.todoValues} "TODO" value${s2.todoValues === 1 ? "" : "s"} in ${relName(configPath)} (checkbox ci refuses TODO values), then run \`checkbox ci\` and fix what it reports.${ownerAsk}` } : { type: "run_ci", message: `Run \`checkbox ci\` locally, fix what it reports, then commit checkbox.json and the workflow.${ownerAsk}` }
   };
@@ -36105,6 +36385,7 @@ async function runInit(ctx, argv) {
     if (needs.urlPages) lines.push("", 'Note: "url" pages are fetched by the API (checkbox ci --online), which needs a LIVE key (ck_live_\u2026) on an activated account. Without one, list the built page as "file".');
     if (s2.todos.length) lines.push("", "To do:", ...s2.todos.map((t) => `  - ${t}`));
     if (s2.notes.length) lines.push("", "Also:", ...s2.notes.map((t) => `  - ${t}`));
+    if (agentsOptIn) lines.push("", ctx.out.c.dim(agentsOptIn));
     lines.push("", `${ctx.out.c.cyan("Next:")} ${result.next_action.message}`);
     if (!write) lines.push("", ctx.out.c.dim(`${relName(configPath)}:`), ...JSON.stringify(s2.config, null, 2).split("\n").map((l) => ctx.out.c.dim(`  ${l}`)));
     return lines;
@@ -36150,13 +36431,13 @@ function couponIdsIn(params) {
   const discounts = params?.discounts;
   return (Array.isArray(discounts) ? discounts : []).flatMap((d) => d && typeof d === "object" && typeof d.coupon === "string" ? [d.coupon] : []);
 }
-var HELP2, TERMS_DIFF_EXCLUDES, STRIPE_KEYS, ENTRY_KEYS, OWNER_SECRET_STEP, NOTICE_KIND_TO_EMAIL, ci_default;
+var HELP, TERMS_DIFF_EXCLUDES, STRIPE_KEYS, ENTRY_KEYS, OWNER_SECRET_STEP, NOTICE_KIND_TO_EMAIL, ci_default;
 var init_ci = __esm({
   "packages/cli/src/commands/ci/index.ts"() {
     "use strict";
     init_device();
     init_args();
-    init_config3();
+    init_config2();
     init_coverage();
     init_unlisted_emails();
     init_inputs();
@@ -36170,7 +36451,7 @@ var init_ci = __esm({
     init_drift();
     init_workflow();
     init_types2();
-    HELP2 = [
+    HELP = [
       "Runs every check in checkbox.json (or .checkbox.json) and exits non-zero when one needs a fix.",
       "",
       "Flags:",
@@ -36204,13 +36485,14 @@ var init_ci = __esm({
       "      not applicable, e.g. url pages without --online) \xB7",
       "      3 config / usage error \xB7 4 auth (--online) \xB7 5 API or network error",
       "",
-      "checkbox ci init [--yes] [--force] [--dry-run] [--no-workflow] [--no-agents-md] [--online | --offline]",
+      "checkbox ci init [--yes] [--force] [--dry-run] [--no-workflow] [--agents-md | --no-agents-md] [--online | --offline]",
       '  Writes checkbox.json from the project (Stripe Checkout calls, plans, email templates, pages; "TODO" where it',
       '  cannot tell) and .github/workflows/checkbox.yml (with the install and build steps a fresh clone needs for "module"',
       "  entries and built pages). Asks first on a terminal; --yes writes without asking (agents). With a Checkbox site",
       "  and key (checkbox init) the workflow runs --online (one owner step: the repository secret CHECKBOX_SECRET_KEY);",
-      "  otherwise offline with --require-stripe. --online / --offline choose. Adds the Checkbox rule for coding agents to",
-      "  AGENTS.md (and a CLAUDE.md that does not import it) once; --no-agents-md skips it.",
+      "  otherwise offline with --require-stripe. --online / --offline choose. Appends the Checkbox rule for coding agents to",
+      "  an AGENTS.md / CLAUDE.md that exists; --agents-md also creates AGENTS.md (and CLAUDE.md for Claude Code);",
+      "  --no-agents-md skips it.",
       "",
       "Docs: https://checkbox.site/docs/guides/ci"
     ].join("\n");
@@ -36223,7 +36505,7 @@ var init_ci = __esm({
       name: "ci",
       summary: "Run the checks in checkbox.json (CI: annotations + job summary); `ci init` scaffolds the config and workflow",
       usage: "checkbox ci [--config checkbox.json] [--online] [--strict] [--changed-only] [--json] | checkbox ci init [--yes]",
-      help: HELP2,
+      help: HELP,
       async run(ctx) {
         if (ctx.argv[0] === "init") return runInit(ctx, ctx.argv.slice(1));
         const p = parseArgs(ctx.argv, { boolean: ["online", "offline", "strict", "verbose", "changed-only", "require-stripe", "introduced-only"], string: ["config", "base", "site"] });
@@ -36315,17 +36597,22 @@ ${message}
           ctx.out.warn(msg2);
           if (gha) emit(`::warning title=Checkbox%3A base branch missing::${msg2.replace(/%/g, "%25").replace(/\r/g, "%0D").replace(/\n/g, "%0A")}`);
         }
-        if (baseRef && !noBase) anchorToChanges(run0.checks, ctx.cwd, workspace, baseRef);
+        const inputsByName = /* @__PURE__ */ new Map();
+        for (const j of jobs) inputsByName.set(j.name, [...inputsByName.get(j.name) ?? [], ...j.inputs.map((f) => resolve7(loaded.dir, f))]);
+        if (baseRef && !noBase) anchorToChanges(run0.checks, ctx.cwd, workspace, baseRef, (n) => inputsByName.get(n) ?? []);
         const requireStripe = bool(p.flags, "require-stripe") === true;
         const stripeSold = jobs.some((j) => j.type === "stripe_checkout") || (loaded.config.plans?.length ?? 0) > 0;
-        const unchecked = !client && (noBase && stripeSold || drift.length > 0 || !noBase && termsChanged(ctx.cwd, baseRef, jobs));
+        const termsBase = baseRef ?? (requireStripe ? implicitBase(ctx.cwd) : void 0);
+        const unchecked = !client && (noBase && stripeSold || drift.length > 0 || !noBase && termsChanged(ctx.cwd, termsBase, jobs));
         const workflowFile = join13(workspace, WORKFLOW_PATH);
-        const workflow = workflowArgsOf(existsSync10(workflowFile) ? readFileSync14(workflowFile, "utf8") : void 0);
+        const workflow = workflowArgsOf(existsSync10(workflowFile) ? readFileSync13(workflowFile, "utf8") : void 0);
         let run2 = unchecked ? withStripeNotChecked(run0, strict, { requireStripe, ...noBase && stripeSold ? { noBase } : {}, ...workflow ? { workflow } : {} }) : run0;
         const termsHint = (loaded.config.checks.pages ?? []).some((e) => e.kind === "terms") ? void 0 : termsPageOf(loaded.dir)?.file;
         run2 = withOwnerItems(run2, { ...termsHint ? { termsHint } : {}, ...loaded.config.plans?.length ? { plans: plansAsSold(loaded.config.plans, jobs.map((j) => j.sold)) } : {} });
         if (baseRef && !noBase) markIntroduced(run2.checks, { cwd: ctx.cwd, base: baseRef, workspace, loaded, jobs });
         if (bool(p.flags, "introduced-only") === true) run2 = withIntroducedOnly(run2);
+        const skippedParts = notCheckedList(run2);
+        if (skippedParts.length) run2 = { ...run2, not_checked: skippedParts };
         ctx.out.result(run2, () => renderHuman(run2, ctx.out.c, { verbose: bool(p.flags, "verbose") === true }));
         if (gha) {
           for (const a of annotations(run2)) emit(a);
@@ -36347,466 +36634,6 @@ CHECKBOX_OWNER_ITEMS
   }
 });
 
-// packages/cli/src/commands/plan/patch.ts
-function selectorId(selector2) {
-  if (!selector2) return null;
-  const m = /#([A-Za-z][\w-]*)/.exec(selector2) ?? /\[id=["']?([\w-]+)["']?\]/.exec(selector2);
-  return m ? m[1] : null;
-}
-function findAnchor(src, target) {
-  const id = selectorId(target.selector);
-  const tag = (target.tag ?? "").toLowerCase().replace(/[^a-z0-9-]/g, "");
-  const tagRe = tag ? new RegExp(`<${escapeRe2(tag)}\\b`, "gi") : /<[A-Za-z][\w.-]*\b/g;
-  const openAt = (idx, how) => {
-    const start = src.lastIndexOf("<", idx);
-    if (start < 0) return null;
-    const end = src.indexOf(">", idx);
-    return end < 0 ? null : { start, openEnd: end + 1, how };
-  };
-  if (id) {
-    const m = new RegExp(`\\bid\\s*=\\s*(?:"${escapeRe2(id)}"|'${escapeRe2(id)}'|\\{\\s*["'\`]${escapeRe2(id)}["'\`]\\s*\\})`).exec(src);
-    if (m) return openAt(m.index, `id="${id}"`);
-  }
-  const text = (target.text ?? "").trim();
-  if (text) {
-    const words = text.split(/\s+/).map(escapeRe2).join("(?:\\s|<[^>]*>|\\{[^}]*\\})+");
-    const textRe = new RegExp(`(?<![\\w-])${words}(?![\\w-])`, "i");
-    const voidTag = ["input", "img", "br", "hr", "meta", "link"].includes(tag);
-    for (const m of voidTag ? [] : src.matchAll(tagRe)) {
-      const open2 = m.index;
-      const close = tag ? src.indexOf(`</${tag}`, open2) : src.indexOf("</", open2);
-      const body = src.slice(open2, close < 0 ? Math.min(src.length, open2 + 400) : close);
-      if (textRe.test(body)) return openAt(open2 + 1, `<${tag || "element"}> containing "${text.slice(0, 40)}"`);
-    }
-    if (!voidTag && tag) {
-      const lead = text.split(/\s+/).slice(0, 2).map(escapeRe2).join("(?:s|<[^>]*>|{[^}]*})+");
-      const leadRe = new RegExp(`(?<![w-])${lead}(?![w-])`, "i");
-      const hits = [...src.matchAll(tagRe)].filter((m) => {
-        const close = src.indexOf(`</${tag}`, m.index);
-        return leadRe.test(src.slice(m.index, close < 0 ? Math.min(src.length, m.index + 400) : close));
-      });
-      if (hits.length === 1) return openAt(hits[0].index + 1, `<${tag}> starting with "${text.split(/\s+/).slice(0, 2).join(" ")}"`);
-      const all = [...src.matchAll(tagRe)];
-      if (all.length === 1) return openAt(all[0].index + 1, `the only <${tag}> in this file`);
-    }
-    if (tag === "input") {
-      const t = textRe.exec(src);
-      if (t) {
-        const before = src.slice(0, t.index);
-        const i = before.toLowerCase().lastIndexOf("<input");
-        if (i >= 0) return openAt(i + 1, `<input> before the label "${text.slice(0, 40)}"`);
-      }
-    }
-  }
-  if (!text && !id && tag) {
-    const all = [...src.matchAll(tagRe)];
-    if (all.length === 1) return openAt(all[0].index + 1, `the only <${tag}> in this file`);
-    if (tag === "button" || tag === "input") {
-      const submit = all.filter((m) => /^[^>]*\btype\s*=\s*(?:"submit"|'submit'|\{\s*["']submit["']\s*\})/i.test(src.slice(m.index, src.indexOf(">", m.index) + 1)));
-      if (submit.length === 1) return openAt(submit[0].index + 1, `the only <${tag} type="submit"> in this file`);
-    }
-  }
-  return null;
-}
-function lineStart(src, idx) {
-  return src.lastIndexOf("\n", idx - 1) + 1;
-}
-function indentOf2(src, idx) {
-  const ls = lineStart(src, idx);
-  return /^[ \t]*/.exec(src.slice(ls))[0];
-}
-function lineNo(src, idx) {
-  return src.slice(0, idx).split("\n").length;
-}
-function indentBlock(block, indent) {
-  return block.split("\n").map((l) => l.length ? indent + l : l).join("\n");
-}
-function htmlToJsx(html) {
-  const camel = (p) => p.trim().replace(/^-ms-/, "ms-").replace(/-([a-z])/g, (_, c) => c.toUpperCase());
-  return html.replace(/<script async src="([^"]+\/g\.js)"><\/script>/g, (_, src) => `<!-- Region script: add <script async src="${src}"></script> to your page's <head> (Next.js: <Script src="${src}" strategy="afterInteractive" /> in the layout). React does not run a script tag written here. -->`).replace(/<!--([\s\S]*?)-->/g, (_, c) => `{/*${c.replace(/\*\//g, "* /")}*/}`).replace(/<([a-zA-Z][\w-]*)((?:\s+[^\s=>/]+(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+))?)*)\s*(\/?)>/g, (_m, tag, attrs, selfClose) => {
-    const a = attrs.replace(/(\s)class\s*=/g, "$1className=").replace(/(\s)for\s*=/g, "$1htmlFor=").replace(/(\s)tabindex\s*=/gi, "$1tabIndex=").replace(/(\s)style\s*=\s*"([^"]*)"/g, (_s, sp, css) => {
-      const pairs = css.split(";").map((d) => d.trim()).filter(Boolean).map((d) => {
-        const i = d.indexOf(":");
-        return i < 0 ? null : `${camel(d.slice(0, i))}: ${JSON.stringify(d.slice(i + 1).trim())}`;
-      }).filter(Boolean);
-      return `${sp}style={{ ${pairs.join(", ")} }}`;
-    }).replace(/(\s)checked(?=[\s>/]|$)(?!\s*=)/g, "$1defaultChecked");
-    const isVoid = VOID_TAGS.includes(tag.toLowerCase());
-    return `<${tag}${a.replace(/\s+$/, "")}${isVoid || selfClose ? " />" : ">"}`;
-  });
-}
-function isJsxFile(path) {
-  return !!path && /\.(jsx|tsx)$/i.test(path);
-}
-function applyEdits(source, edits, opts = {}) {
-  let src = source;
-  const markup = (c) => opts.jsx ? htmlToJsx(c) : c;
-  const applied = [];
-  const unmatched = [];
-  for (const e of edits) {
-    if (e.op === "append") {
-      src = `${src.replace(/\s*$/, "")}
-${markup(e.content ?? "")}
-`;
-      applied.push({ op: e.op, line: lineNo(src, src.length - 1), how: "end of file" });
-      continue;
-    }
-    const a = findAnchor(src, e.target);
-    if (!a) {
-      unmatched.push({ op: e.op, reason: `no element matching ${[e.target.selector, e.target.text && `"${e.target.text}"`, e.target.tag && `<${e.target.tag}>`].filter(Boolean).join(" / ")} in this file` });
-      continue;
-    }
-    if (e.op === "insert_before" || e.op === "insert_after") {
-      const content = markup(e.content ?? "").replace(/\s+$/, "");
-      if (e.op === "insert_before") {
-        const ls = lineStart(src, a.start);
-        const onlyWs = /^[ \t]*$/.test(src.slice(ls, a.start));
-        const indent = indentOf2(src, a.start);
-        if (onlyWs) src = `${src.slice(0, ls)}${indentBlock(content, indent)}
-${src.slice(ls)}`;
-        else src = `${src.slice(0, a.start)}
-${indentBlock(content, indent)}
-${indent}${src.slice(a.start)}`;
-      } else {
-        const close = src.indexOf("\n", a.openEnd);
-        const at = close < 0 ? src.length : close + 1;
-        src = `${src.slice(0, at)}${indentBlock(content, indentOf2(src, a.start))}
-${src.slice(at)}`;
-      }
-      applied.push({ op: e.op, line: lineNo(src, a.start), how: a.how });
-    } else if (e.op === "remove_attribute") {
-      const attr = escapeRe2(e.attribute ?? "");
-      const open2 = src.slice(a.start, a.openEnd);
-      const names = (e.attribute ?? "") === "checked" ? `(?:checked|defaultChecked)` : attr;
-      const re = new RegExp(`\\s+${names}(?:\\s*=\\s*(?:\\{[^}]*\\}|"[^"]*"|'[^']*'|[^\\s>]+))?(?=[\\s/>])`, "g");
-      const next = open2.replace(re, "");
-      if (next === open2) {
-        unmatched.push({ op: e.op, reason: `${a.how} has no ${e.attribute} attribute in the source (it may be set by code: make sure it starts unchecked)` });
-        continue;
-      }
-      src = src.slice(0, a.start) + next + src.slice(a.openEnd);
-      applied.push({ op: e.op, line: lineNo(src, a.start), how: a.how });
-    } else if (e.op === "replace_text") {
-      const text = e.target.text ?? "";
-      const i = text ? src.indexOf(text, a.start) : -1;
-      if (i < 0) {
-        unmatched.push({ op: e.op, reason: `text "${text.slice(0, 40)}" not found after ${a.how}` });
-        continue;
-      }
-      src = src.slice(0, i) + (e.content ?? "") + src.slice(i + text.length);
-      applied.push({ op: e.op, line: lineNo(src, i), how: a.how });
-    }
-  }
-  return { patched: src, applied, unmatched };
-}
-function diffLines(a, b) {
-  let pre = 0;
-  while (pre < a.length && pre < b.length && a[pre] === b[pre]) pre++;
-  let suf = 0;
-  while (suf < a.length - pre && suf < b.length - pre && a[a.length - 1 - suf] === b[b.length - 1 - suf]) suf++;
-  const A = a.slice(pre, a.length - suf);
-  const B = b.slice(pre, b.length - suf);
-  const ops = a.slice(0, pre).map((line2) => ({ t: " ", line: line2 }));
-  if (A.length * B.length > 4e6) {
-    ops.push(...A.map((line2) => ({ t: "-", line: line2 })), ...B.map((line2) => ({ t: "+", line: line2 })));
-  } else {
-    const dp = Array.from({ length: A.length + 1 }, () => new Uint32Array(B.length + 1));
-    for (let i2 = A.length - 1; i2 >= 0; i2--) for (let j2 = B.length - 1; j2 >= 0; j2--) dp[i2][j2] = A[i2] === B[j2] ? dp[i2 + 1][j2 + 1] + 1 : Math.max(dp[i2 + 1][j2], dp[i2][j2 + 1]);
-    let i = 0;
-    let j = 0;
-    while (i < A.length && j < B.length) {
-      if (A[i] === B[j]) {
-        ops.push({ t: " ", line: A[i] });
-        i++;
-        j++;
-      } else if (dp[i + 1][j] >= dp[i][j + 1]) ops.push({ t: "-", line: A[i++] });
-      else ops.push({ t: "+", line: B[j++] });
-    }
-    while (i < A.length) ops.push({ t: "-", line: A[i++] });
-    while (j < B.length) ops.push({ t: "+", line: B[j++] });
-  }
-  ops.push(...a.slice(a.length - suf).map((line2) => ({ t: " ", line: line2 })));
-  return ops;
-}
-function gitLines(text) {
-  if (text === "") return [];
-  const lines = text.split("\n");
-  if (text.endsWith("\n")) lines.pop();
-  else lines[lines.length - 1] += NO_EOL;
-  return lines;
-}
-function unifiedDiff(before, after, path, context = 3) {
-  if (before === after) return "";
-  const a = gitLines(before);
-  const b = gitLines(after);
-  const ops = diffLines(a, b);
-  const out = [`--- a/${path}`, `+++ b/${path}`];
-  const show2 = (o) => o.line.endsWith(NO_EOL) ? [`${o.t}${o.line.slice(0, -NO_EOL.length)}`, NO_EOL_MARKER] : [`${o.t}${o.line}`];
-  let i = 0;
-  while (i < ops.length) {
-    if (ops[i].t === " ") {
-      i++;
-      continue;
-    }
-    let start = Math.max(0, i - context);
-    let end = i;
-    for (; ; ) {
-      while (end < ops.length && ops[end].t !== " ") end++;
-      let k = end;
-      while (k < ops.length && ops[k].t === " " && k - end < 2 * context) k++;
-      if (k < ops.length && ops[k].t !== " " && k - end < 2 * context) end = k;
-      else break;
-    }
-    const stop = Math.min(ops.length, end + context);
-    const slice = ops.slice(start, stop);
-    const aStart = ops.slice(0, start).filter((o) => o.t !== "+").length + 1;
-    const bStart = ops.slice(0, start).filter((o) => o.t !== "-").length + 1;
-    const aLen = slice.filter((o) => o.t !== "+").length;
-    const bLen = slice.filter((o) => o.t !== "-").length;
-    out.push(`@@ -${aLen ? aStart : aStart - 1},${aLen} +${bLen ? bStart : bStart - 1},${bLen} @@`, ...slice.flatMap(show2));
-    i = stop;
-    start = stop;
-  }
-  return `${out.join("\n")}
-`;
-}
-var escapeRe2, VOID_TAGS, NO_EOL, NO_EOL_MARKER;
-var init_patch2 = __esm({
-  "packages/cli/src/commands/plan/patch.ts"() {
-    "use strict";
-    escapeRe2 = (s2) => s2.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    VOID_TAGS = ["area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr"];
-    NO_EOL = "\0no-eol";
-    NO_EOL_MARKER = "\\ No newline at end of file";
-  }
-});
-
-// packages/cli/src/commands/plan/fix.ts
-import { existsSync as existsSync11, readdirSync as readdirSync4, readFileSync as readFileSync15, writeFileSync as writeFileSync4 } from "node:fs";
-import { join as join14, relative as relative7, resolve as resolve9 } from "node:path";
-function declaredPlans(cwd) {
-  const path = findConfig(cwd);
-  if (!path) return [];
-  try {
-    return loadConfig(path).config.plans ?? [];
-  } catch {
-    return [];
-  }
-}
-function staleAgainstDeclared(content, plans) {
-  if (!plans.length || !content) return void 0;
-  const text = content.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
-  const said = [];
-  for (const m of text.matchAll(/(\d{1,3})[- ]days? free,? then \$([\d,]+(?:\.\d{1,2})?) (?:every|per|a|\/) ?(month|year|week|day)/gi)) {
-    const trial = Number(m[1]);
-    const price3 = Number(m[2].replace(/,/g, ""));
-    const interval = m[3].toLowerCase();
-    const same = plans.filter((p) => p.interval === interval && major(p) !== void 0 && Math.abs(major(p) - price3) < 5e-3);
-    if (same.length && !same.some((p) => (p.trial_days ?? 0) === trial)) said.push(`it says \u201C${m[0]}\u201D, but checkbox.json declares ${same.map((p) => `"${p.name}" with ${p.trial_days ? `a ${p.trial_days}-day trial` : "no trial"}`).join(", ")}`);
-  }
-  return said.length ? said.join("; ") : void 0;
-}
-function resolveFileHint(cwd, hint) {
-  if (existsSync11(resolve9(cwd, hint))) return hint;
-  const m = /^((?:src\/)?app)\/(?!\()(.+)$/.exec(hint);
-  if (!m) return void 0;
-  const found = [];
-  const walk4 = (dir, depth) => {
-    if (depth > 3) return;
-    let entries = [];
-    try {
-      entries = readdirSync4(resolve9(cwd, dir));
-    } catch {
-      return;
-    }
-    for (const e of entries.filter((x) => /^\([^)]+\)$/.test(x))) {
-      const sub = join14(dir, e);
-      if (existsSync11(resolve9(cwd, sub, m[2]))) found.push(join14(sub, m[2]).split("\\").join("/"));
-      walk4(sub, depth + 1);
-    }
-  };
-  walk4(m[1], 1);
-  return found.length === 1 ? found[0] : void 0;
-}
-function fixForTask(task, cwd, file, plans = declaredPlans(cwd)) {
-  const base = {
-    object: "task_fix",
-    task: task.id,
-    title: task.title,
-    change_type: task.change.type,
-    content: task.change.content,
-    explanation: task.change.explanation,
-    verify: task.verify
-  };
-  const verifyCmd = `checkbox verify ${task.id} --wait`;
-  const settled = settledFix(task);
-  if (settled) return { ...base, file: null, diff: null, applied: [], unmatched: [], next_action: settled };
-  const stale = staleAgainstDeclared(`${task.change.content}
-${task.change.edits.map((e) => e.content ?? "").join("\n")}`, plans);
-  if (stale) {
-    return {
-      ...base,
-      content: "",
-      explanation: `Withheld: ${task.id} was built from the site's plans in Checkbox, which are older than checkbox.json (${stale}).`,
-      stale,
-      file: null,
-      diff: null,
-      applied: [],
-      unmatched: [],
-      next_action: {
-        type: "refresh_plan",
-        description: `Do not apply ${task.id}: it was built from the site's plans in Checkbox, which are older than checkbox.json (${stale}). Applying it would put the old terms back, so its change is not shown. Leave the code as it is; once this change is deployed, update the site's plans (updateSetupSession plans[], or \`checkbox init --plan \u2026\` with the plans checkbox.json declares), then run \`checkbox plan\` again for a fix built from the new plans. If the site's plans are already updated, verify the task against what your code now sends (\`checkbox verify ${task.id} --wait\`): Checkbox judges that, not the old change.`,
-        command: "checkbox plan"
-      }
-    };
-  }
-  const candidate = file ?? (task.where.file_hint ? resolveFileHint(cwd, task.where.file_hint) : void 0);
-  if (task.change.type === "patch" && task.change.edits.length && candidate) {
-    const path = resolve9(cwd, candidate);
-    let src;
-    try {
-      src = readFileSync15(path, "utf8");
-    } catch (err) {
-      throw new UsageError(`Cannot read ${candidate}: ${err.code ?? err.message}`);
-    }
-    const r = applyEdits(src, task.change.edits, { jsx: isJsxFile(candidate) });
-    const rel2 = relative7(cwd, path).split("\\").join("/");
-    const diff2 = unifiedDiff(src, r.patched, rel2);
-    const complete = r.unmatched.length === 0;
-    return {
-      ...base,
-      file: rel2,
-      diff: diff2 || null,
-      applied: r.applied,
-      unmatched: r.unmatched,
-      next_action: complete ? { type: "apply_diff", description: `Apply the diff to ${rel2} (git apply, or edit the file), deploy, then verify.`, command: verifyCmd } : {
-        type: "edit_manually",
-        description: `${r.unmatched.map((u) => u.reason).join("; ")}. Apply what the diff shows, then make the remaining change by hand following change.content (the elements may be rendered by another component), then verify.`,
-        command: verifyCmd
-      }
-    };
-  }
-  const own = task.next_action;
-  if (task.change.type === "manual" && own && own.type !== "answer_question" && own.type !== "none" && own.description) {
-    return { ...base, file: null, diff: null, applied: [], unmatched: [], next_action: { type: own.type, description: own.description, command: own.command ?? null } };
-  }
-  if (task.change.type === "stripe_params" && /^Nothing to change in the params\b/.test(task.change.content)) {
-    return { ...base, file: null, diff: null, applied: [], unmatched: [], next_action: { type: "create_checkout_session", description: `Nothing to merge: the params already pass. ${task.change.content.replace(/^Nothing to change in the params \([^)]*\)\.\s*/, "").replace(/call verifyTask on (task_\w+)/, "run `checkbox verify $1 --wait`")}`, command: verifyCmd } };
-  }
-  const how = {
-    patch: `Apply change.content in ${task.where.file_hint ?? "the file that renders the page"} (pass --file <path> for an exact diff), then verify.`,
-    copy: `Put this exact text in ${task.where.url ?? task.where.kind} (${task.where.file_hint ?? "your CMS or codebase"}), then verify.`,
-    stripe_params: task.where.stripe_object === "payment_link" ? paymentLinkHow(task) : stripeParamsHow(task),
-    config: `Send change.content to ${task.change.operation_id ?? "the API"}${task.change.endpoint ? ` (${task.change.endpoint})` : ""}, then verify.`,
-    needs_facts: `Checkbox needs facts before it can give an exact change (no diff with placeholders): send change.content with the real values to ${task.change.operation_id ?? "updateSetupSession"}${task.change.endpoint ? ` (${task.change.endpoint})` : ""} \u2014 or re-run \`checkbox init --merchant-name <brand> --plan <price>/<interval>[,trial=<days>] --account-url <url>\` \u2014 then run \`checkbox fix ${task.id}\` again.`,
-    manual: `A person has to do this: ask the human, then record it with \`checkbox answer ${task.id} <answer>\`.`
-  };
-  const type = task.change.type === "manual" ? "answer_question" : task.change.type === "needs_facts" ? "provide_facts" : "apply_change";
-  const checkoutParams = task.change.type === "stripe_params" && isCheckoutSessionObject(task.where.stripe_object);
-  return { ...base, file: null, diff: null, applied: [], unmatched: [], next_action: { type, description: how[task.change.type] ?? "Apply the change, then verify.", command: task.change.type === "manual" ? `checkbox answer ${task.id}` : task.change.type === "needs_facts" ? `checkbox fix ${task.id}` : checkoutParams ? `checkbox verify ${task.id} --stripe-params <params.json> --wait` : verifyCmd } };
-}
-function isCheckoutSessionObject(o) {
-  return !o || /checkout/i.test(o);
-}
-function stripeParamsHow(task) {
-  const where2 = `${task.where.stripe_object ?? "the Stripe call"}${task.where.file_hint ? ` in ${task.where.file_hint}` : ""}`;
-  if (isCheckoutSessionObject(task.where.stripe_object)) {
-    return `Merge these params into ${where2}, save the object your code now passes to stripe.checkout.sessions.create as JSON (e.g. params.json), then run \`checkbox verify ${task.id} --stripe-params params.json --wait\`: without --stripe-params, verify judges the config registered earlier, not your new code.`;
-  }
-  return `Apply these settings to ${where2} (the task's change; with the stored Stripe TEST key the agent can call the Stripe API itself), then run \`checkbox verify ${task.id} --wait\`: Checkbox re-reads the setting from Stripe.`;
-}
-function settledFix(task) {
-  const own = task.next_action;
-  const ownText = own?.description ?? own?.message ?? "";
-  if (task.status === "done" || task.status === "wont_fix") {
-    const why = task.closed_reason ? ` (closed: ${task.closed_reason.replace(/_/g, " ")})` : "";
-    return { type: "none", description: `${task.status === "done" ? "Done" : "Declined"}${why}: nothing to change for this task. Run \`checkbox plan\` for what is left.`, command: "checkbox plan" };
-  }
-  if (task.status === "pending_live_check") {
-    return { type: own?.type ?? "live_check_pending", description: ownText || "Live check pending: the checks pass and nothing needs to change; it completes on its own when Checkbox sees the real event.", command: own?.command ?? null };
-  }
-  if (task.status === "verifying" && (!own?.type || ["wait", "wait_for_verification", "wait_for_test_run", "none", "live_check_pending"].includes(own.type))) {
-    return { type: own?.type ?? "wait", description: ownText ? `Checkbox is checking this; nothing to change meanwhile. ${ownText}` : "Checkbox is checking this; nothing to change meanwhile. Run `checkbox plan` again in a minute.", command: own?.command ?? "checkbox plan" };
-  }
-  return null;
-}
-function paymentLinkHow(task) {
-  let params = {};
-  try {
-    params = JSON.parse(task.change.content);
-  } catch {
-  }
-  const page = task.where.file_hint ? ` in ${task.where.file_hint}` : "";
-  const edits = task.change.edits.length ? " and add the renewal line above it (change.edits; `checkbox fix " + task.id + " --file <page>` prints the diff)" : "";
-  if (params.consent_collection) {
-    return `Your Payment Link must be replaced (Stripe adds the consent checkbox only to a new link). Owner: create the replacement link in the Checkbox dashboard (Ready-made fixes \u2192 Payment Link \u2192 Create replacement link, one click; or stripe.paymentLinks.create with these params and the current link's line_items). You: swap the Join button's link${page} to the new URL${edits}, deploy, then verify. Owner: deactivate the old link in Stripe (Payment Links \u2192 the old link \u2192 Deactivate) once the site uses the new one.`;
-  }
-  return `Send these params to every Payment Link your pages use (stripe.paymentLinks.update, or the owner edits the link in the Stripe Dashboard)${edits ? `, ${edits.replace(/^ and /, "")}` : ""}, then verify.`;
-}
-var TASK_RE2, major, fix_default;
-var init_fix = __esm({
-  "packages/cli/src/commands/plan/fix.ts"() {
-    "use strict";
-    init_args();
-    init_types2();
-    init_config3();
-    init_patch2();
-    TASK_RE2 = /^task_[0-9a-f]{32}$/;
-    major = (p) => p.price !== void 0 ? Number(p.price) : p.amount !== void 0 ? p.amount / 100 : void 0;
-    fix_default = defineCommand({
-      name: "fix",
-      summary: "Show the change for a plan task (exact diff of your file for code tasks)",
-      usage: "checkbox fix <task_id> [--file <path>] [--out <patch file>] [--json]",
-      help: [
-        "Prints the task's change. For code tasks it reads --file (default: the task's file_hint when it exists in this",
-        "directory), applies the task's anchored edits in memory and prints an exact unified diff \u2014 it never edits your files.",
-        "",
-        "Flags:",
-        "  --file <path>   Source file that renders the page (component, template, HTML)",
-        "  --out <path>    Also write the diff to this file (then: git apply <path>)",
-        '  --json          { object: "task_fix", diff, applied, unmatched, content, explanation, verify, next_action }'
-      ].join("\n"),
-      async run(ctx) {
-        const { positionals, flags } = parseArgs(ctx.argv, { string: ["file", "out"] });
-        const id = positionals[0];
-        if (!id || !TASK_RE2.test(id)) throw new UsageError("Usage: checkbox fix <task_id> (task ids come from `checkbox plan`)");
-        const task = await ctx.client().sdk.tasks.retrieve(id);
-        const result = fixForTask(task, ctx.cwd, str(flags, "file"));
-        const out = str(flags, "out");
-        if (out && result.diff) writeFileSync4(resolve9(ctx.cwd, out), result.diff);
-        ctx.out.result({ ...result, task_object: task }, () => {
-          const c = ctx.out.c;
-          const lines = [`${c.bold(task.title)} ${c.dim(`(${task.priority}, ${task.id})`)}`, c.dim(`${task.requirement.citation}`), task.why, ""];
-          if (result.stale) {
-            lines.push(c.yellow(`STALE: ${task.id} was built from the site's older plans in Checkbox: ${result.stale}. Its change is not shown, so it cannot be applied by mistake.`));
-          } else if (result.diff) {
-            lines.push(result.diff.trimEnd());
-            for (const u of result.unmatched) lines.push(c.yellow(`not applied: ${u.reason}`));
-          } else {
-            lines.push(`${c.cyan(task.change.type)} ${task.where.file_hint ?? task.where.url ?? task.where.stripe_object ?? ""}`, task.change.content, "", task.change.explanation);
-          }
-          lines.push("", `${c.cyan("next")}  ${result.next_action.description}${result.next_action.command ? `
-      $ ${result.next_action.command}` : ""}`);
-          return lines;
-        });
-        return EXIT.ok;
-      }
-    });
-  }
-});
-
-// packages/cli/src/commands/fix.ts
-var fix_exports = {};
-__export(fix_exports, {
-  default: () => fix_default
-});
-var init_fix2 = __esm({
-  "packages/cli/src/commands/fix.ts"() {
-    "use strict";
-    init_fix();
-  }
-});
-
 // packages/cli/src/commands/init/index.ts
 var init_exports = {};
 __export(init_exports, {
@@ -36825,8 +36652,8 @@ __export(init_exports, {
   syncCheckoutConfigs: () => syncCheckoutConfigs,
   withEvaluatedAt: () => withEvaluatedAt
 });
-import { existsSync as existsSync12 } from "node:fs";
-import { join as join15 } from "node:path";
+import { existsSync as existsSync11 } from "node:fs";
+import { join as join14 } from "node:path";
 import { createInterface as createInterface2 } from "node:readline";
 async function findSetupSession(client, siteUrl) {
   const r = await client.sdk.setupSessions.list({ limit: 20 });
@@ -36955,7 +36782,7 @@ async function syncCheckoutConfigs(client, site, sessions, root) {
     const from = configFileOf(c.name);
     if (!from) continue;
     const sameFile = perFile.has(from.file);
-    const gone = !sameFile && !existsSync12(join15(root, from.file));
+    const gone = !sameFile && !existsSync11(join14(root, from.file));
     const current = sameFile && from.call !== void 0 && from.call <= perFile.get(from.file) && c.name === configNameOf(from.file, from.call);
     if (!sameFile && !gone || current) continue;
     if (await client.sdk.stripeCheckoutConfigs.del(c.id).then(() => true, () => false)) {
@@ -37201,7 +37028,7 @@ var init_init = __esm({
         const siteUrlOk = (u) => isPublicSiteUrl(u) || privateOk && isHttpUrl(u);
         if (flagUrls.site_url && !siteUrlOk(flagUrls.site_url)) throw new UsageError("--site-url must be a public URL Checkbox can load (not localhost); use a preview deployment URL while developing");
         const supportEmail = str(flags, "support-email") ?? remembered.support_email;
-        let siteUrl = flagUrls.site_url ? originOf2(flagUrls.site_url) : d.siteUrl;
+        let siteUrl = flagUrls.site_url ? originOf(flagUrls.site_url) : d.siteUrl;
         const creds = ctx.credentials();
         if (bool(flags, "verify") || bool(flags, "complete")) {
           if (!creds) throw new UsageError("No Checkbox setup for this project yet: run `checkbox init` first.");
@@ -37336,7 +37163,7 @@ var init_init = __esm({
           const answer = (await ask2("Public URL of your site (production or a preview deployment), or Enter to skip: ")).trim();
           if (answer) {
             if (!siteUrlOk(answer)) throw new UsageError("That URL is not public (Checkbox must be able to load it).");
-            siteUrl = originOf2(answer);
+            siteUrl = originOf(answer);
           }
         }
         const policyFromPaths = (kind) => siteUrl && d.policyPaths[kind] ? `${siteUrl}${d.policyPaths[kind]}` : void 0;
@@ -37469,7 +37296,7 @@ var init_init = __esm({
             try {
               const lc = ctx.client({ apiKey: liveKey, apiBase });
               const sites = await lc.sdk.sites.list({ limit: 100 });
-              const liveSite = sites.data.find((s2) => originOf2(s2.url) === siteUrl) ?? await lc.sdk.sites.create({ url: siteUrl });
+              const liveSite = sites.data.find((s2) => originOf(s2.url) === siteUrl) ?? await lc.sdk.sites.create({ url: siteUrl });
               const dv = await lc.sdk.domainVerifications.create(liveSite.id);
               if (dv.file) {
                 const wk = planWellKnown(d, dv.file.contents);
@@ -37497,6 +37324,834 @@ var init_init = __esm({
         return EXIT.ok;
       }
     });
+  }
+});
+
+// packages/cli/src/commands/check/index.ts
+var check_exports = {};
+__export(check_exports, {
+  default: () => check_default
+});
+import { readFileSync as readFileSync14 } from "node:fs";
+import { resolve as resolve8 } from "node:path";
+function operationFor2(endpoint) {
+  const op = Object.values(OPERATIONS).find((o) => o.httpMethod === "POST" && o.path === endpoint);
+  if (!op) throw new Error(`No API operation for POST ${endpoint}`);
+  return op.operationId;
+}
+async function readInput(ctx, file) {
+  if (file === "-") return ctx.readStdin();
+  try {
+    return readFileSync14(resolve8(ctx.cwd, file), "utf8");
+  } catch (err) {
+    throw new UsageError(`Cannot read ${file}: ${err.code ?? err.message}`);
+  }
+}
+function parseJson(text, what) {
+  try {
+    const v = JSON.parse(text);
+    if (!v || typeof v !== "object" || Array.isArray(v)) throw new Error("not an object");
+    return v;
+  } catch (err) {
+    throw new UsageError(`${what} must be a JSON object (${err.message})`);
+  }
+}
+function planFrom(f) {
+  const out = {};
+  const s2 = (flag, key) => {
+    const v = str(f, flag);
+    if (v !== void 0) out[key] = v;
+  };
+  const n = (flag, key) => {
+    const v = num(f, flag);
+    if (v !== void 0) out[key] = v;
+  };
+  s2("merchant-name", "merchant_name");
+  s2("plan-name", "plan_name");
+  const price3 = str(f, "price");
+  if (price3 !== void 0) out.price = /^[\d.]+$/.test(price3) ? Number(price3) : price3;
+  n("amount", "amount");
+  s2("currency", "currency");
+  s2("interval", "interval");
+  n("interval-count", "interval_count");
+  n("trial-days", "trial_days");
+  s2("cancel-url", "cancel_url");
+  s2("cancel-timing", "cancel_timing");
+  return out;
+}
+function common2(f) {
+  const j = list(f, "jurisdictions");
+  const asOf = str(f, "as-of");
+  return { ...j ? { jurisdictions: j.length === 1 && j[0].toLowerCase() === "all" ? "all" : j } : {}, ...asOf ? { as_of: asOf } : {} };
+}
+async function preflight() {
+  return Promise.resolve().then(() => (init_preflight(), preflight_exports));
+}
+var PLAN_FLAGS, COMMON_STRING, SUBS, HELP2, check_default;
+var init_check = __esm({
+  "packages/cli/src/commands/check/index.ts"() {
+    "use strict";
+    init_args();
+    init_types2();
+    init_render();
+    init_src();
+    init_init();
+    PLAN_FLAGS = ["merchant-name", "plan-name", "price", "amount", "currency", "interval", "interval-count", "trial-days", "cancel-url", "cancel-timing"];
+    COMMON_STRING = ["as-of", "body"];
+    SUBS = {
+      disclosure: {
+        endpoint: "/v1/checks/disclosure",
+        offline: true,
+        summary: "Checkout disclosure text + placement + consent checkbox",
+        flags: {
+          string: ["text", "file", "button-text", "order-summary", "font-size", "contrast", "body-font-size", "consent-label"],
+          boolean: ["above-button", "same-page", "bold", "boxed", "consent-checkbox", "prechecked", "consent-required"]
+        },
+        async build(p, ctx) {
+          const f = p.flags;
+          const file = str(f, "file");
+          const text = str(f, "text") ?? (file ? (await readInput(ctx, file)).trim() : void 0);
+          if (!text) throw new UsageError('Give the disclosure with --text "\u2026" or --file <path> (- for stdin)');
+          const placement = {};
+          const pb = (flag, key) => {
+            const v = bool(f, flag);
+            if (v !== void 0) placement[key] = v;
+          };
+          pb("above-button", "above_button");
+          pb("same-page", "same_page_as_payment");
+          pb("bold", "bold");
+          pb("boxed", "boxed");
+          const fs = num(f, "font-size");
+          if (fs !== void 0) placement.font_size_px = fs;
+          const cr = num(f, "contrast");
+          if (cr !== void 0) placement.contrast_ratio = cr;
+          const bfs = num(f, "body-font-size");
+          if (bfs !== void 0) placement.body_font_size_px = bfs;
+          const cb = bool(f, "consent-checkbox");
+          const consent = cb !== void 0 || bool(f, "prechecked") !== void 0 || str(f, "consent-label") ? {
+            checkbox: cb ?? true,
+            prechecked: bool(f, "prechecked") ?? false,
+            ...str(f, "consent-label") ? { label: str(f, "consent-label") } : {},
+            ...bool(f, "consent-required") !== void 0 ? { required: bool(f, "consent-required") } : {}
+          } : void 0;
+          return {
+            text,
+            ...planFrom(f),
+            ...str(f, "button-text") ? { button_text: str(f, "button-text") } : {},
+            ...str(f, "order-summary") ? { order_summary: str(f, "order-summary") } : {},
+            ...Object.keys(placement).length ? { placement } : {},
+            ...consent ? { consent } : {},
+            ...common2(f)
+          };
+        },
+        async runOffline(body) {
+          return (await preflight()).checkDisclosure(body);
+        }
+      },
+      "stripe-session": {
+        endpoint: "/v1/checks/stripe_checkout_session",
+        offline: true,
+        summary: "Params passed to stripe.checkout.sessions.create",
+        flags: { string: ["file", "params"] },
+        async build(p, ctx) {
+          const raw = str(p.flags, "params") ?? (str(p.flags, "file") ? await readInput(ctx, str(p.flags, "file")) : void 0);
+          if (!raw) throw new UsageError("Give the Checkout Session params with --file <params.json> (- for stdin) or --params '{\u2026}'");
+          const merchant = planFrom(p.flags);
+          return { params: parseJson(raw, "The Checkout Session params"), ...Object.keys(merchant).length ? { merchant } : {}, ...common2(p.flags) };
+        },
+        async runOffline(body) {
+          return (await preflight()).checkStripeCheckoutSession(body);
+        }
+      },
+      "payment-link": {
+        endpoint: "/v1/checks/stripe_payment_link",
+        offline: true,
+        summary: "Payment Link create params or a retrieved link object",
+        flags: { string: ["file", "params"] },
+        async build(p, ctx) {
+          const raw = str(p.flags, "params") ?? (str(p.flags, "file") ? await readInput(ctx, str(p.flags, "file")) : void 0);
+          if (!raw) throw new UsageError("Give the Payment Link params with --file <link.json> (- for stdin) or --params '{\u2026}'");
+          const merchant = planFrom(p.flags);
+          return { params: parseJson(raw, "The Payment Link params"), ...Object.keys(merchant).length ? { merchant } : {}, ...common2(p.flags) };
+        },
+        async runOffline(body) {
+          return (await preflight()).checkStripePaymentLink(body);
+        }
+      },
+      email: {
+        endpoint: "/v1/checks/email",
+        offline: true,
+        summary: "Lifecycle email (acknowledgment, reminders, price change, cancellation confirmation)",
+        flags: { string: ["kind", "subject", "text", "file", "html-file", "previous-price", "support-contact"] },
+        async build(p, ctx) {
+          const f = p.flags;
+          const kind = str(f, "kind");
+          if (!kind) throw new UsageError("--kind is required: acknowledgment, trial_reminder, renewal_reminder, price_change, annual_terms or cancellation_confirmation");
+          let subject = str(f, "subject");
+          let text = str(f, "text");
+          let html;
+          const file = str(f, "file");
+          if (file) {
+            let content = await readInput(ctx, file);
+            const m = /^subject:\s*(.+)\r?\n/i.exec(content);
+            if (m) {
+              subject ??= m[1].trim();
+              content = content.slice(m[0].length);
+            }
+            if (/\.html?$/i.test(file) || /^\s*</.test(content)) html = content;
+            else text = content;
+          }
+          const hf = str(f, "html-file");
+          if (hf) html = await readInput(ctx, hf);
+          if (!subject && html) subject = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(html)?.[1]?.replace(/\s+/g, " ").trim() || void 0;
+          if (!subject) throw new UsageError('--subject is required (or a "Subject: \u2026" first line in --file, or an HTML <title>)');
+          if (!text && !html) throw new UsageError("Give the email body with --text, --file or --html-file");
+          const terms2 = planFrom(f);
+          const pp = str(f, "previous-price");
+          if (pp) terms2.previous_price = /^[\d.]+$/.test(pp) ? Number(pp) : pp;
+          if (str(f, "support-contact")) terms2.support_contact = str(f, "support-contact");
+          return { kind: kind.replace(/-/g, "_"), subject, ...text ? { text } : {}, ...html ? { html } : {}, terms: terms2, ...common2(f) };
+        },
+        async runOffline(body) {
+          return (await preflight()).checkEmail(body);
+        }
+      },
+      page: {
+        endpoint: "/v1/checks/page",
+        offline: true,
+        summary: "Checkout page HTML (--file) or a live URL (--url, activated live accounts)",
+        flags: { string: ["file", "url", "page-kind", "plan"] },
+        async build(p, ctx) {
+          const f = p.flags;
+          const file = str(f, "file");
+          const url = str(f, "url");
+          if (!file && !url) throw new UsageError("Give the page with --file <page.html> (- for stdin) or --url <https://\u2026>");
+          const terms2 = planFrom(f);
+          const raw = f.plan;
+          const plans = (Array.isArray(raw) ? raw : typeof raw === "string" ? [raw] : []).flatMap((v) => parsePlanFlag(String(v))).map((x) => {
+            const { trial_days, name, interval_count, ...rest } = x;
+            return { ...rest, ...interval_count ? { interval_count } : {}, ...trial_days !== void 0 ? { trial_days } : {}, ...name ? { name } : {} };
+          });
+          return {
+            ...file ? { html: await readInput(ctx, file) } : {},
+            ...url ? { url } : {},
+            ...str(f, "page-kind") ? { page_kind: str(f, "page-kind") } : {},
+            ...Object.keys(terms2).length ? { terms: terms2 } : {},
+            ...plans.length ? { plans } : {},
+            ...common2(f)
+          };
+        },
+        async runOffline(body) {
+          if (typeof body.html !== "string") throw new UsageError("--offline needs --file (fetching --url is done by the API)");
+          return (await preflight()).checkPageHtml(body);
+        }
+      },
+      "notice-schedule": {
+        endpoint: "/v1/checks/notice_schedule",
+        offline: false,
+        summary: "Exact dates each legally required notice must be sent",
+        flags: { string: ["start-date", "price-change-date", "new-price", "cycles"] },
+        async build(p) {
+          const f = p.flags;
+          const terms2 = planFrom(f);
+          const pcd = str(f, "price-change-date");
+          const np = str(f, "new-price");
+          return {
+            terms: terms2,
+            ...str(f, "start-date") ? { start_date: str(f, "start-date") } : {},
+            ...pcd || np ? { price_change: { ...pcd ? { effective_date: pcd } : {}, ...np ? { new_price: Number(np) } : {} } } : {},
+            ...num(f, "cycles") !== void 0 ? { cycles: num(f, "cycles") } : {},
+            ...common2(f)
+          };
+        }
+      }
+    };
+    HELP2 = [
+      "Sub-commands:",
+      ...Object.entries(SUBS).map(([k, s2]) => `  ${k.padEnd(16)} ${s2.summary}${s2.offline ? "" : " (online only)"}`),
+      "",
+      "Plan flags (the subscription the checkout sells):",
+      "  --price <19.99> | --amount <1999>   recurring price (major units | minor units)",
+      "  --currency usd  --interval month|year|week|day  --interval-count 1  --trial-days 14",
+      '  --merchant-name "Joybox"  --plan-name "Pro"  --cancel-url https://\u2026  --cancel-timing period_end|immediately',
+      "",
+      'disclosure:     --text "\u2026" | --file terms.txt   [--button-text Subscribe] [--no-above-button] [--no-same-page]',
+      '                [--font-size 14] [--contrast 7] [--bold] [--boxed] [--consent-checkbox] [--prechecked] [--consent-label "\u2026"]',
+      "stripe-session: --file params.json (the object passed to stripe.checkout.sessions.create; - for stdin)",
+      "payment-link:   --file link.json (paymentLinks.create params, or a retrieved link incl. its id)",
+      'email:          --kind trial_reminder --subject "\u2026" (--text "\u2026" | --file email.txt|email.html) [--previous-price 14.99]',
+      "page:           --file checkout.html | --url https://\u2026 (url: online, activated live accounts) [--page-kind checkout|pricing]",
+      '                [--plan "9/month,name=Monthly" --plan "90/year,trial=14,name=Yearly"] (every plan a pricing page sells)',
+      "notice-schedule: plan flags + [--start-date YYYY-MM-DD] [--price-change-date YYYY-MM-DD --new-price 24.99] [--cycles 2]",
+      "",
+      "Common: --jurisdictions US-CA,US-NY (default all) \xB7 --as-of YYYY-MM-DD \xB7 --body request.json (send a full request body)",
+      "        --offline (run the rules engine locally; no key or network) \xB7 --strict (needs_review exits 2) \xB7 --verbose \xB7 --json",
+      "",
+      "Exit: 0 pass (or needs_review without --strict) \xB7 1 fail \xB7 2 needs_review with --strict \xB7 3 usage \xB7 4 auth \xB7 5 error",
+      "",
+      "Examples:",
+      '  checkbox check disclosure --text "Renews monthly at $19.99 until you cancel." --price 19.99 --interval month --consent-checkbox',
+      "  checkbox check stripe-session --file session.json --merchant-name Joybox --cancel-url https://joybox.com/cancel --json",
+      "  checkbox check email --kind acknowledgment --file emails/welcome.html --price 19.99 --interval month --offline"
+    ].join("\n");
+    check_default = defineCommand({
+      name: "check",
+      summary: "Preflight compliance checks: disclosure text, Stripe params, emails, checkout HTML",
+      usage: "checkbox check <disclosure|stripe-session|payment-link|email|page|notice-schedule> [flags]",
+      help: HELP2,
+      async run(ctx) {
+        const [subName, ...rest] = ctx.argv;
+        const sub = subName ? SUBS[subName] ?? SUBS[subName.replace(/_/g, "-")] : void 0;
+        if (!sub) {
+          throw new UsageError(subName ? `Unknown check "${subName}". Choose one of: ${Object.keys(SUBS).join(", ")}` : `Which check? ${Object.keys(SUBS).join(", ")} (see checkbox check --help)`);
+        }
+        const p = parseArgs(rest, {
+          string: [...sub.flags.string ?? [], ...PLAN_FLAGS, ...COMMON_STRING],
+          boolean: [...sub.flags.boolean ?? [], "offline", "strict", "verbose"],
+          multiple: ["jurisdictions", ...sub.flags.multiple ?? []]
+        });
+        if (sub.flags.string?.includes("plan")) {
+          const all = rest.flatMap((a, i) => a === "--plan" && rest[i + 1] !== void 0 ? [rest[i + 1]] : a.startsWith("--plan=") ? [a.slice("--plan=".length)] : []);
+          if (all.length) p.flags.plan = all;
+        }
+        if (p.positionals.length) throw new UsageError(`Unexpected argument "${p.positionals[0]}"`);
+        const bodyFile = str(p.flags, "body");
+        const body = bodyFile ? parseJson(await readInput(ctx, bodyFile), "--body") : await sub.build(p, ctx);
+        const offline = bool(p.flags, "offline") === true;
+        let report;
+        if (offline) {
+          if (!sub.runOffline) throw new UsageError(`checkbox check ${subName} needs the API (no --offline mode)`);
+          try {
+            report = { ...await sub.runOffline(body), mode: "offline" };
+          } catch (err) {
+            if (err instanceof Error && err.name === "PreflightInputError") {
+              const param = err.param;
+              ctx.out.error({ message: err.message, code: "parameter_invalid", type: "invalid_request_error", ...param ? { param } : {} });
+              return EXIT.usage;
+            }
+            throw err;
+          }
+        } else {
+          report = await ctx.client().sdk.call(operationFor2(sub.endpoint), body);
+        }
+        ctx.out.result(report, () => renderReport(report, ctx.out, { offline, verbose: bool(p.flags, "verbose") === true }));
+        return exitCodeFor(report, bool(p.flags, "strict") === true);
+      }
+    });
+  }
+});
+
+// packages/cli/src/commands/plan/patch.ts
+function selectorId(selector2) {
+  if (!selector2) return null;
+  const m = /#([A-Za-z][\w-]*)/.exec(selector2) ?? /\[id=["']?([\w-]+)["']?\]/.exec(selector2);
+  return m ? m[1] : null;
+}
+function findAnchor(src, target) {
+  const id = selectorId(target.selector);
+  const tag = (target.tag ?? "").toLowerCase().replace(/[^a-z0-9-]/g, "");
+  const tagRe = tag ? new RegExp(`<${escapeRe2(tag)}\\b`, "gi") : /<[A-Za-z][\w.-]*\b/g;
+  const openAt = (idx, how) => {
+    const start = src.lastIndexOf("<", idx);
+    if (start < 0) return null;
+    const end = src.indexOf(">", idx);
+    return end < 0 ? null : { start, openEnd: end + 1, how };
+  };
+  if (id) {
+    const m = new RegExp(`\\bid\\s*=\\s*(?:"${escapeRe2(id)}"|'${escapeRe2(id)}'|\\{\\s*["'\`]${escapeRe2(id)}["'\`]\\s*\\})`).exec(src);
+    if (m) return openAt(m.index, `id="${id}"`);
+  }
+  const text = (target.text ?? "").trim();
+  if (text) {
+    const words = text.split(/\s+/).map(escapeRe2).join("(?:\\s|<[^>]*>|\\{[^}]*\\})+");
+    const textRe = new RegExp(`(?<![\\w-])${words}(?![\\w-])`, "i");
+    const voidTag = ["input", "img", "br", "hr", "meta", "link"].includes(tag);
+    for (const m of voidTag ? [] : src.matchAll(tagRe)) {
+      const open2 = m.index;
+      const close = tag ? src.indexOf(`</${tag}`, open2) : src.indexOf("</", open2);
+      const body = src.slice(open2, close < 0 ? Math.min(src.length, open2 + 400) : close);
+      if (textRe.test(body)) return openAt(open2 + 1, `<${tag || "element"}> containing "${text.slice(0, 40)}"`);
+    }
+    if (!voidTag && tag) {
+      const lead = text.split(/\s+/).slice(0, 2).map(escapeRe2).join("(?:s|<[^>]*>|{[^}]*})+");
+      const leadRe = new RegExp(`(?<![w-])${lead}(?![w-])`, "i");
+      const hits = [...src.matchAll(tagRe)].filter((m) => {
+        const close = src.indexOf(`</${tag}`, m.index);
+        return leadRe.test(src.slice(m.index, close < 0 ? Math.min(src.length, m.index + 400) : close));
+      });
+      if (hits.length === 1) return openAt(hits[0].index + 1, `<${tag}> starting with "${text.split(/\s+/).slice(0, 2).join(" ")}"`);
+      const all = [...src.matchAll(tagRe)];
+      if (all.length === 1) return openAt(all[0].index + 1, `the only <${tag}> in this file`);
+    }
+    if (tag === "input") {
+      const t = textRe.exec(src);
+      if (t) {
+        const before = src.slice(0, t.index);
+        const i = before.toLowerCase().lastIndexOf("<input");
+        if (i >= 0) return openAt(i + 1, `<input> before the label "${text.slice(0, 40)}"`);
+      }
+    }
+  }
+  if (!text && !id && tag) {
+    const all = [...src.matchAll(tagRe)];
+    if (all.length === 1) return openAt(all[0].index + 1, `the only <${tag}> in this file`);
+    if (tag === "button" || tag === "input") {
+      const submit = all.filter((m) => /^[^>]*\btype\s*=\s*(?:"submit"|'submit'|\{\s*["']submit["']\s*\})/i.test(src.slice(m.index, src.indexOf(">", m.index) + 1)));
+      if (submit.length === 1) return openAt(submit[0].index + 1, `the only <${tag} type="submit"> in this file`);
+    }
+  }
+  return null;
+}
+function lineStart(src, idx) {
+  return src.lastIndexOf("\n", idx - 1) + 1;
+}
+function indentOf2(src, idx) {
+  const ls = lineStart(src, idx);
+  return /^[ \t]*/.exec(src.slice(ls))[0];
+}
+function lineNo(src, idx) {
+  return src.slice(0, idx).split("\n").length;
+}
+function indentBlock(block, indent) {
+  return block.split("\n").map((l) => l.length ? indent + l : l).join("\n");
+}
+function htmlToJsx(html) {
+  const camel = (p) => p.trim().replace(/^-ms-/, "ms-").replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+  return html.replace(/<script async src="([^"]+\/g\.js)"><\/script>/g, (_, src) => `<!-- Region script: add <script async src="${src}"></script> to your page's <head> (Next.js: <Script src="${src}" strategy="afterInteractive" /> in the layout). React does not run a script tag written here. -->`).replace(/<!--([\s\S]*?)-->/g, (_, c) => `{/*${c.replace(/\*\//g, "* /")}*/}`).replace(/<([a-zA-Z][\w-]*)((?:\s+[^\s=>/]+(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+))?)*)\s*(\/?)>/g, (_m, tag, attrs, selfClose) => {
+    const a = attrs.replace(/(\s)class\s*=/g, "$1className=").replace(/(\s)for\s*=/g, "$1htmlFor=").replace(/(\s)tabindex\s*=/gi, "$1tabIndex=").replace(/(\s)style\s*=\s*"([^"]*)"/g, (_s, sp, css) => {
+      const pairs = css.split(";").map((d) => d.trim()).filter(Boolean).map((d) => {
+        const i = d.indexOf(":");
+        return i < 0 ? null : `${camel(d.slice(0, i))}: ${JSON.stringify(d.slice(i + 1).trim())}`;
+      }).filter(Boolean);
+      return `${sp}style={{ ${pairs.join(", ")} }}`;
+    }).replace(/(\s)checked(?=[\s>/]|$)(?!\s*=)/g, "$1defaultChecked");
+    const isVoid = VOID_TAGS.includes(tag.toLowerCase());
+    return `<${tag}${a.replace(/\s+$/, "")}${isVoid || selfClose ? " />" : ">"}`;
+  });
+}
+function isJsxFile(path) {
+  return !!path && /\.(jsx|tsx)$/i.test(path);
+}
+function findTextAnchors(src, target) {
+  if (selectorId(target.selector)) return [];
+  const text = (target.text ?? "").trim();
+  const tag = (target.tag ?? "").toLowerCase().replace(/[^a-z0-9-]/g, "");
+  if (!text || !tag || ["input", "img", "br", "hr", "meta", "link"].includes(tag)) return [];
+  const words = text.split(/\s+/).map(escapeRe2).join("(?:\\s|<[^>]*>|\\{[^}]*\\})+");
+  const textRe = new RegExp(`(?<![\\w-])${words}(?![\\w-])`, "i");
+  const out = [];
+  for (const m of src.matchAll(new RegExp(`<${escapeRe2(tag)}\\b`, "gi"))) {
+    const open2 = m.index;
+    const close = src.indexOf(`</${tag}`, open2);
+    const body = src.slice(open2, close < 0 ? Math.min(src.length, open2 + 400) : close);
+    const end = src.indexOf(">", open2);
+    if (textRe.test(body) && end > 0) out.push({ start: open2, openEnd: end + 1, how: `<${tag}> containing "${text.slice(0, 40)}"` });
+  }
+  return out;
+}
+function planAmountOf(content) {
+  const m = /[$€£]\s?(\d[\d,]*)(?:\.(\d{2}))?/.exec(content);
+  if (!m) return null;
+  return `${m[1].replace(/,/g, "")}${m[2] && m[2] !== "00" ? `.${m[2]}` : ""}`;
+}
+function anchorForPlan(src, candidates, content) {
+  const amount = planAmountOf(content);
+  if (!amount) return null;
+  const amountRe = new RegExp(`[$\u20AC\xA3]\\s?${escapeRe2(amount)}(?:\\.00)?(?![\\d,]|\\.\\d)`);
+  const hits = candidates.filter((c, i) => {
+    const from = i === 0 ? Math.max(0, c.start - 2500) : candidates[i - 1].openEnd;
+    return amountRe.test(src.slice(from, c.start).replace(OWN_BLOCK_RE, ""));
+  });
+  return hits.length === 1 ? hits[0] : null;
+}
+function applyEdits(source, edits, opts = {}) {
+  let src = source;
+  const markup = (c) => opts.jsx ? htmlToJsx(c) : c;
+  const applied = [];
+  const unmatched = [];
+  const sameTarget = (a, b) => a.target.selector === b.target.selector && a.target.text === b.target.text && a.target.tag === b.target.tag;
+  for (const e of edits) {
+    if (e.op === "append") {
+      src = `${src.replace(/\s*$/, "")}
+${markup(e.content ?? "")}
+`;
+      applied.push({ op: e.op, line: lineNo(src, src.length - 1), how: "end of file" });
+      continue;
+    }
+    const shared = e.op === "insert_before" && edits.filter((x) => x.op === "insert_before" && sameTarget(x, e)).length > 1;
+    const candidates = shared ? findTextAnchors(src, e.target) : [];
+    if (shared && candidates.length > 1) {
+      const own = anchorForPlan(src, candidates, e.content ?? "");
+      const amount = planAmountOf(e.content ?? "");
+      if (!own) {
+        unmatched.push({ op: e.op, reason: `${candidates.length} buttons read "${(e.target.text ?? "").slice(0, 40)}" and Checkbox could not tell which one sells the plan of this block${amount ? ` (${amount})` : ""}: put it directly above that plan's own button yourself` });
+        continue;
+      }
+      const content = markup(e.content ?? "").replace(/\s+$/, "");
+      const ls = lineStart(src, own.start);
+      const indent = indentOf2(src, own.start);
+      if (/^[ \t]*$/.test(src.slice(ls, own.start))) src = `${src.slice(0, ls)}${indentBlock(content, indent)}
+${src.slice(ls)}`;
+      else src = `${src.slice(0, own.start)}
+${indentBlock(content, indent)}
+${indent}${src.slice(own.start)}`;
+      applied.push({ op: e.op, line: lineNo(src, own.start), how: `${own.how}, the button of the ${amount} plan` });
+      continue;
+    }
+    const a = findAnchor(src, e.target);
+    if (!a) {
+      unmatched.push({ op: e.op, reason: `no element matching ${[e.target.selector, e.target.text && `"${e.target.text}"`, e.target.tag && `<${e.target.tag}>`].filter(Boolean).join(" / ")} in this file` });
+      continue;
+    }
+    if (e.op === "insert_before" || e.op === "insert_after") {
+      const content = markup(e.content ?? "").replace(/\s+$/, "");
+      if (e.op === "insert_before") {
+        const ls = lineStart(src, a.start);
+        const onlyWs = /^[ \t]*$/.test(src.slice(ls, a.start));
+        const indent = indentOf2(src, a.start);
+        if (onlyWs) src = `${src.slice(0, ls)}${indentBlock(content, indent)}
+${src.slice(ls)}`;
+        else src = `${src.slice(0, a.start)}
+${indentBlock(content, indent)}
+${indent}${src.slice(a.start)}`;
+      } else {
+        const close = src.indexOf("\n", a.openEnd);
+        const at = close < 0 ? src.length : close + 1;
+        src = `${src.slice(0, at)}${indentBlock(content, indentOf2(src, a.start))}
+${src.slice(at)}`;
+      }
+      applied.push({ op: e.op, line: lineNo(src, a.start), how: a.how });
+    } else if (e.op === "remove_attribute") {
+      const attr = escapeRe2(e.attribute ?? "");
+      const open2 = src.slice(a.start, a.openEnd);
+      const names = (e.attribute ?? "") === "checked" ? `(?:checked|defaultChecked)` : attr;
+      const re = new RegExp(`\\s+${names}(?:\\s*=\\s*(?:\\{[^}]*\\}|"[^"]*"|'[^']*'|[^\\s>]+))?(?=[\\s/>])`, "g");
+      const next = open2.replace(re, "");
+      if (next === open2) {
+        unmatched.push({ op: e.op, reason: `${a.how} has no ${e.attribute} attribute in the source (it may be set by code: make sure it starts unchecked)` });
+        continue;
+      }
+      src = src.slice(0, a.start) + next + src.slice(a.openEnd);
+      applied.push({ op: e.op, line: lineNo(src, a.start), how: a.how });
+    } else if (e.op === "replace_text") {
+      const text = e.target.text ?? "";
+      const i = text ? src.indexOf(text, a.start) : -1;
+      if (i < 0) {
+        unmatched.push({ op: e.op, reason: `text "${text.slice(0, 40)}" not found after ${a.how}` });
+        continue;
+      }
+      src = src.slice(0, i) + (e.content ?? "") + src.slice(i + text.length);
+      applied.push({ op: e.op, line: lineNo(src, i), how: a.how });
+    }
+  }
+  return { patched: src, applied, unmatched };
+}
+function diffLines(a, b) {
+  let pre = 0;
+  while (pre < a.length && pre < b.length && a[pre] === b[pre]) pre++;
+  let suf = 0;
+  while (suf < a.length - pre && suf < b.length - pre && a[a.length - 1 - suf] === b[b.length - 1 - suf]) suf++;
+  const A = a.slice(pre, a.length - suf);
+  const B = b.slice(pre, b.length - suf);
+  const ops = a.slice(0, pre).map((line2) => ({ t: " ", line: line2 }));
+  if (A.length * B.length > 4e6) {
+    ops.push(...A.map((line2) => ({ t: "-", line: line2 })), ...B.map((line2) => ({ t: "+", line: line2 })));
+  } else {
+    const dp = Array.from({ length: A.length + 1 }, () => new Uint32Array(B.length + 1));
+    for (let i2 = A.length - 1; i2 >= 0; i2--) for (let j2 = B.length - 1; j2 >= 0; j2--) dp[i2][j2] = A[i2] === B[j2] ? dp[i2 + 1][j2 + 1] + 1 : Math.max(dp[i2 + 1][j2], dp[i2][j2 + 1]);
+    let i = 0;
+    let j = 0;
+    while (i < A.length && j < B.length) {
+      if (A[i] === B[j]) {
+        ops.push({ t: " ", line: A[i] });
+        i++;
+        j++;
+      } else if (dp[i + 1][j] >= dp[i][j + 1]) ops.push({ t: "-", line: A[i++] });
+      else ops.push({ t: "+", line: B[j++] });
+    }
+    while (i < A.length) ops.push({ t: "-", line: A[i++] });
+    while (j < B.length) ops.push({ t: "+", line: B[j++] });
+  }
+  ops.push(...a.slice(a.length - suf).map((line2) => ({ t: " ", line: line2 })));
+  return ops;
+}
+function gitLines(text) {
+  if (text === "") return [];
+  const lines = text.split("\n");
+  if (text.endsWith("\n")) lines.pop();
+  else lines[lines.length - 1] += NO_EOL;
+  return lines;
+}
+function unifiedDiff(before, after, path, context = 3) {
+  if (before === after) return "";
+  const a = gitLines(before);
+  const b = gitLines(after);
+  const ops = diffLines(a, b);
+  const out = [`--- a/${path}`, `+++ b/${path}`];
+  const show2 = (o) => o.line.endsWith(NO_EOL) ? [`${o.t}${o.line.slice(0, -NO_EOL.length)}`, NO_EOL_MARKER] : [`${o.t}${o.line}`];
+  let i = 0;
+  while (i < ops.length) {
+    if (ops[i].t === " ") {
+      i++;
+      continue;
+    }
+    let start = Math.max(0, i - context);
+    let end = i;
+    for (; ; ) {
+      while (end < ops.length && ops[end].t !== " ") end++;
+      let k = end;
+      while (k < ops.length && ops[k].t === " " && k - end < 2 * context) k++;
+      if (k < ops.length && ops[k].t !== " " && k - end < 2 * context) end = k;
+      else break;
+    }
+    const stop = Math.min(ops.length, end + context);
+    const slice = ops.slice(start, stop);
+    const aStart = ops.slice(0, start).filter((o) => o.t !== "+").length + 1;
+    const bStart = ops.slice(0, start).filter((o) => o.t !== "-").length + 1;
+    const aLen = slice.filter((o) => o.t !== "+").length;
+    const bLen = slice.filter((o) => o.t !== "-").length;
+    out.push(`@@ -${aLen ? aStart : aStart - 1},${aLen} +${bLen ? bStart : bStart - 1},${bLen} @@`, ...slice.flatMap(show2));
+    i = stop;
+    start = stop;
+  }
+  return `${out.join("\n")}
+`;
+}
+var escapeRe2, VOID_TAGS, OWN_BLOCK_RE, NO_EOL, NO_EOL_MARKER;
+var init_patch2 = __esm({
+  "packages/cli/src/commands/plan/patch.ts"() {
+    "use strict";
+    escapeRe2 = (s2) => s2.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    VOID_TAGS = ["area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr"];
+    OWN_BLOCK_RE = /<div\s+class(?:Name)?=["']checkbox-renewal-terms["'][\s\S]*?<\/div>/g;
+    NO_EOL = "\0no-eol";
+    NO_EOL_MARKER = "\\ No newline at end of file";
+  }
+});
+
+// packages/cli/src/commands/plan/fix.ts
+import { existsSync as existsSync12, readdirSync as readdirSync4, readFileSync as readFileSync15, writeFileSync as writeFileSync4 } from "node:fs";
+import { join as join15, relative as relative7, resolve as resolve9 } from "node:path";
+function declaredPlans(cwd) {
+  const path = findConfig(cwd);
+  if (!path) return [];
+  try {
+    return loadConfig(path).config.plans ?? [];
+  } catch {
+    return [];
+  }
+}
+function staleAgainstDeclared(content, plans) {
+  if (!plans.length || !content) return void 0;
+  const text = content.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+  const said = [];
+  for (const m of text.matchAll(/(\d{1,3})[- ]days? free,? then \$([\d,]+(?:\.\d{1,2})?) (?:every|per|a|\/) ?(month|year|week|day)/gi)) {
+    const trial = Number(m[1]);
+    const price3 = Number(m[2].replace(/,/g, ""));
+    const interval = m[3].toLowerCase();
+    const same = plans.filter((p) => p.interval === interval && major(p) !== void 0 && Math.abs(major(p) - price3) < 5e-3);
+    if (same.length && !same.some((p) => (p.trial_days ?? 0) === trial)) said.push(`it says \u201C${m[0]}\u201D, but checkbox.json declares ${same.map((p) => `"${p.name}" with ${p.trial_days ? `a ${p.trial_days}-day trial` : "no trial"}`).join(", ")}`);
+  }
+  return said.length ? said.join("; ") : void 0;
+}
+function resolveFileHint(cwd, hint) {
+  if (existsSync12(resolve9(cwd, hint))) return hint;
+  const m = /^((?:src\/)?app)\/(?!\()(.+)$/.exec(hint);
+  if (!m) return void 0;
+  const found = [];
+  const walk4 = (dir, depth) => {
+    if (depth > 3) return;
+    let entries = [];
+    try {
+      entries = readdirSync4(resolve9(cwd, dir));
+    } catch {
+      return;
+    }
+    for (const e of entries.filter((x) => /^\([^)]+\)$/.test(x))) {
+      const sub = join15(dir, e);
+      if (existsSync12(resolve9(cwd, sub, m[2]))) found.push(join15(sub, m[2]).split("\\").join("/"));
+      walk4(sub, depth + 1);
+    }
+  };
+  walk4(m[1], 1);
+  return found.length === 1 ? found[0] : void 0;
+}
+function fixForTask(task, cwd, file, plans = declaredPlans(cwd)) {
+  const base = {
+    object: "task_fix",
+    task: task.id,
+    title: task.title,
+    change_type: task.change.type,
+    content: task.change.content,
+    explanation: task.change.explanation,
+    verify: task.verify
+  };
+  const verifyCmd = `checkbox verify ${task.id} --wait`;
+  const settled = settledFix(task);
+  if (settled) return { ...base, file: null, diff: null, applied: [], unmatched: [], next_action: settled };
+  const stale = staleAgainstDeclared(`${task.change.content}
+${task.change.edits.map((e) => e.content ?? "").join("\n")}`, plans);
+  if (stale) {
+    return {
+      ...base,
+      content: "",
+      explanation: `Withheld: ${task.id} was built from the site's plans in Checkbox, which are older than checkbox.json (${stale}).`,
+      stale,
+      file: null,
+      diff: null,
+      applied: [],
+      unmatched: [],
+      next_action: {
+        type: "refresh_plan",
+        description: `Do not apply ${task.id}: it was built from the site's plans in Checkbox, which are older than checkbox.json (${stale}). Applying it would put the old terms back, so its change is not shown. Leave the code as it is; once this change is deployed, update the site's plans (updateSetupSession plans[], or \`checkbox init --plan \u2026\` with the plans checkbox.json declares), then run \`checkbox plan\` again for a fix built from the new plans. If the site's plans are already updated, verify the task against what your code now sends (\`checkbox verify ${task.id} --wait\`): Checkbox judges that, not the old change.`,
+        command: "checkbox plan"
+      }
+    };
+  }
+  const candidate = file ?? (task.where.file_hint ? resolveFileHint(cwd, task.where.file_hint) : void 0);
+  if (task.change.type === "patch" && task.change.edits.length && candidate) {
+    const path = resolve9(cwd, candidate);
+    let src;
+    try {
+      src = readFileSync15(path, "utf8");
+    } catch (err) {
+      throw new UsageError(`Cannot read ${candidate}: ${err.code ?? err.message}`);
+    }
+    const r = applyEdits(src, task.change.edits, { jsx: isJsxFile(candidate) });
+    const rel2 = relative7(cwd, path).split("\\").join("/");
+    const diff2 = unifiedDiff(src, r.patched, rel2);
+    const complete = r.unmatched.length === 0;
+    return {
+      ...base,
+      file: rel2,
+      diff: diff2 || null,
+      applied: r.applied,
+      unmatched: r.unmatched,
+      next_action: complete ? { type: "apply_diff", description: `Apply the diff to ${rel2} (git apply, or edit the file), deploy, then verify.`, command: verifyCmd } : {
+        type: "edit_manually",
+        description: `${r.unmatched.map((u) => u.reason).join("; ")}. Apply what the diff shows, then make the remaining change by hand following change.content (the elements may be rendered by another component), then verify.`,
+        command: verifyCmd
+      }
+    };
+  }
+  const own = task.next_action;
+  if (task.change.type === "manual" && own && own.type !== "answer_question" && own.type !== "none" && own.description) {
+    return { ...base, file: null, diff: null, applied: [], unmatched: [], next_action: { type: own.type, description: own.description, command: own.command ?? null } };
+  }
+  if (task.change.type === "stripe_params" && /^Nothing to change in the params\b/.test(task.change.content)) {
+    return { ...base, file: null, diff: null, applied: [], unmatched: [], next_action: { type: "create_checkout_session", description: `Nothing to merge: the params already pass. ${task.change.content.replace(/^Nothing to change in the params \([^)]*\)\.\s*/, "").replace(/call verifyTask on (task_\w+)/, "run `checkbox verify $1 --wait`")}`, command: verifyCmd } };
+  }
+  const how = {
+    patch: `Apply change.content in ${task.where.file_hint ?? "the file that renders the page"} (pass --file <path> for an exact diff), then verify.`,
+    copy: `Put this exact text in ${task.where.url ?? task.where.kind} (${task.where.file_hint ?? "your CMS or codebase"}), then verify.`,
+    stripe_params: task.where.stripe_object === "payment_link" ? paymentLinkHow(task) : stripeParamsHow(task),
+    config: `Send change.content to ${task.change.operation_id ?? "the API"}${task.change.endpoint ? ` (${task.change.endpoint})` : ""}, then verify.`,
+    needs_facts: `Checkbox needs facts before it can give an exact change (no diff with placeholders): send change.content with the real values to ${task.change.operation_id ?? "updateSetupSession"}${task.change.endpoint ? ` (${task.change.endpoint})` : ""} \u2014 or re-run \`checkbox init --merchant-name <brand> --plan <price>/<interval>[,trial=<days>] --account-url <url>\` \u2014 then run \`checkbox fix ${task.id}\` again.`,
+    manual: `A person has to do this: ask the human, then record it with \`checkbox answer ${task.id} <answer>\`.`
+  };
+  const type = task.change.type === "manual" ? "answer_question" : task.change.type === "needs_facts" ? "provide_facts" : "apply_change";
+  const checkoutParams = task.change.type === "stripe_params" && isCheckoutSessionObject(task.where.stripe_object);
+  return { ...base, file: null, diff: null, applied: [], unmatched: [], next_action: { type, description: how[task.change.type] ?? "Apply the change, then verify.", command: task.change.type === "manual" ? `checkbox answer ${task.id}` : task.change.type === "needs_facts" ? `checkbox fix ${task.id}` : checkoutParams ? `checkbox verify ${task.id} --stripe-params <params.json> --wait` : verifyCmd } };
+}
+function isCheckoutSessionObject(o) {
+  return !o || /checkout/i.test(o);
+}
+function stripeParamsHow(task) {
+  const where2 = `${task.where.stripe_object ?? "the Stripe call"}${task.where.file_hint ? ` in ${task.where.file_hint}` : ""}`;
+  if (isCheckoutSessionObject(task.where.stripe_object)) {
+    return `Merge these params into ${where2}, save the object your code now passes to stripe.checkout.sessions.create as JSON (e.g. params.json), then run \`checkbox verify ${task.id} --stripe-params params.json --wait\`: without --stripe-params, verify judges the config registered earlier, not your new code.`;
+  }
+  return `Apply these settings to ${where2} (the task's change; with the stored Stripe TEST key the agent can call the Stripe API itself), then run \`checkbox verify ${task.id} --wait\`: Checkbox re-reads the setting from Stripe.`;
+}
+function settledFix(task) {
+  const own = task.next_action;
+  const ownText = own?.description ?? own?.message ?? "";
+  if (task.status === "done" || task.status === "wont_fix") {
+    const why = task.closed_reason ? ` (closed: ${task.closed_reason.replace(/_/g, " ")})` : "";
+    return { type: "none", description: `${task.status === "done" ? "Done" : "Declined"}${why}: nothing to change for this task. Run \`checkbox plan\` for what is left.`, command: "checkbox plan" };
+  }
+  if (task.status === "pending_live_check") {
+    return { type: own?.type ?? "live_check_pending", description: ownText || "Live check pending: the checks pass and nothing needs to change; it completes on its own when Checkbox sees the real event.", command: own?.command ?? null };
+  }
+  if (task.status === "verifying" && (!own?.type || ["wait", "wait_for_verification", "wait_for_test_run", "none", "live_check_pending"].includes(own.type))) {
+    return { type: own?.type ?? "wait", description: ownText ? `Checkbox is checking this; nothing to change meanwhile. ${ownText}` : "Checkbox is checking this; nothing to change meanwhile. Run `checkbox plan` again in a minute.", command: own?.command ?? "checkbox plan" };
+  }
+  return null;
+}
+function paymentLinkHow(task) {
+  let params = {};
+  try {
+    params = JSON.parse(task.change.content);
+  } catch {
+  }
+  const page = task.where.file_hint ? ` in ${task.where.file_hint}` : "";
+  const edits = task.change.edits.length ? " and add the renewal line above it (change.edits; `checkbox fix " + task.id + " --file <page>` prints the diff)" : "";
+  if (params.consent_collection) {
+    return `Your Payment Link must be replaced (Stripe adds the consent checkbox only to a new link). Owner: create the replacement link in the Checkbox dashboard (Ready-made fixes \u2192 Payment Link \u2192 Create replacement link, one click; or stripe.paymentLinks.create with these params and the current link's line_items). You: swap the sign-up button's link${page} to the new URL${edits}, deploy, then verify. Owner: deactivate the old link in Stripe (Payment Links \u2192 the old link \u2192 Deactivate) once the site uses the new one.`;
+  }
+  return `Send these params to every Payment Link your pages use (stripe.paymentLinks.update, or the owner edits the link in the Stripe Dashboard)${edits ? `, ${edits.replace(/^ and /, "")}` : ""}, then verify.`;
+}
+var TASK_RE2, major, fix_default;
+var init_fix = __esm({
+  "packages/cli/src/commands/plan/fix.ts"() {
+    "use strict";
+    init_args();
+    init_types2();
+    init_config2();
+    init_patch2();
+    TASK_RE2 = /^task_[0-9a-f]{32}$/;
+    major = (p) => p.price !== void 0 ? Number(p.price) : p.amount !== void 0 ? p.amount / 100 : void 0;
+    fix_default = defineCommand({
+      name: "fix",
+      summary: "Show the change for a plan task (exact diff of your file for code tasks)",
+      usage: "checkbox fix <task_id> [--file <path>] [--out <patch file>] [--json]",
+      help: [
+        "Prints the task's change. For code tasks it reads --file (default: the task's file_hint when it exists in this",
+        "directory), applies the task's anchored edits in memory and prints an exact unified diff \u2014 it never edits your files.",
+        "",
+        "Flags:",
+        "  --file <path>   Source file that renders the page (component, template, HTML)",
+        "  --out <path>    Also write the diff to this file (then: git apply <path>)",
+        '  --json          { object: "task_fix", diff, applied, unmatched, content, explanation, verify, next_action }'
+      ].join("\n"),
+      async run(ctx) {
+        const { positionals, flags } = parseArgs(ctx.argv, { string: ["file", "out"] });
+        const id = positionals[0];
+        if (!id || !TASK_RE2.test(id)) throw new UsageError("Usage: checkbox fix <task_id> (task ids come from `checkbox plan`)");
+        const task = await ctx.client().sdk.tasks.retrieve(id);
+        const result = fixForTask(task, ctx.cwd, str(flags, "file"));
+        const out = str(flags, "out");
+        if (out && result.diff) writeFileSync4(resolve9(ctx.cwd, out), result.diff);
+        ctx.out.result({ ...result, task_object: task }, () => {
+          const c = ctx.out.c;
+          const lines = [`${c.bold(task.title)} ${c.dim(`(${task.priority}, ${task.id})`)}`, c.dim(`${task.requirement.citation}`), task.why, ""];
+          if (result.stale) {
+            lines.push(c.yellow(`STALE: ${task.id} was built from the site's older plans in Checkbox: ${result.stale}. Its change is not shown, so it cannot be applied by mistake.`));
+          } else if (result.diff) {
+            lines.push(result.diff.trimEnd());
+            for (const u of result.unmatched) lines.push(c.yellow(`not applied: ${u.reason}`));
+          } else {
+            lines.push(`${c.cyan(task.change.type)} ${task.where.file_hint ?? task.where.url ?? task.where.stripe_object ?? ""}`, task.change.content, "", task.change.explanation);
+          }
+          lines.push("", `${c.cyan("next")}  ${result.next_action.description}${result.next_action.command ? `
+      $ ${result.next_action.command}` : ""}`);
+          return lines;
+        });
+        return EXIT.ok;
+      }
+    });
+  }
+});
+
+// packages/cli/src/commands/fix.ts
+var fix_exports = {};
+__export(fix_exports, {
+  default: () => fix_default
+});
+var init_fix2 = __esm({
+  "packages/cli/src/commands/fix.ts"() {
+    "use strict";
+    init_fix();
   }
 });
 
